@@ -651,7 +651,7 @@ export class ConnectedEnvironment {
     this.box(0.35, 3.6, 7.6, 6.65, 7, -64.2, this.wall, sector);
     this.box(3.6, 0.3, 8, 5, 9, -64, this.dark, sector);
     this.window(6.43, 6.1, -65, 1.3, 2.1, sector, -Math.PI / 2, true);
-    this.chandelier(5, 7.5, -61.9, "chapel");
+    this.chandelier(5, 8.35, -61.9, "chapel");
     this.torch(6.5, 6.5, -61.5, "chapel");
   }
   private crypt() {
