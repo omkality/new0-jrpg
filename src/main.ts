@@ -42,6 +42,8 @@ let toastTimer = 0;
 let lastFrame = performance.now();
 let lastRender = 0;
 let nearest: Target | null = null;
+let demoAxis: { x: number; y: number } | null = null;
+let demoRunning = false;
 
 function toast(message: string) {
   text("#toast", message);
@@ -181,7 +183,7 @@ async function start() {
     show("#intro", false);
     closeModal();
     renderState();
-    toast("WASD или экранный стик. Подойди к знаку и взаимодействуй");
+    toast("WASD или стик: ходьба. Потяни по сцене, чтобы повернуть камеру");
   } catch (error) {
     toast(error instanceof Error ? error.message : "Не удалось войти");
   } finally {
@@ -552,7 +554,7 @@ function pause() {
     "ПАУЗА",
     "Архив подождёт",
     [
-      "Двигайся по залу. Подходи к светящимся знакам и взаимодействуй. В бою выбирай действие после подсказки о намерении стража.",
+      "WASD или экранный стик: движение. Потяни мышью или пальцем по сцене, чтобы повернуть камеру. Подходи к знакам и взаимодействуй. В бою следи за намерением стража.",
     ],
     [
       { label: "Продолжить ↗", callback: closeModal, primary: true },
@@ -564,8 +566,43 @@ function pause() {
         },
       },
       { label: "Начать заново", callback: () => void start() },
+      { label: "Авторы и материалы", callback: credits },
     ],
   );
+}
+
+function credits() {
+  modal(
+    "МАТЕРИАЛЫ ПРОТОТИПА",
+    "Нулевой архив",
+    [
+      "Герои, геометрия зала, анимации и временный синтезированный звук созданы для этой демки.",
+      "Текстуры PSX Dungeon: Goblinatron, лицензия CC BY 4.0. Исходные PNG не изменены. В игре применены тонирование, повторение и освещение.",
+    ],
+    [
+      {
+        label: "Вернуться к паузе",
+        callback: () => {
+          closeModal();
+          pause();
+        },
+        primary: true,
+      },
+    ],
+  );
+  const links = paragraph("");
+  for (const [label, url] of [
+    ["PSX Dungeon by Goblinatron", "https://goblinatron.itch.io/psx-dungeon"],
+    ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"],
+  ]) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.textContent = label;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    links.append(link, document.createTextNode(" · "));
+  }
+  $("#modal-body").append(links);
 }
 
 input.onInteract = interact;
@@ -650,7 +687,7 @@ function frame(now: number) {
     !paused &&
     run?.status === "active" &&
     ["explore", "won"].includes(run.state.phase);
-  world.update(paused ? 0 : dt, input.axis(), !!active);
+  world.update(paused ? 0 : dt, demoAxis ?? input.axis(), !!active);
   const target = active ? world.nearest() : null;
   nearest = target?.id ?? null;
   if (target) text("#interaction-name", target.title);
@@ -678,6 +715,8 @@ async function boot() {
     });
     tg?.onEvent?.("viewportChanged", () => world?.resize());
     world = new World($<HTMLCanvasElement>("#world"), input.touch);
+    input.bindLook($("#world"));
+    input.onLook = (dx, dy) => world.orbit(dx, dy);
     world.onStep = () => sound.play("step");
     requestAnimationFrame(frame);
     await Promise.all([world.load(), api.connect(tg?.initData ?? "")]);
@@ -697,6 +736,17 @@ async function boot() {
     text("#start-button span", "Войти в архив");
     $<HTMLButtonElement>("#start-button").disabled = false;
     show("#loading", false);
+    if (
+      new URLSearchParams(location.search).get("showcase") === "1" &&
+      api.user.is_guest
+    ) {
+      const demo = document.createElement("button");
+      demo.id = "showcase-button";
+      demo.className = "showcase-button";
+      demo.textContent = "Автопоказ · 20 секунд";
+      demo.addEventListener("click", () => void showcase(demo));
+      $("#app").append(demo);
+    }
   } catch (error) {
     if (error instanceof APIError && error.status === 401)
       fail(
@@ -705,6 +755,58 @@ async function boot() {
         ),
       );
     else fail(error);
+  }
+}
+
+async function showcase(control: HTMLButtonElement) {
+  if (demoRunning) return;
+  demoRunning = true;
+  control.disabled = true;
+  control.textContent = "Автопоказ · реальный движок";
+  const wait = (ms: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, ms));
+  const move = async (ms: number, axis: { x: number; y: number }) => {
+    demoAxis = axis;
+    await wait(ms);
+    demoAxis = { x: 0, y: 0 };
+  };
+  try {
+    if (modalOpen) closeModal();
+    await start();
+    await wait(700);
+    await move(2450, { x: 0, y: -1 });
+    await wait(500);
+    world.orbit(95, 0);
+    await wait(1000);
+    world.orbit(-95, 0);
+    await wait(600);
+    interact();
+    await wait(900);
+    await engage();
+    await wait(700);
+    for (const action of [
+      "attack",
+      "guard",
+      "pulse",
+      "attack",
+      "guard",
+      "pulse",
+    ] as Action[]) {
+      await battleAction(action);
+      await wait(180);
+    }
+    await wait(1200);
+    if (modalOpen) closeModal();
+    await wait(500);
+    await move(700, { x: 0, y: -1 });
+    await wait(1000);
+  } catch (error) {
+    toast(error instanceof Error ? error.message : "Показ прерван");
+  } finally {
+    demoAxis = null;
+    demoRunning = false;
+    control.disabled = false;
+    control.textContent = "Повторить автопоказ";
   }
 }
 void boot();

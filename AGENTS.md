@@ -6,6 +6,10 @@
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
 - Current scope is a one-week prototype: one Three.js room, desktop/touch movement,
   one turn-based fight, two secrets, Telegram identity, versioned leaderboards, Docker Compose.
+- The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
+  camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
+- Iterate on the playable demo first. Provide a short real gameplay GIF/video with a
+  focused visual/interaction change, then incorporate feedback before adding more systems.
 - Keep all prize-relevant rules and score calculation on the Python API. Validate Telegram
   initData before trusting identity. Never accept a client-supplied user ID, score, HP or win flag.
 - Guest runs are for local testing only and must never mix with Telegram results.

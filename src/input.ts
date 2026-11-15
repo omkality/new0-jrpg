@@ -9,6 +9,8 @@ export class Input {
   onInteract = () => {};
   onPause = () => {};
   onAction = (_action: number) => {};
+  onLook = (_dx: number, _dy: number) => {};
+  private lookPointer: number | null = null;
   private pointer: number | null = null;
   private joystick: HTMLElement;
   private knob: HTMLElement;
@@ -74,6 +76,30 @@ export class Input {
     this.stick = { x: x / radius, y: y / radius };
     this.knob.style.transform = `translate(${x}px,${y}px)`;
   }
+  bindLook(element: HTMLElement) {
+    let lastX = 0,
+      lastY = 0;
+    element.addEventListener("contextmenu", (e) => e.preventDefault());
+    element.addEventListener("pointerdown", (e) => {
+      if (!this.enabled || this.lookPointer !== null) return;
+      this.lookPointer = e.pointerId;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      element.setPointerCapture(e.pointerId);
+    });
+    element.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== this.lookPointer || !this.enabled) return;
+      this.onLook(e.clientX - lastX, e.clientY - lastY);
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      element.addEventListener(type, (e) => {
+        if ((e as PointerEvent).pointerId === this.lookPointer)
+          this.lookPointer = null;
+      });
+    }
+  }
   axis() {
     if (!this.enabled) return { x: 0, y: 0 };
     let x =
@@ -99,6 +125,7 @@ export class Input {
   }
   reset() {
     this.keys.clear();
+    this.lookPointer = null;
     this.resetStick();
   }
 }
