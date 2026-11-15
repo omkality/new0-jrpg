@@ -1,317 +1,185 @@
 import * as THREE from "three";
+import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
+import { clone } from "three/addons/utils/SkeletonUtils.js";
+import type { Fighter } from "./game";
 
-// Original figures with adult proportions, cloth folds and deliberately stepped poses.
+let source: Promise<GLTF> | undefined;
 export class Actor {
   root = new THREE.Group();
-  private body = new THREE.Group();
-  private head = new THREE.Group();
-  private arms = [new THREE.Group(), new THREE.Group()];
-  private legs = [new THREE.Group(), new THREE.Group()];
-  private clock = 0;
-  private current = "idle";
-  private oneShot = false;
-  constructor(guard = false) {
-    const cloth = new THREE.MeshLambertMaterial({
-      map: clothTexture(guard),
-      color: guard ? 0xaaa397 : 0xc5c0b6,
-    });
-    const leather = new THREE.MeshLambertMaterial({ color: 0x282b2a });
-    const bone = new THREE.MeshLambertMaterial({ color: 0xa6a598 });
-    const iron = new THREE.MeshStandardMaterial({
-      color: 0x666961,
-      roughness: 0.9,
-      metalness: 0.35,
-    });
-    const black = new THREE.MeshBasicMaterial({ color: 0x0c0c0d });
-    this.root.add(this.body);
-    this.root.scale.setScalar(guard ? 1.13 : 1);
-    const mesh = (
-      g: THREE.BufferGeometry,
-      m: THREE.Material,
-      parent: THREE.Group,
-      x: number,
-      y: number,
-      z: number,
-    ) => {
-      const o = new THREE.Mesh(g, m);
-      o.position.set(x, y, z);
-      o.castShadow = true;
-      o.receiveShadow = true;
-      parent.add(o);
-      return o;
-    };
-    mesh(
-      new THREE.CylinderGeometry(0.22, 0.19, 0.48, 7),
-      cloth,
-      this.body,
-      0,
-      1.18,
-      0,
-    );
-    mesh(new THREE.BoxGeometry(0.47, 0.12, 0.22), cloth, this.body, 0, 1.39, 0);
-    mesh(
-      new THREE.CylinderGeometry(0.205, 0.225, 0.08, 7),
-      leather,
-      this.body,
-      0,
-      0.96,
-      0,
-    );
-    const verts: number[] = [],
-      uvs: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2,
-        b = ((i + 1) / 10) * Math.PI * 2;
-      const top = (t: number) => [
-        Math.sin(t) * 0.265,
-        1.37,
-        Math.cos(t) * 0.17 - 0.025,
-      ];
-      const bottom = (t: number, n: number) => [
-        Math.sin(t) * 0.35,
-        0.48 + (n % 3) * 0.035,
-        Math.cos(t) * 0.25 - 0.025,
-      ];
-      const p = top(a),
-        q = top(b),
-        r = bottom(a, i),
-        s = bottom(b, i + 1);
-      verts.push(...p, ...r, ...q, ...q, ...r, ...s);
-      uvs.push(
-        i / 10,
-        1,
-        i / 10,
-        0,
-        (i + 1) / 10,
-        1,
-        (i + 1) / 10,
-        1,
-        i / 10,
-        0,
-        (i + 1) / 10,
-        0,
-      );
-    }
-    const robe = new THREE.BufferGeometry();
-    robe.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    robe.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    robe.computeVertexNormals();
-    const robeMat = cloth.clone();
-    robeMat.side = THREE.DoubleSide;
-    mesh(robe, robeMat, this.body, 0, 0, 0);
-    this.head.position.y = 1.58;
-    this.body.add(this.head);
-    mesh(
-      new THREE.CylinderGeometry(0.13, 0.175, 0.29, 7),
-      cloth,
-      this.head,
-      0,
-      0.045,
-      -0.015,
-    );
-    mesh(
-      new THREE.BoxGeometry(0.225, 0.24, 0.08),
-      black,
-      this.head,
-      0,
-      0.02,
-      0.11,
-    );
-    const mask = mesh(
-      new THREE.SphereGeometry(0.117, 6, 5),
-      bone,
-      this.head,
-      0,
-      0.015,
-      0.143,
-    );
-    mask.scale.set(0.73, 1.03, 0.42);
-    for (const x of [-0.035, 0.035])
-      mesh(
-        new THREE.PlaneGeometry(0.029, 0.014),
-        black,
-        this.head,
-        x,
-        0.04,
-        0.197,
-      );
-    for (let i = 0; i < 2; i++) {
-      const side = i === 0 ? -1 : 1;
-      this.arms[i].position.set(side * 0.275, 1.36, 0);
-      this.body.add(this.arms[i]);
-      mesh(
-        new THREE.CylinderGeometry(0.075, 0.06, 0.31, 5),
-        cloth,
-        this.arms[i],
-        0,
-        -0.145,
-        0,
-      );
-      mesh(
-        new THREE.CylinderGeometry(0.06, 0.05, 0.29, 5),
-        leather,
-        this.arms[i],
-        0,
-        -0.435,
-        0.018,
-      );
-      mesh(
-        new THREE.BoxGeometry(0.085, 0.105, 0.075),
-        leather,
-        this.arms[i],
-        0,
-        -0.61,
-        0.025,
-      );
-      this.legs[i].position.set(side * 0.115, 0.88, 0);
-      this.body.add(this.legs[i]);
-      mesh(
-        new THREE.CylinderGeometry(0.085, 0.065, 0.4, 5),
-        leather,
-        this.legs[i],
-        0,
-        -0.19,
-        0,
-      );
-      mesh(
-        new THREE.CylinderGeometry(0.065, 0.055, 0.36, 5),
-        leather,
-        this.legs[i],
-        0,
-        -0.55,
-        0,
-      );
-      mesh(
-        new THREE.BoxGeometry(0.13, 0.14, 0.25),
-        leather,
-        this.legs[i],
-        0,
-        -0.77,
-        0.045,
-      );
-    }
-    if (guard) {
-      for (const x of [-0.25, 0.25]) {
-        const plate = mesh(
-          new THREE.ConeGeometry(0.17, 0.23, 4),
-          iron,
-          this.body,
-          x,
-          1.43,
-          0,
-        );
-        plate.rotation.z = x < 0 ? -0.5 : 0.5;
+  private rig!: THREE.Object3D;
+  private mixer!: THREE.AnimationMixer;
+  private clips = new Map<string, THREE.AnimationAction>();
+  private current = "";
+  private currentAction?: THREE.AnimationAction;
+  private weapon = new THREE.Group();
+  private ready = false;
+  private hand?: THREE.Object3D;
+  private dropped = false;
+  constructor(private enemy = false) {}
+  async load() {
+    source ??= new GLTFLoader().loadAsync("/assets/knight/knight.glb");
+    const gltf = await source;
+    this.rig = clone(gltf.scene);
+    this.root.add(this.rig);
+    this.rig.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        const original = o.material as THREE.MeshStandardMaterial;
+        const m = original.clone();
+        m.color.set(this.enemy ? 0xc4b5a3 : 0xf4eee1);
+        m.roughness = Math.max(0.66, m.roughness);
+        m.metalness = Math.min(0.5, m.metalness);
+        o.material = m;
+        o.frustumCulled = false;
       }
-      const blade = new THREE.Shape();
-      blade.moveTo(-0.045, 0);
-      blade.lineTo(0.045, 0);
-      blade.lineTo(0.06, 0.66);
-      blade.lineTo(0, 0.86);
-      blade.lineTo(-0.06, 0.66);
-      blade.closePath();
-      const sword = mesh(
-        new THREE.ExtrudeGeometry(blade, { depth: 0.025, bevelEnabled: false }),
-        iron,
-        this.arms[1],
-        0,
-        -0.64,
-        0.1,
-      );
-      sword.rotation.x = Math.PI;
-      mesh(
-        new THREE.BoxGeometry(0.2, 0.035, 0.045),
-        iron,
-        this.arms[1],
-        0,
-        -0.69,
-        0.11,
-      );
-    } else {
-      const shield = mesh(
-        new THREE.CylinderGeometry(0.17, 0.17, 0.045, 8),
-        iron,
-        this.arms[0],
-        -0.02,
-        -0.38,
-        0.07,
-      );
-      shield.rotation.x = Math.PI / 2;
-      mesh(
-        new THREE.BoxGeometry(0.03, 0.23, 0.052),
-        bone,
-        this.arms[0],
-        -0.02,
-        -0.38,
-        0.098,
-      );
-      mesh(
-        new THREE.BoxGeometry(0.16, 0.025, 0.052),
-        bone,
-        this.arms[0],
-        -0.02,
-        -0.38,
-        0.098,
-      );
-    }
+    });
+    this.mixer = new THREE.AnimationMixer(this.rig);
+    for (const clip of gltf.animations)
+      this.clips.set(clip.name, this.mixer.clipAction(clip));
+    this.makeSword();
+    this.hand = this.rig.getObjectByName("hand_R");
+    this.hand?.add(this.weapon);
+    this.ready = true;
+    this.change("Idle");
+    this.mixer.update(0.01);
   }
-  play(name: string, once = false) {
-    if (name === this.current && !once) return;
+  private makeSword() {
+    const steel = new THREE.MeshStandardMaterial({
+      color: 0xc6c9c2,
+      metalness: 0.65,
+      roughness: 0.34,
+    });
+    const grip = new THREE.MeshStandardMaterial({
+      color: this.enemy ? 0x51382f : 0x363a3a,
+      roughness: 1,
+    });
+    const blade = new THREE.Shape();
+    blade.moveTo(-0.045, 0);
+    blade.lineTo(0.045, 0);
+    blade.lineTo(0.035, 0.72);
+    blade.lineTo(0, 0.91);
+    blade.lineTo(-0.035, 0.72);
+    blade.closePath();
+    const b = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(blade, {
+        depth: 0.018,
+        bevelEnabled: true,
+        bevelSize: 0.009,
+        bevelThickness: 0.005,
+        bevelSegments: 1,
+      }),
+      steel,
+    );
+    b.position.y = 0.1;
+    this.weapon.add(b);
+    const guard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.26, 0.035, 0.055),
+      steel,
+    );
+    guard.position.y = 0.08;
+    this.weapon.add(guard);
+    const handle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.17, 8),
+      grip,
+    );
+    this.weapon.add(handle);
+    const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.036, 8, 6), steel);
+    pommel.position.y = -0.11;
+    this.weapon.add(pommel);
+    this.weapon.position.set(0, 0.06, 0);
+    this.weapon.rotation.set(-Math.PI / 2, 0, 0);
+    this.weapon.scale.setScalar(this.enemy ? 1.1 : 1);
+  }
+  private change(name: string, once = false) {
+    if (this.current === name) return;
+    const next = this.clips.get(name) ?? this.clips.get("Idle")!;
+    next.reset();
+    next.enabled = true;
+    next.setEffectiveTimeScale(1);
+    next.setEffectiveWeight(1);
+    next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+    next.clampWhenFinished = once;
+    next.play();
+    this.currentAction?.fadeOut(once ? 0.08 : 0.16);
+    next.fadeIn(once ? 0.08 : 0.16);
     this.current = name;
-    this.clock = 0;
-    this.oneShot = once;
+    this.currentAction = next;
   }
-  update(dt: number) {
-    this.clock += dt;
-    const t = Math.floor(this.clock * 12) / 12,
-      walking = this.current === "walk",
-      stride = walking ? Math.sin(t * 9) * 0.42 : 0;
-    this.legs[0].rotation.x = stride;
-    this.legs[1].rotation.x = -stride;
-    this.arms[0].rotation.x = -stride * 0.6;
-    this.arms[1].rotation.x = stride * 0.6;
-    this.arms[0].rotation.z = 0.06;
-    this.arms[1].rotation.z = -0.06;
-    this.body.position.y = walking
-      ? Math.abs(Math.sin(t * 9)) * 0.025
-      : Math.sin(t * 1.8) * 0.008;
-    this.head.rotation.x = Math.sin(t * 1.4) * 0.025;
-    if (this.current.includes("attack")) {
-      this.arms[1].rotation.x = -1.7 + Math.min(1, t / 0.45) * 2;
-      this.arms[0].rotation.x = -0.55;
-      this.body.rotation.y = Math.sin(Math.min(t / 0.55, 1) * Math.PI) * 0.2;
-    } else if (this.current === "interact-right") {
-      this.arms[0].rotation.x = -1.05;
-      this.arms[1].rotation.x = -0.8;
-    } else this.body.rotation.y = 0;
-    this.body.rotation.z = this.current === "die" ? Math.min(0.5, t * 0.6) : 0;
-    if (this.oneShot && this.clock > 1.1 && this.current !== "die")
-      this.play("idle");
-  }
-}
-function clothTexture(guard: boolean) {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 64;
-  const ctx = canvas.getContext("2d")!,
-    img = ctx.createImageData(64, 64);
-  let seed = guard ? 777 : 123;
-  for (let y = 0; y < 64; y++)
-    for (let x = 0; x < 64; x++) {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      const c =
-        48 +
-        (seed % 16) +
-        Math.cos(x * 0.72) * 9 +
-        Math.cos(x * 0.21) * 5 -
-        (y > 45 ? (y - 45) * 0.6 : 0);
-      img.data.set(
-        [c + (guard ? 4 : 0), c + 1, c + (guard ? -2 : 4), 255],
-        (y * 64 + x) * 4,
+  update(dt: number, f: Fighter) {
+    if (!this.ready) return;
+    this.root.position.set(f.x, 0, f.z);
+    this.root.rotation.set(0, f.yaw, 0);
+    const mode = f.mode;
+    const name =
+      mode === "dead"
+        ? "Death"
+        : mode === "attack"
+          ? "SwordAttack"
+          : mode === "dodge"
+            ? "Quickstep"
+            : mode === "windup" || mode === "guard"
+              ? "SwordAttack"
+              : mode === "hit"
+                ? "Hit"
+                : f.speed > 1.65
+                  ? "Run"
+                  : f.speed > 0.1
+                    ? "Walk"
+                    : "Idle";
+    this.change(
+      name,
+      ["Death", "SwordAttack", "Quickstep", "Hit"].includes(name),
+    );
+    const a = this.currentAction!;
+    a.paused = false;
+    if (mode === "windup" || mode === "guard") {
+      a.time = 0.12;
+      a.paused = true;
+    } else if (mode === "attack" || mode === "dodge" || mode === "dead") {
+      a.time = Math.min(
+        a.getClip().duration - 0.001,
+        mode === "attack" && this.enemy ? 0.15 + f.time * 0.72 : f.time,
       );
+      a.paused = true;
+    } else if (mode === "hit")
+      a.setEffectiveTimeScale(a.getClip().duration / 0.4);
+    else
+      a.setEffectiveTimeScale(
+        name === "Run"
+          ? Math.max(0.65, f.speed / 2.93)
+          : name === "Walk"
+            ? Math.max(0.5, f.speed / 1.07)
+            : 1,
+      );
+    this.mixer.update(dt);
+    if (mode === "dead" && f.time > 0.65) {
+      if (!this.dropped) {
+        this.root.updateMatrixWorld(true);
+        this.root.attach(this.weapon);
+        this.dropped = true;
+      }
+      this.weapon.position.y = THREE.MathUtils.damp(
+        this.weapon.position.y,
+        0.05,
+        12,
+        dt,
+      );
+      this.weapon.rotation.x = THREE.MathUtils.damp(
+        this.weapon.rotation.x,
+        Math.PI / 2,
+        12,
+        dt,
+      );
+      this.weapon.rotation.z = THREE.MathUtils.damp(
+        this.weapon.rotation.z,
+        0.4,
+        12,
+        dt,
+      );
+    } else if (mode !== "dead" && this.dropped) {
+      this.hand?.add(this.weapon);
+      this.weapon.position.set(0, 0.06, 0);
+      this.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      this.dropped = false;
     }
-  ctx.putImageData(img, 0, 0);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestMipmapNearestFilter;
-  return texture;
+  }
 }

@@ -10,6 +10,11 @@ export class Input {
   onPause = () => {};
   onAction = (_action: number) => {};
   onLook = (_dx: number, _dy: number) => {};
+  onAttack = () => {};
+  onDodge = () => {};
+  onLock = () => {};
+  guarding = false;
+  private guardPointer: number | null = null;
   private lookPointer: number | null = null;
   private pointer: number | null = null;
   private joystick: HTMLElement;
@@ -42,11 +47,19 @@ export class Input {
       this.keys.add(key);
       if (key === "Escape") this.onPause();
       if (!this.enabled) return;
-      if (key === "KeyE" || key === "Space") this.onInteract();
+      if (key === "KeyE") this.onInteract();
+      if (key === "KeyJ") this.onAttack();
+      if (["Space", "ShiftLeft", "ShiftRight", "KeyK"].includes(key))
+        this.onDodge();
+      if (key === "KeyF") this.guarding = true;
+      if (key === "KeyQ") this.onLock();
       if (["Digit1", "Digit2", "Digit3"].includes(key))
         this.onAction(Number(key.slice(-1)));
     });
-    window.addEventListener("keyup", (e) => this.keys.delete(e.code));
+    window.addEventListener("keyup", (e) => {
+      this.keys.delete(e.code);
+      if (e.code === "KeyF") this.guarding = false;
+    });
     window.addEventListener("blur", () => this.reset());
     this.joystick.addEventListener("pointerdown", (e) => {
       if (!this.enabled || this.pointer !== null) return;
@@ -79,22 +92,42 @@ export class Input {
   bindLook(element: HTMLElement) {
     let lastX = 0,
       lastY = 0;
+    let distance = 0;
     element.addEventListener("contextmenu", (e) => e.preventDefault());
     element.addEventListener("pointerdown", (e) => {
+      if (e.button === 2 && this.enabled) {
+        this.guarding = true;
+        this.guardPointer = e.pointerId;
+        element.setPointerCapture(e.pointerId);
+        return;
+      }
       if (!this.enabled || this.lookPointer !== null) return;
       this.lookPointer = e.pointerId;
+      distance = 0;
       lastX = e.clientX;
       lastY = e.clientY;
       element.setPointerCapture(e.pointerId);
     });
     element.addEventListener("pointermove", (e) => {
       if (e.pointerId !== this.lookPointer || !this.enabled) return;
+      distance += Math.hypot(e.clientX - lastX, e.clientY - lastY);
       this.onLook(e.clientX - lastX, e.clientY - lastY);
       lastX = e.clientX;
       lastY = e.clientY;
     });
     for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
       element.addEventListener(type, (e) => {
+        if ((e as PointerEvent).pointerId === this.guardPointer) {
+          this.guarding = false;
+          this.guardPointer = null;
+        }
+        if (
+          type === "pointerup" &&
+          (e as PointerEvent).pointerId === this.lookPointer &&
+          distance < 8 &&
+          this.enabled
+        )
+          this.onAttack();
         if ((e as PointerEvent).pointerId === this.lookPointer)
           this.lookPointer = null;
       });
@@ -126,6 +159,8 @@ export class Input {
   reset() {
     this.keys.clear();
     this.lookPointer = null;
+    this.guarding = false;
+    this.guardPointer = null;
     this.resetStick();
   }
 }
