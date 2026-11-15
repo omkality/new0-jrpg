@@ -17,7 +17,7 @@ Both assets are expressly dedicated to **CC0 1.0 Universal** on their author pag
 
 The anymove software repository is Apache-2.0. This is separate from Patch's CC0 dedication of these model assets. Original downloads and saved author pages remain in `work/assets-v4/`.
 
-## Prepared derivatives
+## Historical v7 prepared derivatives
 
 | File           |   Bytes | Triangles | Vertices | Materials | Mesh primitives |
 | -------------- | ------: | --------: | -------: | --------: | --------------: |
@@ -140,7 +140,7 @@ are nonnegative model-space metres. Runtime must account for any visual scale
 and smooth clip transitions. The table avoids per-frame vertex skinning for
 ground alignment. It does not alter animations, gameplay position or scoring.
 
-Final geometry hashes:
+Historical v7 geometry hashes:
 
 - prisoner: `a1686e17a95b740b8971ec59ad3b7c7677a9079c29405a8869476d385a507964`
 - watcher: `09b25785f3808a8849a52590ea1d364656b24fbe5a5a0abd62bcb35467fcab74`
@@ -156,3 +156,53 @@ On the final mesh, maximum floor offsets are 105.410 mm for DeathFront,
 92.534 mm for DeathSide, 27.618 mm for DeathBack and 92.783 mm for legacy Death.
 The source motion and approved attacks remain unchanged. The corresponding
 static corpse study is `work/assets-v7/garment/watcher-deaths-shortrobe.png`.
+
+
+## Текущее состояние v8.2 / облегающая ткань и закрытые кисти
+
+Актуальные публичные GLB подготовлены `scripts/assets/fit-cast-v8.mjs`.
+Длинные широкие оболочки v7 заменены рубахой с рукавами и штанами.
+Их вершины повторяют поверхность исходного тела с отступом 11 мм и 7 мм,
+используют его же индексы костей и веса. Капюшоны, воротник, маска и вуаль
+сохранены. Отдельной симуляции ткани нет.
+
+Восстановленные индексы исходного тела находятся в
+`scripts/assets/seeds/woman-body-indices.u16`. Это записи индексов производной
+CC0-модели Patch после удаления скрытого пучка волос. Они нужны, чтобы под
+новой более короткой одеждой не оставались отверстия. Сами базовые записи
+вершин тела, 22 кости, rest TRS, inverse-bind matrices, исходные анимации и
+встроенные изображения сохраняют защищённые хэши. Боевые GLB не менялись.
+
+У исходных моделей нет костей пальцев. Две additive morph-цели `new0GripR`
+и `new0GripL` закрывают исходную геометрию пальцев вокруг рукояти. Открытая
+кисть сохранена как нулевое значение morph. Новые жёсткие примитивы вместо
+рук не используются. Изменения нормалей ограничены изменёнными пальцами.
+
+Повторный запуск подготовки не накапливает старые оболочки и morph-аксессоры.
+Очистка касается только неиспользуемых Accessor/Buffer, защищённые данные
+проверяются до записи и после экспорта. Происхождение и лицензия исходных
+моделей остаются CC0, указаны выше.
+
+```powershell
+node scripts/assets/fit-cast-v8.mjs --apply --floor
+npm --prefix scripts/assets run check
+```
+
+`floor-v7.json` сохраняет имя URL для загрузчика. В актуальной таблице есть
+prisoner, watcher и gaoler. Контакт с полом пересчитан по новой геометрии.
+Для падений корректировка может быть отрицательной, чтобы тело после удаления
+длинной одежды не зависало над полом. Остальные клипы используют положительное
+поднятие при необходимости. Эти значения не меняют игровую координату и HP.
+
+`GearPose` ограничивает руки после смешивания анимаций и сохраняет длины
+плеча и предплечья. Хват меча, тяжёлый замах секирой и выпад копьём различаются.
+Проверка пересечения выполняется по уже изменённой позе ткани, включая рукава.
+У носильщика дополнительно проверяется поверхность тела вне зоны хвата.
+Рендер и проверка используют общие положения рукоятей и одинаковые модели оружия.
+Предмет остаётся прикреплён к кисти. Тест проверяет сторону несущей руки,
+сгиб запястья, расстояние опорной кисти до древка, одежду, пол и направление лезвия.
+У врагов проверяются движения, которые действительно использует их текущий AI.
+Исходные перекаты сохраняются в ассетах, но AI врагов их не вызывает.
+
+Светлая ткань и камень выбеливаются при рендере, исходные PNG сохранены.
+Референсы PRISON OF HUSKS не входят в поставляемые игровые ассеты.

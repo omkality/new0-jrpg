@@ -13,6 +13,11 @@
   The user explicitly rejected turn-based combat and action-selection menus.
 - The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
+- Cloth must follow the body surface and skin weights. Rigid metal plates are separate.
+  Use weapon-specific stances and closed hand grips, with anatomical wrist limits.
+  Validate the final posed sleeves as well as the torso, including both support hands.
+- All visible text uses the local Ebbe Black face, including canvas HUD. Keep its OFL
+  notice and test Cyrillic coverage and small-screen readability. Use SVG for action icons.
 - Latest art direction: gloomy pale stone and cloth, readable cool midtones, localized shimmering light
   through dark depth fog, subtle monochrome grain and clean UI. Avoid uniform bright
   lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.

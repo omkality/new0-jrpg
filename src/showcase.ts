@@ -85,14 +85,14 @@ export class Showcase {
       return this.walk(-2.65, 4.4);
     }
     if (this.stage === "chest-view") {
-      this.label = "Сундук · лунный серп";
+      this.label = "Сундук / лунный серп";
       this.cameraYaw = 0.48 + Math.sin(this.stageTime * 1.5) * 0.55;
       this.cameraPitch = 0.13;
       if (this.stageTime > 1.25) this.enter("first-secret");
       return rest;
     }
     if (this.stage === "first-secret") {
-      this.label = "Первая пасхалка · клеймо на камне";
+      this.label = "Первая пасхалка / клеймо на камне";
       this.cameraYaw = 0.25;
       if (Math.hypot(p.x + 2.7, p.z - 0.65) < 0.28) {
         g.interact();
@@ -108,7 +108,7 @@ export class Showcase {
       return rest;
     }
     if (this.stage === "second-secret") {
-      this.label = "Вторая пасхалка · отзвук";
+      this.label = "Вторая пасхалка / отзвук";
       this.cameraYaw = -0.35 + Math.sin(this.stageTime * 0.8) * 0.4;
       if (Math.hypot(p.x - 3.05, p.z + 4.8) < 0.3) {
         g.interact();
@@ -117,7 +117,7 @@ export class Showcase {
       return this.walk(3.05, -4.8);
     }
     if (this.stage === "exit") {
-      this.label = "Путь открыт · 2 / 2";
+      this.label = "Путь открыт / 2 / 2";
       this.cameraYaw = 0.12;
       if (Math.hypot(p.x, p.z + 6.9) < 0.3) g.interact();
       return this.walk(0, -6.9);
@@ -142,7 +142,7 @@ export class Showcase {
     }
     if (this.stage === "double" || this.stage === "triple") {
       const total = this.stage === "double" ? 2 : 3;
-      this.label = total === 2 ? "Двойной удар" : "Серп · тройная цепочка";
+      this.label = total === 2 ? "Двойной удар" : "Серп / тройная цепочка";
       if (d > 1.8 && !this.began) return approach();
       if (!this.began) {
         if (p.stamina < (total === 3 ? 60 : 36)) return rest;

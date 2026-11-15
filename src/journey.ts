@@ -330,7 +330,7 @@ export class CampaignShowcase {
     if (this.fightStage === 3) {
       this.label =
         e.kind === "mimic"
-          ? "Выпад пастью · уходим от укуса"
+          ? "Выпад пастью / уходим от укуса"
           : "Перекат под ударом";
       const moment =
         e.kind === "mimic"
@@ -347,7 +347,7 @@ export class CampaignShowcase {
       if (!this.dodged && d > profile.reach - 0.1) return approach();
       return rest;
     }
-    this.label = weapon.name + " · ответная цепочка";
+    this.label = weapon.name + " / ответная цепочка";
     if (p.mode === "attack") {
       if (p.chain === 1 && p.time > 0.17) g.attack();
       else if (p.chain === 2 && p.time > 0.34) g.attack();

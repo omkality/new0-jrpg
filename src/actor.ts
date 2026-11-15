@@ -3,12 +3,13 @@ import * as THREE from "three";
 import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
 import { assetUrl } from "./assets";
-import { heldWeapon } from "./level-props";
+import { heldWeapon, attachWeapon } from "./level-props";
 import { loadModel as load } from "./asset-store";
 import type { WeaponId } from "./world-layout";
 import { armourModel, flaskModel } from "./gear-visuals";
 import { GearPose } from "./gear-pose";
 import { GearCollision } from "./gear-collision";
+import { WEAPON_RELEASE_TIME } from "./weapon-spec";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
@@ -105,15 +106,34 @@ export class Actor {
                     ? 0xa9a69a
                     : 0x9fa8a9,
             );
+            if (/new0_v8_fitted/.test(o.name))
+              m.color.set(
+                /trousers/.test(o.name)
+                  ? kind === "pilgrim"
+                    ? 0x818b85
+                    : 0x515c57
+                  : kind === "pilgrim"
+                    ? 0xe4e6dc
+                    : 0x7c8980,
+              );
+            else if (/hood/.test(o.name))
+              m.color.set(kind === "pilgrim" ? 0x656e64 : 0x46514a);
+            else if (/collar/.test(o.name))
+              m.color.set(kind === "pilgrim" ? 0x929e8f : 0x59675b);
             o.material = m;
             if (/linen|headwrap/.test(m.name)) {
               m.onBeforeCompile = (shader) => {
                 shader.fragmentShader = shader.fragmentShader.replace(
                   "#include <map_fragment>",
-                  "#include <map_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.2126,0.7152,0.0722))), diffuseColor.rgb, 0.2);",
+                  `#ifdef USE_MAP
+ vec4 clothTexel=texture2D(map,vMapUv);
+ float weave=pow(clamp(dot(clothTexel.rgb,vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.42);
+ diffuseColor.rgb*=mix(vec3(0.38),vec3(0.97),weave);
+ diffuseColor.a*=clothTexel.a;
+ #endif`,
                 );
               };
-              m.customProgramCacheKey = () => "new0-ashen-cloth-v8";
+              m.customProgramCacheKey = () => "new0-bleached-cloth-v8";
             }
             o.frustumCulled = false;
           }
@@ -126,6 +146,7 @@ export class Actor {
         const hand = rig.getObjectByName("hand_R"),
           weapon = heldWeapon(
             kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : "sword",
+            kind === "gaoler",
           );
         const weapons = new Map<string, THREE.Group>([["sword", weapon]]);
         if (kind === "pilgrim") {
@@ -146,7 +167,9 @@ export class Actor {
           rig.updateMatrixWorld(true);
           rig.getObjectByName("chest")?.attach(armour);
           flask = flaskModel();
-          flask.scale.setScalar(0.72);
+          flask.scale.setScalar(0.4);
+          flask.position.set(-0.024, 0.078, 0.124);
+          flask.rotation.x = -Math.PI / 2;
           flask.visible = false;
           rig.getObjectByName("hand_L")?.add(flask);
         }
@@ -163,10 +186,10 @@ export class Actor {
           profile: model,
           armour,
           flask,
-          gear: new GearPose(rig),
+          gear: new GearPose(rig, kind === "gaoler"),
           collision:
             hand && kind !== "effigy"
-              ? new GearCollision(rig, hand, weapons)
+              ? new GearCollision(rig, hand, weapons, kind === "gaoler")
               : undefined,
         });
       }),
@@ -209,8 +232,7 @@ export class Actor {
       if (this.active) {
         if (this.active.dropped) {
           this.active.hand?.add(this.active.weapon);
-          this.active.weapon.position.set(0, 0.06, 0);
-          this.active.weapon.rotation.set(-Math.PI / 2, 0, 0);
+          attachWeapon(this.active.weapon, this.kind === "gaoler");
           this.active.dropped = false;
         }
         this.active.rig.visible = false;
@@ -223,8 +245,7 @@ export class Actor {
     if (weapon !== s.weapon) {
       s.hand?.add(s.weapon);
       s.weapon.visible = false;
-      s.weapon.position.set(0, 0.06, 0);
-      s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      attachWeapon(s.weapon, kind === "gaoler");
       s.weapon = weapon;
       s.weapon.visible = true;
       s.dropped = false;
@@ -314,29 +335,32 @@ export class Actor {
         ? offset
         : THREE.MathUtils.damp(s.floorOffset, offset, 28, dt);
     this.root.position.y = f.y + s.floorOffset;
-    if (!(mode === "dead" && f.time > 0.65)) {
+    if (!(mode === "dead" && f.time > WEAPON_RELEASE_TIME)) {
       this.root.updateMatrixWorld(true);
-      s.collision?.update();
       const item =
         kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : f.weapon;
       s.gear.apply(
         item,
-        name,
+        mode === "heal" ? "Drink" : name,
         f.y,
         s.collision
-          ? (matrix) =>
-              s.collision!.penalty(
+          ? (matrix, correction) => {
+              s.collision!.update();
+              return s.collision!.penalty(
                 kind === "gaoler" ? "sword" : item,
                 matrix,
                 f.y,
-              )
+                correction,
+              );
+            }
           : undefined,
         action.time,
       );
     }
     if (mode === "heal") s.gear.drink(f.time);
 
-    if (mode === "dead" && f.time > 0.65) {
+    if (mode === "dead" && f.time > WEAPON_RELEASE_TIME) {
+      s.gear.setGrip(0, 0);
       if (!s.dropped) {
         this.root.updateMatrixWorld(true);
         this.root.attach(s.weapon);
@@ -368,8 +392,7 @@ export class Actor {
       );
     } else if (mode !== "dead" && s.dropped) {
       s.hand?.add(s.weapon);
-      s.weapon.position.set(0, 0.06, 0);
-      s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      attachWeapon(s.weapon, kind === "gaoler");
       s.dropped = false;
     }
   }
@@ -381,8 +404,7 @@ export class Actor {
       s.floorOffset = 0;
       if (s.dropped) {
         s.hand?.add(s.weapon);
-        s.weapon.position.set(0, 0.06, 0);
-        s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+        attachWeapon(s.weapon, s.profile === "gaoler");
         s.dropped = false;
       }
     }

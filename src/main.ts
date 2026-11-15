@@ -224,11 +224,14 @@ function text(
   color = "#e4eaf3",
   align: CanvasTextAlign = "left",
 ) {
-  h.font = `${size}px Arial`;
+  h.font = `${Math.max(12, size * 1.2)}px "Ebbe Black"`;
   h.textAlign = align;
   h.fillStyle = color;
   h.shadowColor = "#132232";
   h.shadowBlur = 5;
+  h.lineWidth = 2;
+  h.strokeStyle = "rgba(12,16,17,0.8)";
+  h.strokeText(t, x, y);
   h.fillText(t, x, y);
   h.shadowBlur = 0;
 }
@@ -279,14 +282,14 @@ function drawHUD() {
   const weapon = WEAPONS[p.weapon];
   text(weapon.name.toUpperCase(), x, y + 50, 8, "#c9d7e7");
   text(
-    `${p.armour ? "КИРАСА · защита 28%" : "ТКАНЬ"} · зелья ${game.flasks}/3`,
+    `${p.armour ? "КИРАСА / защита 28%" : "ТКАНЬ"} / зелья ${game.flasks}/3`,
     x,
     y + 64,
     8,
     "#d7e0de",
   );
   text(
-    `Монеты ${game.coins} · ключи ${game.keys.size}`,
+    `Монеты ${game.coins} / ключи ${game.keys.size}`,
     w - 20,
     hh - 20,
     9,
@@ -306,16 +309,16 @@ function drawHUD() {
     text(toastValue, w / 2, hh - 60, mobile ? 11 : 13, "#dae6f5", "center");
   if (autoplay && demonstration) {
     const progress = deviceCheck
-      ? `${deviceCheck.index + 1}/4 · `
+      ? `${deviceCheck.index + 1}/4 / `
       : soak
-        ? `Повтор ${soak.runs + 1}/5 · `
+        ? `Повтор ${soak.runs + 1}/5 / `
         : "";
-    text(progress + demonstration.label, 20, hh - 20, mobile ? 9 : 11);
+    text(progress + demonstration.label, 20, hh - 39, mobile ? 9 : 11);
     if (deviceCheck)
       text(
-        performanceText.split(" · ").slice(0, 2).join(" · "),
+        performanceText.split(" / ").slice(0, 2).join(" / "),
         20,
-        hh - 37,
+        hh - 56,
         9,
         "#b9c9dc",
       );
@@ -405,7 +408,7 @@ async function finishDeviceCheck(interrupted: boolean) {
         : "Проход завершён не полностью",
     ...current.stages.map(
       (s) =>
-        `${LOCATIONS[s.location].name}: ${s.fps.toFixed(1)} FPS · p95 ${s.p95_ms.toFixed(1)} мс${s.completed ? "" : " · не завершено"}`,
+        `${LOCATIONS[s.location].name}: ${s.fps.toFixed(1)} FPS / p95 ${s.p95_ms.toFixed(1)} мс${s.completed ? "" : " / не завершено"}`,
     ),
   ];
   $("#check-result").textContent = summary.join("\n");
@@ -441,7 +444,7 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-v8-${selected}-60fps.mp4`;
+    a.download = `new0-v8.2-${selected}-60fps.mp4`;
     visible("#download", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
@@ -645,7 +648,7 @@ function frame(now: number) {
       game.flasks === 0 ||
       game.player.hp >= game.player.maxHp ||
       !["idle", "move", "guard"].includes(game.player.mode);
-    $("#heal").textContent = `Выпить зелье · ${game.flasks}`;
+    $("#heal").textContent = `Выпить зелье / ${game.flasks}`;
     $("#interact").textContent = game.nearby;
     if (deviceCheck && game.phase !== "finished") measureControlFit();
     $("#guard").setAttribute(
@@ -660,12 +663,12 @@ function frame(now: number) {
     if (frames.length > 30) {
       const sorted = [...frames].sort((a, b) => a - b),
         avg = frames.reduce((a, b) => a + b, 0) / frames.length;
-      performanceText = `${(1000 / avg).toFixed(1)} FPS · p95 ${sorted[Math.ceil(sorted.length * 0.95) - 1].toFixed(1)} мс · ${world.renderer.info.render.calls} calls · ${Math.round(world.renderer.info.render.triangles / 1000)}k tris`;
+      performanceText = `${(1000 / avg).toFixed(1)} FPS / p95 ${sorted[Math.ceil(sorted.length * 0.95) - 1].toFixed(1)} мс / ${world.renderer.info.render.calls} calls / ${Math.round(world.renderer.info.render.triangles / 1000)}k tris`;
       if (review) {
         const r = world.resources();
         $("#performance").textContent =
           performanceText +
-          ` · G${r.geometries} T${r.textures} P${r.programs} M${r.models}`;
+          ` / G${r.geometries} T${r.textures} P${r.programs} M${r.models}`;
       }
       if (
         !recording &&
@@ -701,7 +704,11 @@ async function boot() {
     await api.connect(tg?.initData ?? "");
     connecting = false;
     $("#autoplay").textContent = "Загрузка сцены…";
-    await world.load();
+    const [, faces] = await Promise.all([
+      world.load(),
+      document.fonts.load('16px "Ebbe Black"'),
+    ]);
+    if (!faces.length) throw new Error("Не удалось загрузить шрифт игры");
     world.resetView();
     loaded = true;
     $("#performance").title = world.device;

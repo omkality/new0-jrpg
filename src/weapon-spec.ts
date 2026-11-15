@@ -59,3 +59,19 @@ export const WEAPON_MOUNTS = {
   relic: { scale: 0.79, twist: 0 },
   unarmed: { scale: 1, twist: 0 },
 } as const;
+
+// The shaft crosses the curled palm, beyond the wrist. Ogre hands have a
+// different bind-space centre. Spear is gripped closer to its butt for thrusts.
+export const HAND_GRIP = {
+  human: [0.024, 0.078, 0],
+  gaoler: [0.012, 0.17, -0.045],
+} as const;
+export const WEAPON_GRIP_SHIFT = {
+  sword: 0,
+  axe: 0.12,
+  spear: 0.34,
+  relic: 0,
+  unarmed: 0,
+} as const;
+
+export const WEAPON_RELEASE_TIME = 0.25;

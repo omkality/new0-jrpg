@@ -9,10 +9,19 @@ import {
   type WeaponId,
 } from "./world-layout";
 import { prop, propModel } from "./asset-store";
-import { WEAPONS, WEAPON_MOUNTS } from "./weapon-spec";
+import {
+  WEAPONS,
+  WEAPON_MOUNTS,
+  HAND_GRIP,
+  WEAPON_GRIP_SHIFT,
+} from "./weapon-spec";
 import { blackGate, flaskModel, armourModel, lootGlow } from "./gear-visuals";
 
-export function heldWeapon(id: WeaponId) {
+export function attachWeapon(group: THREE.Group, gaoler = false) {
+  group.position.fromArray(HAND_GRIP[gaoler ? "gaoler" : "human"]);
+  group.rotation.set(-Math.PI / 2, 0, 0);
+}
+export function heldWeapon(id: WeaponId, gaoler = false) {
   const group = new THREE.Group();
   group.name = `Held-${id}`;
   if (id !== "unarmed") {
@@ -20,10 +29,10 @@ export function heldWeapon(id: WeaponId) {
     const mount = WEAPON_MOUNTS[id];
     object.scale.setScalar(mount.scale);
     object.rotation.y = mount.twist;
+    object.position.y = WEAPON_GRIP_SHIFT[id];
     group.add(object);
   }
-  group.position.set(0, 0.06, 0);
-  group.rotation.x = -Math.PI / 2;
+  attachWeapon(group, gaoler);
   return group;
 }
 export class LevelProps {

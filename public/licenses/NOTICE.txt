@@ -21,3 +21,10 @@ Copyright (c) 2018 Garrett Johnson
 License: MIT, complete notice supplied in three-mesh-bvh-MIT.txt.
 Unmodified npm library used for posed clothing and weapon surface checks.
 https://github.com/gkjohnson/three-mesh-bvh
+
+Ebbe Black
+Ebbe Typeface © (Blue Curve Designstudio). 2024. All Rights Reserved
+Designer: Dimitri Antonov
+License: SIL Open Font License 1.1. Full text in ../fonts/OFL.txt.
+Unmodified original TTF, self-hosted for all game interface text.
+https://ofont.ru/view/5821

@@ -1,5 +1,12 @@
+@font-face {
+  font-family: "Ebbe Black";
+  src: url("/fonts/Ebbe-Black.ttf") format("truetype");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
 :root {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Ebbe Black", serif;
   color: #e4e9ef;
   background: #253442;
   font-synthesis: none;
@@ -24,8 +31,14 @@ a,
 select {
   -webkit-tap-highlight-color: transparent;
 }
-button {
+button,
+input,
+select,
+textarea,
+option {
   font: inherit;
+}
+button {
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -100,7 +113,7 @@ a {
   background: #dbe3e9;
   color: #24313d;
   padding: 17px 20px;
-  font-size: 14px;
+  font-size: 19px;
   font-weight: 600;
   box-shadow: 0 4px 28px #101a283d;
 }
@@ -108,7 +121,7 @@ a {
   display: block;
   margin-top: 18px;
   white-space: pre-line;
-  font: 11px/1.8 Arial;
+  font: 15px/1.6 "Ebbe Black";
   color: #e0e7f0;
   text-shadow: 0 1px 6px #101a28;
 }
@@ -119,7 +132,7 @@ a {
   bottom: calc(14px + var(--safe-bottom));
   text-align: center;
   color: #c2cbd6;
-  font: 9px/1.65 Arial;
+  font: 12px/1.6 "Ebbe Black";
   text-shadow: 0 1px 5px #172330;
 }
 .credits a {
@@ -196,12 +209,19 @@ a {
   gap: 2px;
 }
 .touch-actions button span {
-  font:
-    34px/1 Georgia,
-    serif;
+  font: 34px/1 "Ebbe Black";
+}
+.touch-actions svg {
+  width: 27px;
+  height: 27px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .touch-actions small {
-  font-size: 7px;
+  font-size: 12px;
   letter-spacing: 1px;
 }
 .touch-actions #dodge {
@@ -236,7 +256,7 @@ a {
   color: #e3eaf3;
   border: 1px solid #d6e2f088;
   padding: 12px 18px;
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
   min-height: 44px;
 }
@@ -270,7 +290,7 @@ a {
 #review button,
 #review a,
 #review select {
-  font: 10px Arial;
+  font: 14px "Ebbe Black";
   background: #25374bdb;
   border: 1px solid #b8cadb66;
   padding: 7px;
@@ -278,7 +298,7 @@ a {
 }
 #performance {
   flex-basis: 100%;
-  font: 10px/1.6 monospace;
+  font: 13px/1.6 "Ebbe Black";
   text-align: right;
   text-shadow: 0 1px 4px #132133;
 }
@@ -294,7 +314,7 @@ a {
   #review button,
   #review select,
   #review a {
-    font-size: 9px;
+    font-size: 13px;
     padding: 6px;
   }
 }
@@ -306,7 +326,7 @@ a {
     bottom: 20px;
   }
   .credits {
-    font-size: 8px;
+    font-size: 11px;
     bottom: 8px;
   }
 }
@@ -320,7 +340,7 @@ a {
   background: #263445d9;
   border: 1px solid #adbcc888;
   padding: 9px;
-  font-size: 10px;
+  font-size: 13px;
   min-height: 44px;
 }
 #heal {
@@ -332,7 +352,7 @@ a {
   background: #263d3ad9;
   border: 1px solid #b8ccc888;
   padding: 9px;
-  font-size: 10px;
+  font-size: 13px;
   min-height: 44px;
 }
 #heal:disabled {

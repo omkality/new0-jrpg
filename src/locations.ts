@@ -12,10 +12,10 @@ import {
 } from "./world-layout";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0x939b9e, density: 0.027 },
-  roofs: { name: "Воротный двор", fog: 0x8a9399, density: 0.028 },
-  chapel: { name: "Собор и верхняя галерея", fog: 0x59656b, density: 0.037 },
-  crypt: { name: "Зал погребённых", fog: 0x46535b, density: 0.046 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xb8bebc, density: 0.027 },
+  roofs: { name: "Воротный двор", fog: 0xaeb7b7, density: 0.028 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0x879392, density: 0.037 },
+  crypt: { name: "Зал погребённых", fog: 0x626d6d, density: 0.046 },
   courtyard: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
@@ -110,15 +110,20 @@ export class ConnectedEnvironment {
       material.onBeforeCompile = (shader) => {
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <map_fragment>",
-          "#include <map_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.2126,0.7152,0.0722))), diffuseColor.rgb, 0.18);",
+          `#ifdef USE_MAP
+ vec4 stoneTexel = texture2D(map, vMapUv);
+ float chalk = pow(clamp(dot(stoneTexel.rgb, vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.45);
+ diffuseColor.rgb *= mix(vec3(0.34,0.35,0.33),vec3(0.96,0.98,0.94),chalk);
+ diffuseColor.a *= stoneTexel.a;
+ #endif`,
         );
       };
-      material.customProgramCacheKey = () => "new0-ashen-stone-v8";
+      material.customProgramCacheKey = () => "new0-chalk-stone-v8";
       return material;
     };
-    this.wall = tiled("TEX_Wall_03", 0xc6cbcd);
-    this.stone = tiled("TEX_Arch_02", 0xe2e4e1);
-    this.floor = tiled("TEX_Ground_04", 0xc0c9cc);
+    this.wall = tiled("TEX_Wall_03", 0xebeee8);
+    this.stone = tiled("TEX_Arch_02", 0xf1f2ed);
+    this.floor = tiled("TEX_Ground_04", 0xd9ddd6);
     this.metal = new THREE.MeshStandardMaterial({
       color: 0x353e48,
       roughness: 0.87,
@@ -136,7 +141,7 @@ export class ConnectedEnvironment {
       roughness: 1,
       vertexColors: true,
     });
-    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.46));
+    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.58));
     const moon = new THREE.DirectionalLight(0xe8eef3, 1.05);
     moon.position.set(-9, 18, 8);
     this.root.add(moon);

@@ -8,13 +8,20 @@ import {
   Vector3,
   Group,
   Object3D,
+  Line3,
 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { structure, sample, world, blend } from "./pose-sampling.mjs";
-import { WEAPON_MOUNTS } from "../../src/weapon-spec.ts";
+import {
+  WEAPON_MOUNTS,
+  HAND_GRIP,
+  WEAPON_GRIP_SHIFT,
+  WEAPON_RELEASE_TIME,
+} from "../../src/weapon-spec.ts";
+import { surfacePush } from "../../src/gear-collision.ts";
 import { GearPose } from "../../src/gear-pose.ts";
 import { ATTACKS } from "../../src/game.ts";
 import assert from "node:assert/strict";
@@ -28,7 +35,10 @@ const doc = await io.read(
   resolve(project, `public/assets/cast/${character}.glb`),
 );
 const motion = await io.read(
-  resolve(project, "public/assets/motion/prisoner-combat.glb"),
+  resolve(
+    project,
+    `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-combat.glb`,
+  ),
 );
 const info = structure(doc);
 const floorTable = JSON.parse(
@@ -40,7 +50,8 @@ for (const [node, o] of objects) {
   o.name = node.getName();
   (info.parent.has(node) ? objects.get(info.parent.get(node)) : rig).add(o);
 }
-const controller = new GearPose(rig);
+const controller = new GearPose(rig, character === "gaoler", true);
+let fittedSurface;
 function fitted(pose, weapon, clip, time) {
   const curve = floorTable.profiles[character]?.clips[clip];
   const fi = Math.min((curve?.offsets.length ?? 1) - 1, Math.round(time * 60));
@@ -54,32 +65,61 @@ function fitted(pose, weapon, clip, time) {
   }
   rig.updateMatrixWorld(true);
   if (process.argv.includes("--fit")) {
-    const pieces = [];
-    for (const node of cloth)
-      for (const primitive of node.getMesh().listPrimitives())
-        pieces.push(skin(node, pose, primitive));
-    const body = mergeGeometries(pieces);
-    for (const p of pieces) p.dispose();
-    body.translate(0, offset, 0);
-    body.boundsTree = new MeshBVH(body);
-    const matrix = new Matrix4(),
-      box = weapon.geometry.boundingBox.clone();
     controller.apply(
       weapon.id,
       clip,
       0,
-      (m) => {
-        matrix.copy(m).multiply(mount);
-        const collision = body.boundsTree.intersectsGeometry(
+      (m, correction) => {
+        for (const [n, o] of objects) {
+          const p = pose.get(n);
+          p.p.copy(o.position);
+          p.q.copy(o.quaternion);
+          p.s.copy(o.scale);
+        }
+        const pieces = [];
+        for (const node of cloth)
+          for (const primitive of node.getMesh().listPrimitives())
+            pieces.push(skin(node, pose, primitive));
+        const positions = fittedSurface.getAttribute("position");
+        let cursor = 0;
+        for (const p of pieces) {
+          const a = p.getAttribute("position");
+          for (let i = 0; i < a.count; i++)
+            positions.setXYZ(
+              cursor++,
+              a.getX(i),
+              a.getY(i) + offset,
+              a.getZ(i),
+            );
+          p.dispose();
+        }
+        fittedSurface.boundsTree.refit();
+        const matrix = new Matrix4().copy(m).multiply(mount),
+          box = weapon.geometry.boundingBox.clone().applyMatrix4(matrix);
+        const collision = fittedSurface.boundsTree.intersectsGeometry(
           weapon.geometry,
           matrix,
         );
-        box.copy(weapon.geometry.boundingBox).applyMatrix4(matrix);
+        if (correction) {
+          correction.set(0, 0, 0);
+          if (collision)
+            surfacePush(
+              fittedSurface.boundsTree,
+              weapon.geometry.boundsTree,
+              matrix,
+              correction,
+            );
+          correction.y += Math.max(0, 0.012 - box.min.y);
+        }
         return (collision ? 1000 : 0) + Math.max(0, 0.008 - box.min.y) * 10000;
       },
       time,
     );
-    body.dispose();
+    assert.equal(
+      controller.diagnostics.finalPenalty,
+      controller.diagnostics.selectedPenalty,
+      "Selected pose changed after constraint evaluation",
+    );
   }
   for (const [n, o] of objects) {
     const s = pose.get(n);
@@ -102,7 +142,13 @@ if (process.argv.includes("--leading")) {
         .find((a) => a.getName() === name),
       pose = sample(info, clip, time);
     const m = world(info, pose, info.byName.get("hand_R"))
-      .multiply(new Matrix4().makeTranslation(0, 0.06, 0))
+      .multiply(
+        new Matrix4().makeTranslation(
+          new Vector3().fromArray(
+            HAND_GRIP[character === "gaoler" ? "gaoler" : "human"],
+          ),
+        ),
+      )
       .multiply(new Matrix4().makeRotationX(-Math.PI / 2));
     const grip = new Vector3().applyMatrix4(m),
       head = new Vector3(0, 0.65, 0).applyMatrix4(m);
@@ -149,7 +195,8 @@ if (process.argv.includes("--describe")) {
 const cloth = info.nodes.filter(
   (n) =>
     n.getMesh() &&
-    !n.getMesh().getName().startsWith("tripo_mesh_") &&
+    (character === "gaoler" ||
+      !n.getMesh().getName().startsWith("tripo_mesh_")) &&
     !/mask|eye|mouth/i.test(n.getMesh().getName()),
 );
 function geometry(primitive) {
@@ -161,8 +208,37 @@ function geometry(primitive) {
       3,
     ),
   );
-  if (primitive.getIndices())
-    g.setIndex([...primitive.getIndices().getArray()]);
+  if (primitive.getIndices()) {
+    let indices = [...primitive.getIndices().getArray()];
+    if (
+      character === "gaoler" &&
+      primitive ===
+        doc
+          .getRoot()
+          .listMeshes()
+          .find((m) => m.getName().startsWith("tripo_mesh_"))
+          .listPrimitives()[0]
+    ) {
+      const jointNames = doc
+          .getRoot()
+          .listSkins()[0]
+          .listJoints()
+          .map((n) => n.getName()),
+        j = primitive.getAttribute("JOINTS_0").getArray(),
+        w = primitive.getAttribute("WEIGHTS_0").getArray(),
+        kept = [];
+      for (let i = 0; i < indices.length; i += 3) {
+        let hand = false;
+        for (const v of indices.slice(i, i + 3))
+          for (let k = 0; k < 4; k++)
+            if (/^hand_/.test(jointNames[j[v * 4 + k]]) && w[v * 4 + k] > 0.18)
+              hand = true;
+        if (!hand) kept.push(...indices.slice(i, i + 3));
+      }
+      indices = kept;
+    }
+    g.setIndex(indices);
+  }
   return g;
 }
 function skin(node, pose, primitive) {
@@ -230,10 +306,11 @@ for (const [from, at, to, duration] of [
   });
 }
 const weapons = [];
-for (const id of character === "watcher" &&
-!process.argv.includes("--all-weapons")
-  ? ["sword"]
-  : ["sword", "axe", "spear"]) {
+for (const id of character === "gaoler"
+  ? ["axe"]
+  : character === "watcher" && !process.argv.includes("--all-weapons")
+    ? ["sword"]
+    : ["sword", "axe", "spear"]) {
   const d = await io.read(
       resolve(project, `public/assets/props-v7/weapon-${id}.glb`),
     ),
@@ -251,26 +328,43 @@ for (const id of character === "watcher" &&
     spec.scale,
     spec.scale,
   );
+  g.translate(0, WEAPON_GRIP_SHIFT[id], 0);
   g.computeBoundingBox();
   g.boundsTree = new MeshBVH(g);
   weapons.push({ id, geometry: g });
 }
 const mount = new Matrix4()
-  .makeTranslation(0, 0.06, 0)
+  .makeTranslation(
+    new Vector3().fromArray(
+      HAND_GRIP[character === "gaoler" ? "gaoler" : "human"],
+    ),
+  )
   .multiply(new Matrix4().makeRotationX(-Math.PI / 2));
+const surfacePieces = cloth.flatMap((n) =>
+  n.getMesh().listPrimitives().map(geometry),
+);
+fittedSurface = mergeGeometries(surfacePieces);
+for (const p of surfacePieces) p.dispose();
+fittedSurface.boundsTree = new MeshBVH(fittedSurface);
 const report = [];
-for (const clip of clips) {
+for (const clip of clips.filter(
+  (c) =>
+    (character === "prisoner" || !c.getName().includes("Dodge")) &&
+    (!process.argv.includes("--clip") ||
+      c.getName() === process.argv[process.argv.indexOf("--clip") + 1]),
+)) {
   const duration = Math.max(
       ...clip.listSamplers().map((s) => s.getInput().getArray().at(-1)),
     ),
     hits = Object.fromEntries(weapons.map((w) => [w.id, []])),
     minimumFloor = Object.fromEntries(weapons.map((w) => [w.id, Infinity])),
-    cuttingEdge = [];
+    cuttingEdge = [],
+    anatomy = [];
   let samples = 0;
   const hz = process.argv.includes("--full") ? 60 : 12;
   for (let frame = 0; frame <= Math.ceil(duration * hz); frame++) {
     const t = Math.min(duration, frame / hz);
-    if (clip.getName().startsWith("Death") && t > 0.65) continue;
+    if (clip.getName().startsWith("Death") && t > WEAPON_RELEASE_TIME) continue;
     samples++;
     for (const w of weapons) {
       const pose = clip.poseAt ? clip.poseAt(t) : sample(info, clip, t),
@@ -279,6 +373,87 @@ for (const clip of clips) {
           .get(info.byName.get("hand_R"))
           .matrixWorld.clone()
           .multiply(mount);
+      if (
+        [
+          "Idle",
+          "Walk",
+          "Run",
+          "Guard",
+          "BlockHit",
+          "Attack1",
+          "Attack2",
+          "Attack3",
+        ].includes(clip.getName())
+      ) {
+        const right = objects.get(info.byName.get("hand_R")),
+          forearm = objects.get(info.byName.get("forearm_R")),
+          left = objects.get(info.byName.get("hand_L"));
+        const hp = right.getWorldPosition(new Vector3()),
+          elbow = forearm.getWorldPosition(new Vector3());
+        const bend = new Vector3(0, 1, 0)
+          .transformDirection(right.matrixWorld)
+          .angleTo(hp.clone().sub(elbow).normalize());
+        const side = objects
+          .get(info.byName.get("upperarm_R"))
+          .getWorldPosition(new Vector3())
+          .sub(
+            objects
+              .get(info.byName.get("upperarm_L"))
+              .getWorldPosition(new Vector3()),
+          )
+          .normalize();
+        const carrySide = hp
+          .clone()
+          .sub(
+            objects
+              .get(info.byName.get("pelvis"))
+              .getWorldPosition(new Vector3()),
+          )
+          .dot(side);
+        let supportGap = 0,
+          leftBend = 0;
+        const two =
+          w.id === "spear" ||
+          (w.id === "axe" &&
+            character !== "gaoler" &&
+            /^(Attack|Guard|Block)/.test(clip.getName()));
+        if (two) {
+          const grip = HAND_GRIP[character === "gaoler" ? "gaoler" : "human"];
+          const r = new Vector3()
+              .fromArray(grip)
+              .applyMatrix4(right.matrixWorld),
+            shaft = new Vector3(0, 0, -1).transformDirection(right.matrixWorld),
+            support = r.addScaledVector(
+              shaft,
+              w.id === "spear"
+                ? clip.getName().startsWith("Attack")
+                  ? 0.27
+                  : 0.32
+                : 0.18,
+            );
+          const lg = new Vector3(-grip[0], grip[1], grip[2]).applyMatrix4(
+            left.matrixWorld,
+          );
+          supportGap = support.distanceTo(lg);
+          const leftForearm = objects.get(info.byName.get("forearm_L"));
+          leftBend = new Vector3(0, 1, 0)
+            .transformDirection(left.matrixWorld)
+            .angleTo(
+              left
+                .getWorldPosition(new Vector3())
+                .sub(leftForearm.getWorldPosition(new Vector3()))
+                .normalize(),
+            );
+        }
+        anatomy.push({
+          weapon: w.id,
+          t,
+          bend,
+          leftBend,
+          carrySide,
+          supportGap,
+        });
+      }
       const positions = w.geometry.getAttribute("position"),
         e = matrix.elements;
       for (let i = 0; i < positions.count; i++)
@@ -316,8 +491,55 @@ for (const clip of clips) {
           const a = {},
             b = {};
           body.boundsTree.closestPointToGeometry(w.geometry, matrix, a, b);
+          let maxSegment = 0,
+            contactPairs = 0;
+          const segment = new Line3();
+          body.boundsTree.bvhcast(w.geometry.boundsTree, matrix, {
+            intersectsTriangles(a, b) {
+              if (a.intersectsTriangle(b, segment)) {
+                contactPairs++;
+                maxSegment = Math.max(maxSegment, segment.distance());
+              }
+              return false;
+            },
+          });
+          let closest = { distance: Infinity };
+          for (const node of cloth)
+            for (const primitive of node.getMesh().listPrimitives()) {
+              const g = skin(node, pose, primitive),
+                p = g.getAttribute("position"),
+                j = primitive.getAttribute("JOINTS_0").getArray(),
+                w = primitive.getAttribute("WEIGHTS_0").getArray(),
+                names = node
+                  .getSkin()
+                  .listJoints()
+                  .map((n) => n.getName());
+              for (let vi = 0; vi < p.count; vi++) {
+                const pt = new Vector3(
+                    p.getX(vi),
+                    p.getY(vi) + offset,
+                    p.getZ(vi),
+                  ),
+                  distance = pt.distanceTo(a.point);
+                if (distance < closest.distance)
+                  closest = {
+                    distance,
+                    mesh: node.getName(),
+                    vertex: vi,
+                    bones: [0, 1, 2, 3].map((k) => [
+                      names[j[vi * 4 + k]],
+                      w[vi * 4 + k],
+                    ]),
+                  };
+              }
+              g.dispose();
+            }
           console.error(
             JSON.stringify({
+              maxSegment,
+              contactPairs,
+              closest,
+              diagnostics: controller.diagnostics,
               clip: clip.getName(),
               weapon: w.id,
               t,
@@ -339,6 +561,7 @@ for (const clip of clips) {
     hits,
     minimumFloor,
     cuttingEdge,
+    anatomy,
   });
 }
 await mkdir(resolve(project, "work/gear-v8"), { recursive: true });
@@ -365,6 +588,9 @@ console.log(
         ),
         minimumFloor: r.minimumFloor,
         cuttingEdge: r.cuttingEdge,
+        maxWristDegrees:
+          (Math.max(0, ...r.anatomy.map((a) => a.bend)) * 180) / Math.PI,
+        maxSupportGap: Math.max(0, ...r.anatomy.map((a) => a.supportGap)),
       })),
     },
     null,
@@ -373,6 +599,25 @@ console.log(
 );
 if (process.argv.includes("--strict"))
   for (const r of report) {
+    for (const pose of r.anatomy) {
+      assert.ok(
+        pose.bend < (Math.PI * 32) / 180,
+        `${character}/${r.clip}/${pose.weapon}: excessive right wrist bend`,
+      );
+      assert.ok(
+        pose.leftBend < (Math.PI * 50) / 180,
+        `${character}/${r.clip}/${pose.weapon}: excessive support wrist bend`,
+      );
+      assert.ok(
+        pose.supportGap < 0.035,
+        `${character}/${r.clip}/${pose.weapon}: support hand misses shaft by ${pose.supportGap}m`,
+      );
+      if (["Idle", "Walk", "Run"].includes(r.clip))
+        assert.ok(
+          pose.carrySide > 0.05,
+          `${character}/${r.clip}/${pose.weapon}: carrying hand crosses the torso`,
+        );
+    }
     for (const [weapon, hits] of Object.entries(r.hits))
       assert.equal(
         hits.length,
