@@ -4,12 +4,15 @@
   "type": "module",
   "scripts": {
     "build": "node author-combat.mjs && node retarget-combat.mjs && node validate-combat.mjs",
-    "check": "node validate-combat.mjs"
+    "check": "node validate-combat.mjs && node fix-garment-v7.mjs --check --poses --verify-floor && node props-v7-validate.mjs && node validate-weapon-v7.mjs",
+    "build:props": "node props-v7-fetch.mjs && node props-v7-prepare.mjs && node props-v7-validate.mjs"
   },
   "dependencies": {
     "@gltf-transform/core": "4.5.1",
     "@gltf-transform/extensions": "4.5.1",
     "@gltf-transform/functions": "4.5.1",
-    "three": "0.187.0"
+    "three": "0.187.0",
+    "sharp": "0.35.5",
+    "meshoptimizer": "1.3.0"
   }
 }

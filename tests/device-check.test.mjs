@@ -14,23 +14,42 @@ test("device metrics use real frame intervals, include stalls and retain a p95",
   samples.add(Number.NaN);
   assert.equal(samples.result().frames, 100);
 });
-test("device check runs all three locations on wall time and keeps incomplete/interrupted results", () => {
-  const begun = [];
-  const check = new DeviceCheck((id) => begun.push(id));
-  for (let i = 0; i < 60 * 46 && !check.done; i++)
-    check.update(1000 / 60, true, 0.9);
-  assert.deepEqual(begun, ["chapel", "roofs", "courtyard"]);
-  assert.equal(check.stages.length, 3);
+const resources = {
+  geometries: 120,
+  textures: 55,
+  programs: 18,
+  models: 13,
+  js_heap_mb: null,
+};
+test("continuous diagnostics observes four areas without issuing game commands", () => {
+  const check = new DeviceCheck(),
+    completed = new Set();
+  const areas = ["forest", "roofs", "chapel", "crypt"];
+  for (const area of areas) {
+    for (let i = 0; i < 1200; i++)
+      check.update(1000 / 60, area, completed, false, 1, resources);
+    completed.add(area);
+  }
+  check.update(1000 / 60, "crypt", completed, true, 0.9, resources);
   assert.ok(check.done);
+  assert.deepEqual(
+    check.stages.map((s) => s.location),
+    areas,
+  );
   assert.ok(
     check.stages.every(
-      (s) => s.completed && s.frames > 800 && Math.abs(s.fps - 60) < 0.001,
+      (s) => s.completed && s.frames >= 1200 && Math.abs(s.fps - 60) < 0.001,
     ),
   );
-  const interrupted = new DeviceCheck(() => {});
-  interrupted.update(1500, false, 1);
-  interrupted.interrupt(false, 1);
-  assert.equal(interrupted.stages.length, 1);
-  assert.equal(interrupted.stages[0].completed, false);
-  assert.equal(interrupted.done, true);
+  assert.equal(check.stages[3].render_scale, 0.9);
+  assert.equal(check.stages[0].resources.js_heap_mb, null);
+});
+test("continuous diagnostics preserves stalls and interrupted partial runs", () => {
+  const check = new DeviceCheck();
+  check.update(1500, "forest", new Set(), false, 1, resources);
+  check.interrupt(false, 1, resources);
+  assert.equal(check.stages.length, 1);
+  assert.equal(check.stages[0].over_50_ms, 1);
+  assert.equal(check.stages[0].completed, false);
+  assert.ok(check.done);
 });

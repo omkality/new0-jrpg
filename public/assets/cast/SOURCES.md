@@ -19,17 +19,17 @@ The anymove software repository is Apache-2.0. This is separate from Patch's CC0
 
 ## Prepared derivatives
 
-| File | Bytes | Triangles | Vertices | Materials | Mesh primitives |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `prisoner.glb` | 1289664 | 17093 | 11437 | 5 | 7 |
-| `gaoler.glb` | 1338752 | 18730 | 12522 | 1 | 1 |
-| `watcher.glb` | 1267704 | 16537 | 11097 | 2 | 4 |
+| File           |   Bytes | Triangles | Vertices | Materials | Mesh primitives |
+| -------------- | ------: | --------: | -------: | --------: | --------------: |
+| `prisoner.glb` | 1395008 |     16257 |    13371 |         5 |               8 |
+| `gaoler.glb`   | 1338752 |     18730 |    12522 |         1 |               1 |
+| `watcher.glb`  | 1399548 |     16050 |    13465 |         2 |               5 |
 
 Every file contains one skin and the same 22 joint names as the earlier knight. Source PBR images were resized to **1024x1024**. The added cloth uses an original **64x64** woven-noise image. Images are embedded. No special geometry decoder is required.
 
 ### Masked prisoner
 
-The unarmoured woman source was adapted with original skinned geometry authored here: an irregular linen tunic, dark cloth headwrap, and an aged oval mask with dark cavities. Tunic weights are transferred from the source body. The headwrap and mask follow the head joint. Source body vertex colours were muted and trainers darkened. This is a new garment-and-mask silhouette, not a recolour of the knight.
+The unarmoured woman source was adapted with original skinned geometry authored here: a linen tunic, compact cloth hood with a separate soft collar, and an aged oval mask with dark cavities. The current v7 tunic uses continuous anatomical weights. The hood and mask follow the head joint. Source body vertex colours were muted and trainers darkened. This is a new garment-and-mask silhouette, not a recolour of the knight.
 
 ### Gaoler
 
@@ -37,16 +37,16 @@ The ogre source supplies a broad, heavy, slightly hunched silhouette with a loin
 
 ### Veiled watcher
 
-This uses the same exact rig/rest pose as the prisoner, with separate original geometry: a wider shoulder contour, floor-length flared robe, large cowl, and folded face veil. Lower cloth weights blend pelvis and leg influences. This is not a material-only recolour. The robe is skinned geometry rather than cloth simulation; extreme crouching and combat need intersection checks.
+This uses the same exact rig/rest pose as the prisoner, with separate original geometry: a wider shoulder contour, a below-knee flared mantle, cloth hood, and folded face veil. Lower cloth weights blend pelvis and thigh influences. The current v7 face veil shares its entire edge with the hood opening. This is not a material-only recolour. The robe is skinned geometry rather than cloth simulation; extreme crouching and combat need intersection checks.
 
 ## Native clips
 
 Use `Walk` and `Run` for movement driven by game code. The additional `_Root` variants contain forward root motion.
 
-| Family | Idle | Walk | Run | Other source clips |
-| --- | ---: | ---: | ---: | --- |
-| Prisoner / watcher | 2.792 s | 2.208 s | 1.500 s | `Kick` 4.875 s |
-| Gaoler | 2.083 s | 1.833 s | 1.000 s | `Attack` 4.000 s, `Hit` 2.542 s, `GroundSlam` 3.917 s |
+| Family             |    Idle |    Walk |     Run | Other source clips                                    |
+| ------------------ | ------: | ------: | ------: | ----------------------------------------------------- |
+| Prisoner / watcher | 2.792 s | 2.208 s | 1.500 s | `Kick` 4.875 s                                        |
+| Gaoler             | 2.083 s | 1.833 s | 1.000 s | `Attack` 4.000 s, `Hit` 2.542 s, `GroundSlam` 3.917 s |
 
 Forward +Z displacement for `Walk_Root` / `Run_Root`: prisoner and watcher approximately **2.103 m / 3.679 m**, gaoler **1.499 m / 2.717 m**. In-place versions return to their initial pelvis translation.
 
@@ -65,3 +65,94 @@ The shared source topknot was retained inside the original body primitive and pr
 Portable reproducible fix, requiring only Node.js: `node scripts/assets/remove-hidden-hair.mjs`. Regression check: `node scripts/assets/remove-hidden-hair.mjs --check`. It is also invoked by the original preparation pipeline so regenerating these derivatives does not restore the hidden hair. The machine-independent helper contains no runtime geometry/image dependencies. The operation and preservation evidence are recorded in `work/assets-v4/hair-fix-report.json`; before-fix GLB backups are in the same working directory.
 
 Source previews were visually inspected and saved as `work/assets-v4/woman.webp` and `ogre.webp`. Derivative viewer: `work/assets-v4/preview.html`, served by `serve-preview.mjs` in the same directory. Structure, licenses, skin references, counts and native clips were inspected. All three enemy profiles were subsequently reviewed in the running game, including their different silhouettes. The full combat capture was inspected for the gaoler. Extreme garment intersections and the final animation quality still need further visual polish.
+
+## v7 garment geometry and skin repair
+
+The side-view walking screenshot exposed defects in the original scripted clothing.
+The original tunic/robe had 66 geometric boundary edges, with one surface and no
+thickness or armholes. The old prisoner headwrap had 58 boundary edges, including
+an uncapped side slit. Nearest-body-vertex weight transfer had assigned arm/head
+influences to the torso cloth and shin/foot/toe influences to the observer robe.
+Consequently adjacent cloth regions followed unrelated limbs during movement.
+
+Portable corrective helper: `scripts/assets/fix-garment-v7.mjs`. Dependencies are
+the versions pinned in `scripts/assets/package.json`. All paths are relative to
+the script. The correction is local asset processing and adds no runtime service.
+
+```powershell
+node scripts/assets/fix-garment-v7.mjs --apply
+node scripts/assets/fix-garment-v7.mjs --check --poses --floor
+node scripts/assets/fix-garment-v7.mjs --check --poses --verify-floor
+```
+
+Apply this helper after running the earlier source preparation pipeline. An
+already repaired v7 asset is left unchanged. Structural regression hashes are
+embedded in the helper, so the checks work in a fresh checkout without `work/`.
+The first application saves ignored local before-files. When those are present,
+`--rebuild --apply --candidate` regenerates a comparison candidate from the old
+geometry without replacing the public assets. This was byte-identical to the
+final public GLBs.
+
+The replacement geometry is original new0 work under the same CC0 asset context:
+
+- The tunic/robe, collar, hood and veil are closed cloth shells, with 7–9 mm
+  thickness, inner walls and edge strips. All their geometric boundary and
+  non-manifold edge counts are zero. The intentional sleeveless armholes have
+  physical rims. Hem offsets are periodic, avoiding a mismatched cylinder seam.
+- Torso cloth uses smooth pelvis/spine/chest/neck/clavicle weights. Lower cloth
+  blends pelvis and thighs. Head, arm, shin, foot and toe influences are excluded
+  from the tunic/robe. The collar follows neck/chest and overlaps the head cloth.
+- The hood is compact and closed at the back. The prisoner's original mask is
+  seated 30 mm closer to the head and the cloth opening overlaps its perimeter.
+  The watcher veil's edge is coincident with the hood edge with identical head
+  weights. That seam stayed closed in every tested deformation.
+- Permanently concealed source triangles were removed beneath the head covering,
+  torso cloth and covered legs, avoiding competition between body and fabric.
+  This removed 4592 additional body triangles for prisoner and 5151 for watcher.
+  All existing body vertex records, including skin weights, remain byte-identical.
+- All 22 bone names, hierarchy, local rest TRS, skeleton reference, inverse-bind
+  matrices, native animation channel arrays and embedded images remain unchanged.
+  Public motion GLBs and the approved attack arrays were not modified.
+
+Structural checks and actual skin evaluation cover Idle, Walk, Run and all 16
+combat clips at 60 Hz, **1322 samples per model**. Static before/after posed-skin
+studies cover Walk/Run, Guard, Attack1/2/3 and backward/lateral roll phases.
+Head/shoulder/hip/knee crops are in `work/assets-v7/garment/*-hood-side-knee.png`.
+These use actual skinned geometry with simple diagnostic lighting, not a game
+screenshot or a physical-device benchmark. Engine materials, camera, blend
+transitions and remaining hand/weapon or extreme cloth self-intersections still
+require real gameplay review. There is no cloth simulation or self-collision.
+
+### Baked floor offsets
+
+`floor-v7.json` is a 14,495-byte table for the final prisoner and watcher meshes.
+It contains 19 clips per profile, 1322 scalar samples each, with each final model's
+SHA256 binding. Samples are computed from the actual indexed weighted skin:
+`yOffset = max(0, 0.008 - minimumWeightedY)`, rounded upward to a micrometre.
+Props and attached weapons are excluded. Every sampled corrected surface remains
+at least 8 mm above the reference plane, verified independently against the
+exported table and deformed vertices.
+
+The schema is `profiles[character].clips[clip] = {duration, offsets}` with global
+`sampleRate: 60`. Sample time is `min(duration, i/60)`. The final interval may be
+shorter than 1/60 s and should be interpolated using its actual duration. Values
+are nonnegative model-space metres. Runtime must account for any visual scale
+and smooth clip transitions. The table avoids per-frame vertex skinning for
+ground alignment. It does not alter animations, gameplay position or scoring.
+
+Final geometry hashes:
+
+- prisoner: `a1686e17a95b740b8971ec59ad3b7c7677a9079c29405a8869476d385a507964`
+- watcher: `09b25785f3808a8849a52590ea1d364656b24fbe5a5a0abd62bcb35467fcab74`
+
+The watcher mantle was shortened after a deformation check found that the earlier
+floor-length edge would require a 344 mm height correction in a prone death.
+The current hem rests approximately 445 mm above the bind floor, slightly below
+the source knee, with a periodic worn edge. The lower cloth follows pelvis and
+thighs with at most 75 percent thigh influence. Source calf triangles were
+restored from the before-file when shortening the garment. The upper garment
+was also fitted closer to the torso to reduce hand/fabric overlap while running.
+On the final mesh, maximum floor offsets are 105.410 mm for DeathFront,
+92.534 mm for DeathSide, 27.618 mm for DeathBack and 92.783 mm for legacy Death.
+The source motion and approved attacks remain unchanged. The corresponding
+static corpse study is `work/assets-v7/garment/watcher-deaths-shortrobe.png`.

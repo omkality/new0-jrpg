@@ -4,8 +4,9 @@
   `master` holds tested milestones. Never force-push or deploy automatically.
 - Track concrete open work in GitHub Issues with `priority:P0`, `priority:P1`, or `priority:P2`.
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
-- Current scope is a one-week prototype: three small visual Three.js stages,
-  mobile-first Telegram play, casual real-time combat, two secrets, one chest, Compose.
+- Current scope is a one-week prototype: a connected Three.js route through forest,
+  gate court, cathedral/gallery and crypt, mobile-first Telegram play, casual combat,
+  keys/coins, one held weapon with swap/drop, hollow chests and a mimic, Compose.
   The current public demo exposes one autoplay button. Keep developer review tools
   guest-only and off the normal Mini App screen.
   The user explicitly rejected turn-based combat and action-selection menus.
@@ -31,6 +32,12 @@
 - The on-device autocheck runs at normal wall-clock speed, records RAF intervals including
   long frames and interruptions, and stores bounded owner-only demo reports. Never use
   these client-reported diagnostics as competition scores or evidence of input security.
+- The long autoplay walks continuously across all four areas without resetting HP,
+  equipment or position. Short review scenarios include victory and genuine player defeat.
+  Never inject a win, damage or teleport into the input driver. Do not add a full inventory.
+- Allocate shared models, textures, geometry and pooled props once. Restarts must reuse
+  resources. Dispose mixers, skeletons, GL resources and capture URLs on teardown.
+  Validate garment contact curves and real held-weapon geometry with the asset checks.
 - Iterate on the playable demo first. Provide a short real gameplay GIF/video with a
   focused visual/interaction change, then incorporate feedback before adding more systems.
 - Target at least 60 FPS on phones. Never hard-cap touch rendering at 30 FPS.

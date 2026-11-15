@@ -52,7 +52,14 @@
             target="_blank"
             rel="noopener"
             >Quaternius</a
-          >, CC0, адаптация.
+          >, CC0, адаптация.<br />
+          Сундуки и материалы:
+          <a
+            href="https://polyhaven.com/a/treasure_chest"
+            target="_blank"
+            rel="noopener"
+            >Poly Haven</a
+          >, CC0.
         </footer>
       </section>
       <div id="touch-controls" class="hidden">
@@ -71,22 +78,25 @@
           </button>
         </div>
       </div>
+      <button id="drop" class="hidden">Сбросить оружие</button>
       <button id="interact" class="hidden">Исследовать</button>
       <div id="toast" role="status" class="sr-only hidden"></div>
       <div id="review" class="hidden">
-        <select id="review-location" aria-label="Показать локацию">
-          <option value="chapel">Малахитовый неф</option>
-          <option value="roofs">Багровые крыши</option>
-          <option value="courtyard">Двор забвения</option>
-        </select>
-        <select id="review-enemy" aria-label="Показать противника">
-          <option value="gaoler">Носильщик</option>
-          <option value="watcher">Смотритель</option>
-          <option value="effigy">Пустая кукла</option>
+        <select id="review-scenario" aria-label="Сценарий демо">
+          <option value="journey">Весь маршрут · четыре локации</option>
+          <option value="forest">Лес · секира и ключ</option>
+          <option value="roofs">Воротный двор · копьё</option>
+          <option value="chapel">Собор · верхняя галерея</option>
+          <option value="crypt">Мимик · победа</option>
+          <option value="defeat">Мимик · поражение</option>
         </select>
         <button id="showcase">Показать проход</button>
         <button id="manual">Ручная проверка</button>
         <button id="record">Записать проход</button>
+        <button id="soak">Пять повторов · ресурсы</button>
+        <a id="soak-download" class="hidden" download="new0-resource-soak.json"
+          >Отчёт ресурсов</a
+        >
         <a id="download" class="hidden" download>Скачать запись</a>
         <a id="check-download" class="hidden" download="new0-device-check.json"
           >Технический отчёт</a
