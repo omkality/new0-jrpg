@@ -36,6 +36,32 @@ class SecretAnswer(Command):
     answer: str = Field(min_length=1, max_length=32)
 
 
+class StageMetrics(Body):
+    location: Literal["chapel", "roofs", "courtyard"]
+    seconds: float = Field(ge=0, le=180, allow_inf_nan=False)
+    frames: int = Field(ge=0, le=100000)
+    fps: float = Field(ge=0, le=1000, allow_inf_nan=False)
+    p95_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    over_25_ms: int = Field(ge=0, le=100000)
+    over_50_ms: int = Field(ge=0, le=100000)
+    completed: bool
+    render_scale: float = Field(ge=0.1, le=1, allow_inf_nan=False)
+
+
+class DeviceReport(Body):
+    protocol: Literal["device-check-1"]
+    platform: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
+    telegram_version: str = Field(max_length=24, pattern=r"^[a-zA-Z0-9_.-]*$")
+    viewport_width: int = Field(ge=100, le=10000)
+    viewport_height: int = Field(ge=100, le=10000)
+    touch_points: int = Field(ge=0, le=100)
+    controls_fit: bool
+    errors: int = Field(ge=0, le=100000)
+    context_losses: int = Field(ge=0, le=100000)
+    interrupted: bool
+    stages: list[StageMetrics] = Field(min_length=1, max_length=3)
+
+
 def create_app(settings=None):
     settings = settings or Settings()
     settings.validate()
@@ -125,6 +151,8 @@ def create_app(settings=None):
     @app.get("/api/config")
     def config():
         return {"version": settings.version, "title": settings.title, "allow_guest": settings.allow_guest,
+                "bot_username": settings.bot_username, "shop_url": settings.shop_url, "drop_url": settings.drop_url,
+                "request_timeout_ms": settings.client_timeout_ms, "bootstrap_attempts": settings.client_bootstrap_attempts,
                 "competition_open": settings.competition_open, "attempt_limit": settings.attempt_limit,
                 "ruleset": combat.RULESET, "rules": {"victory": 1000, "hp": 25, "heavy_guard": 40,
                 "turn_cost": 30, "secret": 120, "tie": "shared_place"}}
@@ -142,6 +170,29 @@ def create_app(settings=None):
                       (profile["telegram_id"], profile["display_name"]))
             user = c.execute("SELECT * FROM users WHERE telegram_id=?", (profile["telegram_id"],)).fetchone()
             return session(c, dict(user))
+
+    @app.post("/api/diagnostics")
+    def diagnostic_report(body: DeviceReport, user=Depends(current_user)):
+        if settings.competition_open:
+            raise HTTPException(403, "Автопроверка доступна в демонстрационном режиме")
+        now = time.time()
+        report_id = str(uuid4())
+        with db.connect(write=True) as c:
+            c.execute("DELETE FROM device_reports WHERE created_at<?", (now - settings.diagnostic_ttl,))
+            recent = c.execute("SELECT created_at FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 1", (user["id"],)).fetchone()
+            if recent and now - recent["created_at"] < 10:
+                raise HTTPException(429, "Подожди немного перед повторной проверкой")
+            c.execute("INSERT INTO device_reports VALUES(?,?,?,?)", (report_id, user["id"], now, encode(body.model_dump())))
+            c.execute("DELETE FROM device_reports WHERE user_id=? AND id NOT IN (SELECT id FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 5)", (user["id"], user["id"]))
+        return {"id": report_id}
+
+    @app.get("/api/diagnostics/{report_id}")
+    def diagnostic_view(report_id: str, user=Depends(current_user)):
+        with db.connect() as c:
+            row = c.execute("SELECT report FROM device_reports WHERE id=? AND user_id=? AND created_at>?", (report_id, user["id"], time.time() - settings.diagnostic_ttl)).fetchone()
+        if not row:
+            raise HTTPException(404, "Отчёт не найден")
+        return json.loads(row["report"])
 
     @app.post("/api/auth/guest")
     def guest_login():

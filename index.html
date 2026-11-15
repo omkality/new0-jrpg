@@ -18,11 +18,11 @@
       <header>
         <a
           class="wordmark"
-          href="https://new0.shop/"
+          href="#"
           target="_blank"
           rel="noopener noreferrer"
           >new0<span>®</span></a
-        ><span class="location">НУЛЕВОЙ АРХИВ <i>/</i> ГЛАВА 00</span>
+        ><span class="location" id="location-name">МАЛАХИТОВЫЙ НЕФ</span>
         <div class="top-actions">
           <button id="sound" aria-label="Включить звук" title="Звук">♪</button
           ><button id="pause" aria-label="Пауза">Ⅱ</button>
@@ -37,6 +37,13 @@
             выход.
           </p>
           <button id="start" class="primary" disabled>Подготовка сцены…</button>
+          <label class="encounter-label">Место
+            <select id="location" aria-label="Локация">
+              <option value="chapel">Малахитовый неф</option>
+              <option value="roofs">Багровые крыши</option>
+              <option value="courtyard">Двор забвения</option>
+            </select>
+          </label>
           <label class="encounter-label"
             >Встреча
             <select id="encounter" aria-label="Противник">
@@ -46,10 +53,11 @@
             </select></label
           >
           <p class="intro-controls">
-            WASD · движение &nbsp; Мышь · обзор<br />Клик · удар &nbsp; Пробел ·
-            уклонение
+            Стик · движение &nbsp; Пальцем · обзор<br />Удар · цепочка &nbsp; Шаг · уклонение
           </p>
           <small>На телефоне: стик, обзор пальцем, удар, шаг и блок.</small>
+          <button id="device-check" class="secondary" disabled>Автопроверка устройства</button>
+          <small class="check-note">Около минуты. Автопроход и замер кадров на этом устройстве. Технический отчёт будет отправлен разработчику.</small>
         </div>
         <span class="demo-note"
           >Локальная демка · без зачётных результатов</span
@@ -134,7 +142,7 @@
           <button id="retry" class="primary">Пройти ещё раз</button
           ><a
             class="shop-link"
-            href="https://new0.shop/"
+            href="#"
             target="_blank"
             rel="noopener noreferrer"
             >К магазину new0 ↗</a
@@ -143,6 +151,11 @@
       </section>
       <div id="toast" role="status" class="hidden"></div>
       <div id="review" class="hidden">
+        <select id="review-location" aria-label="Показать локацию">
+          <option value="chapel">Малахитовый неф</option>
+          <option value="roofs">Багровые крыши</option>
+          <option value="courtyard">Двор забвения</option>
+        </select>
         <select id="review-enemy" aria-label="Показать противника">
           <option value="gaoler">Носильщик</option>
           <option value="effigy">Пустая кукла</option>
@@ -154,10 +167,29 @@
           >Скачать запись</a
         ><output id="performance" aria-label="Производительность"></output>
       </div>
+      <aside id="check-progress" class="hidden" aria-live="polite">
+        <strong id="check-status"></strong>
+        <output id="check-performance"></output>
+        <span>Автопроход · оставь приложение открытым</span>
+        <button id="cancel-check">Остановить проверку</button>
+      </aside>
+      <section id="check-result" class="overlay hidden">
+        <div class="panel">
+          <span class="eyebrow">ЗАМЕР НА ЭТОМ УСТРОЙСТВЕ</span>
+          <h2 id="check-title">Автопроверка завершена</h2>
+          <p id="check-summary"></p>
+          <div id="check-stages"></div>
+          <p id="check-upload" role="status"></p>
+          <button id="retry-upload" class="hidden">Повторить отправку</button>
+          <a id="check-download" class="shop-link" download="new0-device-check.json">Скачать технический отчёт</a>
+          <button id="close-check" class="primary">Играть самостоятельно</button>
+        </div>
+      </section>
       <div id="fatal" class="overlay hidden">
         <div class="panel">
           <h2>Не удалось открыть архив</h2>
           <p id="fatal-text"></p>
+          <button id="reload" class="primary">Повторить загрузку</button>
         </div>
       </div>
     </div>

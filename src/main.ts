@@ -5,6 +5,8 @@ import { World } from "./world";
 import { Sound } from "./audio";
 import { API } from "./api";
 import { Showcase } from "./showcase";
+import { LOCATIONS, isLocation, type LocationId } from "./locations";
+import { DeviceCheck, type DeviceReport } from "./device-check";
 import type { FrameCapture } from "./recording";
 
 declare global {
@@ -12,6 +14,8 @@ declare global {
     Telegram?: {
       WebApp?: {
         initData: string;
+        platform?: string;
+        version?: string;
         ready(): void;
         expand(): void;
         disableVerticalSwipes?(): void;
@@ -60,6 +64,13 @@ let recording = false,
   recordCtx: CanvasRenderingContext2D | null = null;
 let autoplay = false;
 let demonstration: Showcase | null = null;
+let deviceCheck: DeviceCheck | null = null;
+let lastDeviceReport: DeviceReport | null = null;
+let errorCount = 0,
+  contextLosses = 0,
+  checkErrorBaseline = 0,
+  checkContextBaseline = 0;
+let controlsFit = true;
 let toastUntil = 0,
   toastValue = "";
 let frames: number[] = [],
@@ -68,6 +79,15 @@ let performanceText = "";
 let lastCapture = 0,
   lastQualityChange = 0;
 const review = new URLSearchParams(location.search).get("review") === "1";
+const requestedLocation = new URLSearchParams(location.search).get("location");
+if (isLocation(requestedLocation)) chooseLocation(requestedLocation);
+
+function chooseLocation(id: LocationId) {
+  $<HTMLSelectElement>("#location").value = id;
+  $<HTMLSelectElement>("#review-location").value = id;
+  $("#location-name").textContent = LOCATIONS[id].name.toUpperCase();
+  world.selectLocation(id);
+}
 
 function toast(t: string) {
   toastValue = t;
@@ -76,6 +96,7 @@ function toast(t: string) {
   visible("#toast", true);
 }
 function start() {
+  chooseLocation($<HTMLSelectElement>("#location").value as LocationId);
   game.start($<HTMLSelectElement>("#encounter").value as EnemyKind);
   paused = false;
   autoplay = false;
@@ -84,16 +105,21 @@ function start() {
   world.pitch = 0.08;
   input.reset();
   input.enabled = true;
+  $("#touch-controls").inert = false;
   visible("#intro", false);
   visible("#pause-panel", false);
   visible("#ending", false);
-  $('#world').focus({preventScroll:true});
+  $("#world").focus({ preventScroll: true });
   frames = [];
   accumulator = 0;
   last = performance.now();
 }
 function pause() {
   if (!loaded || game.phase === "intro") return;
+  if (deviceCheck) {
+    void finishDeviceCheck(true);
+    return;
+  }
   paused = !paused;
   input.reset();
   input.enabled = !paused;
@@ -115,6 +141,12 @@ input.bindGuard($("#guard"));
 $("#review-enemy").onchange = () => {
   $<HTMLSelectElement>("#encounter").value =
     $<HTMLSelectElement>("#review-enemy").value;
+  start();
+};
+$("#location").onchange = () =>
+  chooseLocation($<HTMLSelectElement>("#location").value as LocationId);
+$("#review-location").onchange = () => {
+  chooseLocation($<HTMLSelectElement>("#review-location").value as LocationId);
   start();
 };
 $("#encounter").onchange = () => {
@@ -152,6 +184,12 @@ document.addEventListener("visibilitychange", () => {
     pause();
     stopRecording();
   }
+});
+window.addEventListener("error", () => errorCount++);
+window.addEventListener("unhandledrejection", () => errorCount++);
+window.addEventListener("game-context-lost", () => {
+  contextLosses++;
+  if (deviceCheck) void finishDeviceCheck(true);
 });
 window.addEventListener("game-context-lost", () =>
   fatal("Графика была приостановлена. Перезагрузи страницу"),
@@ -303,6 +341,130 @@ function drawHUD() {
 function autoControl(dt: number) {
   return demonstration?.update(dt) ?? { x: 0, z: 0, guard: false };
 }
+
+function beginDeviceCheck() {
+  if (!loaded || recording || deviceCheck) return;
+  checkErrorBaseline = errorCount;
+  checkContextBaseline = contextLosses;
+  controlsFit = true;
+  visible("#check-result", false);
+  visible("#check-progress", true);
+  deviceCheck = new DeviceCheck((id) => {
+    chooseLocation(id);
+    $<HTMLSelectElement>("#encounter").value = "gaoler";
+    start();
+    autoplay = true;
+    demonstration = new Showcase(game);
+    input.enabled = false;
+    $("#touch-controls").inert = true;
+  });
+}
+
+function measureControlFit() {
+  if (!input.touch || $("#touch-controls").classList.contains("hidden")) return;
+  const boxes = ["#joystick", "#guard", "#dodge", "#attack"].map((s) =>
+    $(s).getBoundingClientRect(),
+  );
+  const inside = boxes.every(
+    (r) =>
+      r.width > 0 &&
+      r.height > 0 &&
+      r.left >= 0 &&
+      r.top >= 0 &&
+      r.right <= innerWidth + 1 &&
+      r.bottom <= innerHeight + 1,
+  );
+  const overlap = boxes.some((a, i) =>
+    boxes.some(
+      (b, j) =>
+        i < j &&
+        Math.min(a.right, b.right) > Math.max(a.left, b.left) &&
+        Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top),
+    ),
+  );
+  controlsFit = controlsFit && inside && !overlap;
+}
+
+async function uploadDeviceReport() {
+  if (!lastDeviceReport) return;
+  visible("#retry-upload", false);
+  $("#check-upload").textContent = "Отправляю технический отчёт…";
+  try {
+    const result = await api.request<{ id: string }>(
+      "/diagnostics",
+      lastDeviceReport,
+    );
+    $("#check-upload").textContent = `Отчёт сохранён. Номер: ${result.id}`;
+  } catch {
+    $("#check-upload").textContent =
+      "Отправка не удалась. Можно повторить её или скачать отчёт.";
+    visible("#retry-upload", true);
+  }
+}
+
+async function finishDeviceCheck(interrupted: boolean) {
+  const current = deviceCheck;
+  if (!current) return;
+  if (interrupted)
+    current.interrupt(game.phase === "finished", world.resolution);
+  deviceCheck = null;
+  paused = true;
+  input.reset();
+  input.enabled = false;
+  const tg = window.Telegram?.WebApp;
+  lastDeviceReport = {
+    protocol: "device-check-1",
+    platform:
+      (tg?.initData ? tg.platform || "unknown" : "browser")
+        .replace(/[^a-zA-Z0-9_-]/g, "")
+        .slice(0, 32) || "unknown",
+    telegram_version: (tg?.version || "")
+      .replace(/[^a-zA-Z0-9_.-]/g, "")
+      .slice(0, 24),
+    viewport_width: innerWidth,
+    viewport_height: innerHeight,
+    touch_points: navigator.maxTouchPoints,
+    controls_fit: controlsFit,
+    errors: errorCount - checkErrorBaseline,
+    context_losses: contextLosses - checkContextBaseline,
+    interrupted,
+    stages: current.stages,
+  };
+  visible("#check-progress", false);
+  visible("#ending", false);
+  visible("#check-result", true);
+  $("#check-title").textContent = interrupted
+    ? "Проверка прервана"
+    : "Автопроверка завершена";
+  const allComplete =
+    current.stages.length === 3 && current.stages.every((s) => s.completed);
+  $("#check-summary").textContent = interrupted
+    ? "Приложение было свёрнуто или проверка остановлена. Для полного замера запусти её ещё раз и оставь экран открытым."
+    : `${allComplete ? "Пройдены три площадки." : "Часть сценариев не успела завершиться."} Элементы управления ${controlsFit ? "помещаются" : "требуют проверки"}. Ошибок графики: ${lastDeviceReport.context_losses}.`;
+  const stages = $("#check-stages");
+  stages.replaceChildren();
+  for (const stage of current.stages) {
+    const row = document.createElement("p");
+    row.textContent = `${LOCATIONS[stage.location].name}: ${stage.fps.toFixed(1)} FPS · p95 ${stage.p95_ms.toFixed(1)} мс · кадров >50 мс: ${stage.over_50_ms}${stage.completed ? "" : " · проход не завершён"}`;
+    stages.append(row);
+  }
+  const a = $<HTMLAnchorElement>("#check-download");
+  if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(
+    new Blob([JSON.stringify(lastDeviceReport, null, 2)], {
+      type: "application/json",
+    }),
+  );
+  await uploadDeviceReport();
+}
+$("#device-check").onclick = beginDeviceCheck;
+$("#cancel-check").onclick = () => void finishDeviceCheck(true);
+$("#retry-upload").onclick = () => void uploadDeviceReport();
+$("#close-check").onclick = () => {
+  visible("#check-result", false);
+  start();
+};
+$("#reload").onclick = () => location.reload();
 function beginShowcase() {
   start();
   autoplay = true;
@@ -321,7 +483,7 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = "new0-atmosphere-combo.mp4";
+    a.download = `new0-${world.location}-combat.mp4`;
     visible("#download", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
@@ -399,6 +561,10 @@ function frame(now: number) {
     frameNumber++;
   }
   world.render(paused ? 0 : dt);
+  if (deviceCheck && !paused) {
+    deviceCheck.update(raw * 1000, game.phase === "finished", world.resolution);
+    if (deviceCheck.done) void finishDeviceCheck(false);
+  }
   drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
   drawHUD();
   if (
@@ -442,6 +608,12 @@ function frame(now: number) {
   }
   if (now - uiTick > 150) {
     uiTick = now;
+    if (deviceCheck) {
+      measureControlFit();
+      $("#check-status").textContent =
+        `${Math.min(3, deviceCheck.index + 1)} / 3 · ${LOCATIONS[world.location].name} · ${Math.floor(deviceCheck.elapsed)} с`;
+      $("#check-performance").textContent = performanceText;
+    }
     if (recording && capture)
       $("#record").textContent =
         `Запись ${Math.floor(capture.frames / 60)} / 20 с`;
@@ -465,8 +637,10 @@ function frame(now: number) {
       toastValue = "";
     }
     if (
-      (game.phase === "lost" && game.player.time > 2) ||
-      game.phase === "finished"
+      !deviceCheck &&
+      $("#check-result").classList.contains("hidden") &&
+      ((game.phase === "lost" && game.player.time > 2) ||
+        game.phase === "finished")
     ) {
       visible("#ending", true);
       input.enabled = false;
@@ -497,6 +671,7 @@ function frame(now: number) {
 }
 
 async function boot() {
+  let connecting = true;
   try {
     const tg = window.Telegram?.WebApp?.initData
       ? window.Telegram.WebApp
@@ -509,15 +684,30 @@ async function boot() {
     tg?.onEvent?.("deactivated", () => {
       if (!paused && game.phase !== "intro") pause();
     });
-    await Promise.all([world.load(), api.connect(tg?.initData ?? "")]);
+    if (tg?.platform === "ios" || tg?.platform === "android") {
+      input.touch = true;
+      document.body.classList.add("is-touch");
+    }
+    $("#start").textContent = "Подключение к архиву…";
+    // Finish auth before starting large GLBs and texture decoding on the phone.
+    await api.connect(tg?.initData ?? "");
+    connecting = false;
+    $("#start").textContent = "Загрузка персонажей и мест…";
+    await world.load();
+    if (isLocation(requestedLocation)) chooseLocation(requestedLocation);
+    $<HTMLAnchorElement>(".wordmark").href = api.config.shop_url;
+    $<HTMLAnchorElement>(".shop-link").href = api.config.drop_url;
     loaded = true;
     $("#performance").title = world.device;
     $<HTMLButtonElement>("#start").disabled = false;
+    $<HTMLButtonElement>("#device-check").disabled = false;
     $("#start").textContent = "Войти в архив ↗";
     visible("#review", review && api.user.is_guest);
   } catch (error) {
     fatal(
-      error instanceof Error ? error.message : "Не удалось загрузить сцену",
+      connecting
+        ? `Не удалось завершить вход. ${error instanceof Error ? error.message : "Повтори подключение"}`
+        : "Не удалось загрузить 3D-сцену. Проверь соединение и нажми «Повторить загрузку»",
     );
   }
 }

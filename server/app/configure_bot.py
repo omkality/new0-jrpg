@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,16 +31,24 @@ def main():
 
     try:
         bot=call("getMe",{})
-        expected=int(os.getenv("TELEGRAM_BOT_ID","9210184678"))
-        if bot["id"] != expected or bot.get("username","").lower() != "new0_game":
+        expected=int(os.getenv("TELEGRAM_BOT_ID","0"))
+        expected_username=os.getenv("TELEGRAM_BOT_USERNAME", "").lstrip("@").lower()
+        if bot["id"] != expected or (expected_username and bot.get("username","").lower() != expected_username):
             print("Токен принадлежит другому боту. Настройки не изменены.",file=sys.stderr)
             return 1
         call("setChatMenuButton",{"menu_button":{"type":"web_app","text":"Играть","web_app":{"url":args.url}}})
-        menu=call("getChatMenuButton",{})
-        if menu.get("web_app",{}).get("url") != args.url:
+        verified=False
+        for attempt in range(5):
+            menu=call("getChatMenuButton",{})
+            if menu.get("web_app",{}).get("url") == args.url:
+                verified=True
+                break
+            if attempt < 4:
+                time.sleep(0.4)
+        if not verified:
             print("Не удалось подтвердить адрес кнопки.",file=sys.stderr)
             return 1
-        print("Кнопка «Играть» для @new0_game настроена и проверена.")
+        print(f"Кнопка «Играть» для @{bot['username']} настроена и проверена.")
         return 0
     except urllib.error.HTTPError as exc:
         # Never print exception URLs: Telegram's URL contains the token.

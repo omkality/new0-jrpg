@@ -27,11 +27,16 @@ export interface User {
   is_guest: boolean;
 }
 export interface Config {
+  bot_username: string;
+  shop_url: string;
+  drop_url: string;
   version: string;
   title: string;
   allow_guest: boolean;
   competition_open: boolean;
   attempt_limit: number;
+  request_timeout_ms?: number;
+  bootstrap_attempts?: number;
 }
 export interface Secret {
   title: string;
@@ -55,11 +60,10 @@ export interface Version {
 }
 
 export class APIError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
+  status: number;
+  constructor(message: string, status: number) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -67,42 +71,94 @@ export class API {
   private token = "";
   user!: User;
   config!: Config;
+  private network: { timeoutMs: number; attempts: number; delayMs: number };
+  constructor(
+    options: { timeoutMs?: number; attempts?: number; delayMs?: number } = {},
+  ) {
+    this.network = {
+      timeoutMs: options.timeoutMs ?? 30_000,
+      attempts: options.attempts ?? 3,
+      delayMs: options.delayMs ?? 500,
+    };
+  }
 
   async request<T>(path: string, body?: unknown, method?: string): Promise<T> {
-    const response = await fetch(`/api${path}`, {
-      method: method ?? (body === undefined ? "GET" : "POST"),
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(12000),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail =
-        typeof result.detail === "string"
-          ? result.detail
-          : "Не удалось выполнить действие. Попробуй ещё раз";
-      throw new APIError(detail, response.status);
+    try {
+      const response = await fetch(`/api${path}`, {
+        method: method ?? (body === undefined ? "GET" : "POST"),
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(
+          this.config?.request_timeout_ms ?? this.network.timeoutMs,
+        ),
+      });
+      let result: Record<string, unknown>;
+      try {
+        result = await response.json();
+      } catch {
+        if (response.ok)
+          throw new APIError(
+            "Ответ не удалось загрузить полностью. Повтори подключение",
+            0,
+          );
+        result = {};
+      }
+      if (!response.ok) {
+        const detail =
+          typeof result.detail === "string"
+            ? result.detail
+            : "Не удалось выполнить действие. Попробуй ещё раз";
+        throw new APIError(detail, response.status);
+      }
+      return result as T;
+    } catch (error) {
+      if (error instanceof APIError) throw error;
+      throw new APIError(
+        "Связь прервалась или ответ занял слишком долго. Повтори подключение",
+        0,
+      );
     }
-    return result as T;
+  }
+  private async bootstrap<T>(operation: () => Promise<T>): Promise<T> {
+    const attempts = this.config?.bootstrap_attempts ?? this.network.attempts;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (
+          !(error instanceof APIError) ||
+          (error.status !== 0 && error.status < 500 && error.status !== 429) ||
+          attempt + 1 === attempts
+        )
+          throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.network.delayMs * (attempt + 1)),
+        );
+      }
+    }
+    throw new APIError("Подключение не удалось", 0);
   }
 
   async connect(initData: string): Promise<void> {
-    this.config = await this.request<Config>("/config");
+    this.config = await this.bootstrap(() => this.request<Config>("/config"));
     // Actual Telegram launches must authenticate as Telegram. Never silently downgrade.
     if (initData) {
-      const auth = await this.request<{ token: string; user: User }>(
-        "/auth/telegram",
-        { init_data: initData },
+      const auth = await this.bootstrap(() =>
+        this.request<{ token: string; user: User }>("/auth/telegram", {
+          init_data: initData,
+        }),
       );
       this.token = auth.token;
       this.user = auth.user;
       return;
     }
     if (!this.config.allow_guest)
-      throw new Error("Открой игру кнопкой в @new0_game в Telegram");
+      throw new Error(
+        `Открой игру кнопкой ${this.config.bot_username ? "в @" + this.config.bot_username : "бота"} в Telegram`,
+      );
     try {
       this.token = sessionStorage.getItem("new0-guest-session") ?? "";
       if (this.token) {
@@ -112,10 +168,8 @@ export class API {
     } catch {
       this.token = "";
     }
-    const auth = await this.request<{ token: string; user: User }>(
-      "/auth/guest",
-      {},
-      "POST",
+    const auth = await this.bootstrap(() =>
+      this.request<{ token: string; user: User }>("/auth/guest", {}, "POST"),
     );
     this.token = auth.token;
     this.user = auth.user;

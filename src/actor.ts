@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { clone } from "three/addons/utils/SkeletonUtils.js";
-import { ATTACKS, type Fighter, type EnemyKind } from "./game";
+import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
+import { assetUrl } from "./assets";
 
 type Kind = "pilgrim" | EnemyKind;
 interface RigState {
@@ -18,7 +19,7 @@ const cache = new Map<string, Promise<GLTF>>();
 const load = (url: string) => {
   let p = cache.get(url);
   if (!p) {
-    p = new GLTFLoader().loadAsync(url);
+    p = new GLTFLoader().loadAsync(assetUrl(url));
     cache.set(url, p);
   }
   return p;
@@ -163,8 +164,18 @@ export class Actor {
     );
     action.clampWhenFinished = once;
     action.play();
-    s.action?.fadeOut(once ? 0.06 : 0.15);
-    action.fadeIn(once ? 0.06 : 0.15);
+    const linked = s.current.startsWith("Attack") && name.startsWith("Attack");
+    const fade = linked
+      ? 0.09
+      : name.startsWith("Hit")
+        ? 0.055
+        : name === "Death"
+          ? 0.16
+          : once
+            ? 0.09
+            : 0.18;
+    s.action?.fadeOut(fade);
+    action.fadeIn(fade);
     s.action = action;
     s.current = name;
   }
@@ -222,7 +233,13 @@ export class Actor {
     const action = s.action!;
     action.paused = false;
     if (mode === "windup") {
-      action.time = Math.min(0.2, ATTACKS[attackIndex - 1].contact * 0.72);
+      const progress = THREE.MathUtils.clamp(
+        f.time / (ENEMIES[f.kind as EnemyKind].windup * 0.9),
+        0,
+        1,
+      );
+      const ease = progress * progress * (3 - 2 * progress);
+      action.time = ATTACKS[attackIndex - 1].contact * 0.72 * ease;
       action.paused = true;
     } else if (
       mode === "attack" ||

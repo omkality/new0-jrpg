@@ -1,7 +1,7 @@
 limit_req_zone $binary_remote_addr zone=game_api:10m rate=10r/s;
 
 server {
-    listen 80;
+    listen ${WEB_PORT};
     server_tokens off;
     root /usr/share/nginx/html;
     index index.html;
@@ -16,7 +16,7 @@ server {
     location /api/ {
         limit_req zone=game_api burst=30 nodelay;
         limit_req_status 429;
-        proxy_pass http://api:8000;
+        proxy_pass http://${API_UPSTREAM};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 15s;

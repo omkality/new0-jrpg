@@ -4,10 +4,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+# Static HTTP client, matching the small healthcheck used by domofomka.
+COPY --from=busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478 /bin/busybox /usr/local/bin/wget
 RUN useradd --uid 10001 --create-home game && mkdir /data && chown game:game /data
 USER game
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "app.main:app", "--no-access-log"]
 
 FROM base AS test
 USER root

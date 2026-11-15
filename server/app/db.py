@@ -57,6 +57,11 @@ class Database:
                     payload TEXT NOT NULL, response TEXT NOT NULL,
                     PRIMARY KEY(run_id, request_id)
                 );
+                CREATE TABLE IF NOT EXISTS device_reports (
+                    id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+                    created_at REAL NOT NULL, report TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS device_reports_owner ON device_reports(user_id, created_at);
             """)
         s = self.settings
         with self.connect(write=True) as c:

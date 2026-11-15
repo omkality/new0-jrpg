@@ -4,8 +4,8 @@
   `master` holds tested milestones. Never force-push or deploy automatically.
 - Track concrete open work in GitHub Issues with `priority:P0`, `priority:P1`, or `priority:P2`.
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
-- Current scope is a one-week prototype: one Three.js room, desktop/touch movement,
-  casual real-time action combat, short in-world tutorial, two secrets, Docker Compose.
+- Current scope is a one-week prototype: three small visual Three.js stages,
+  mobile-first Telegram play, casual real-time combat, tutorial, two secrets, Compose.
   The user explicitly rejected turn-based combat and action-selection menus.
 - The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
@@ -14,9 +14,16 @@
   lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.
 - One, two and three consecutive attacks use distinct clips. Block cannot cancel an
   active chain or recovery. Preserve varied dodge/hit reactions and grounded death.
+- Keep gameplay timings aligned with public/assets/motion/contract.json. Linked attacks
+  continue at the authored follow-through timestamps instead of resetting to Guard.
+- Player documentation describes phone/touch controls only. Keep technology badges
+  generated from project files with scripts/update_badges.py and verified by CI.
+- The on-device autocheck runs at normal wall-clock speed, records RAF intervals including
+  long frames and interruptions, and stores bounded owner-only demo reports. Never use
+  these client-reported diagnostics as competition scores or evidence of input security.
 - Iterate on the playable demo first. Provide a short real gameplay GIF/video with a
   focused visual/interaction change, then incorporate feedback before adding more systems.
-- Target at least 60 FPS on desktop and mobile. Never hard-cap touch rendering at 30 FPS.
+- Target at least 60 FPS on phones. Never hard-cap touch rendering at 30 FPS.
   Measure actual frame times. Do not present viewport resizing as a physical-phone benchmark.
 - Keep stone, floor and character silhouettes readable. Retro art comes from materials,
   lighting, fog and proportions, not crushed blacks or primitive rigid-part characters.
@@ -36,6 +43,10 @@
 - Do not commit bot tokens, initData, sessions, `.env`, databases, private logs, or `work/`.
   Only public bot IDs belong in examples. Bot token handling is API-side only.
 - Keep runtime assets local and retain their source and license. Do not use game-ripped assets.
+- Public asset URLs include a build-time content hash. Preserve it after replacing models.
+- Operational ports, bot identity, links and TTLs are runtime configuration. Healthchecks
+  use wget, with the same configurable port as the service. Keep preview projects explicit
+  and isolated even when COMPOSE_PROJECT_NAME is set. Preserve all persisted player data.
 - Before completion or a code commit, run `npm run build` and the relevant Dockerized tests.
   Verify the actual browser flow after UI changes. State limits of device/Telegram verification.
 - Use isolated temporary databases for automated tests. Do not wipe persisted game data.

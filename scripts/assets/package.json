@@ -1,0 +1,15 @@
+{
+  "name": "new0-asset-authoring",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node author-combat.mjs && node retarget-combat.mjs && node validate-combat.mjs",
+    "check": "node validate-combat.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "three": "0.187.0"
+  }
+}

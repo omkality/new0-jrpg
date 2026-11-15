@@ -4,15 +4,18 @@ import json
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from uuid import uuid4
 
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--base',default='http://127.0.0.1:8086')
+    parser.add_argument('--base',required=True,help='Loopback URL of the isolated smoke Compose project')
     args=parser.parse_args()
-    if args.base not in {'http://localhost:8086','http://127.0.0.1:8086'}:
-        parser.error('Smoke test is limited to the isolated local port 8086')
+    base=urllib.parse.urlparse(args.base)
+    if base.scheme != 'http' or base.hostname not in {'localhost','127.0.0.1','::1'} or base.username or base.password or base.path not in {'','/'} or base.query or base.fragment:
+        parser.error('Smoke test is limited to an isolated loopback HTTP URL')
+    args.base=args.base.rstrip('/')
     token=''
 
     def call(path,body=None,expected=200):

@@ -58,28 +58,31 @@ export const ENEMIES = {
 } as const;
 export const ATTACKS = [
   {
-    duration: 0.58,
-    contact: 0.235,
+    duration: 0.74,
+    contact: 0.3,
+    link: 0.52,
     damage: 16,
     cost: 16,
     lunge: 1.5,
-    cancel: 0.3,
+    cancel: 0.46,
   },
   {
-    duration: 0.55,
-    contact: 0.22,
+    duration: 0.7,
+    contact: 0.27,
+    link: 0.51,
     damage: 18,
     cost: 18,
     lunge: 1.8,
-    cancel: 0.43,
+    cancel: 0.47,
   },
   {
-    duration: 0.85,
-    contact: 0.34,
+    duration: 1.0,
+    contact: 0.42,
+    link: 1.0,
     damage: 28,
     cost: 24,
     lunge: 2.3,
-    cancel: 0.7,
+    cancel: 0.82,
   },
 ] as const;
 export interface MoveInput {
@@ -135,6 +138,7 @@ export class CombatGame {
   secrets = new Set<string>();
   events: GameEvent[] = [];
   lock = false;
+  hitPause = 0;
   private vx = 0;
   private vz = 0;
   private dodgeX = 0;
@@ -167,6 +171,7 @@ export class CombatGame {
     this.swingHit = this.enemyHit = false;
     this.staminaDelay = this.distanceWalked = this.deathTime = 0;
     this.lock = false;
+    this.hitPause = 0;
   }
   get distance() {
     return length(this.enemy.x - this.player.x, this.enemy.z - this.player.z);
@@ -273,11 +278,15 @@ export class CombatGame {
       p.stamina -= 12;
       amount = Math.ceil(amount * 0.15);
       p.recoil = 0.32;
+      this.hitPause = Math.max(this.hitPause, 0.018);
       this.emit("block");
     } else {
       p.reaction = (p.reaction + 1) % 3;
       p.combo = p.chain = 0;
       this.set(p, "hit");
+      this.vx += Math.sin(this.enemy.yaw) * 1.5;
+      this.vz += Math.cos(this.enemy.yaw) * 1.5;
+      this.hitPause = Math.max(this.hitPause, 0.04);
       this.emit("hurt");
     }
     p.hp = Math.max(0, p.hp - amount);
@@ -312,8 +321,12 @@ export class CombatGame {
       this.phase === "won" &&
       this.player.z < -6.1 &&
       Math.abs(this.player.x) < 2
-    )
+    ) {
       this.phase = "finished";
+      this.set(this.player, "idle");
+      this.player.speed = 0;
+      this.vx = this.vz = 0;
+    }
   }
   get nearby() {
     for (const [id, x, z] of [
@@ -337,11 +350,17 @@ export class CombatGame {
   update(dt: number, input: MoveInput) {
     if (this.phase === "intro" || this.phase === "finished") return;
     this.elapsed += dt;
+    // A very short pose hold gives contact weight while rendering stays continuous.
+    const held = Math.min(dt, this.hitPause);
+    this.hitPause -= held;
+    dt -= held;
+    if (dt <= 0) return;
     const p = this.player,
       e = this.enemy;
     p.time += dt;
     e.time += dt;
     p.recoil = Math.max(0, p.recoil - dt);
+    e.recoil = Math.max(0, e.recoil - dt);
     if (p.hp <= 0) {
       this.deathTime += dt;
       e.speed = 0;
@@ -378,6 +397,11 @@ export class CombatGame {
         if (e.hp > 0 && this.distance < 2.05 && Math.abs(angle) < 1.1) {
           e.hp = Math.max(0, e.hp - attack.damage);
           e.reaction = (e.reaction + 1) % 3;
+          e.recoil = p.combo === 3 ? 0.15 : 0.11;
+          this.hitPause = Math.max(
+            this.hitPause,
+            p.combo === 3 ? 0.055 : 0.032,
+          );
           this.emit("hit", e);
           if (e.hp === 0) {
             this.set(e, "dead");
@@ -388,16 +412,17 @@ export class CombatGame {
           }
         }
       }
-      if (p.time >= attack.duration) {
-        const continued =
-          p.combo < 3 &&
-          p.chain > p.combo &&
-          e.hp > 0 &&
-          this.beginAttack(p.combo + 1);
-        if (!continued) {
-          this.set(p, "idle");
-          p.combo = p.chain = 0;
-        }
+      if (
+        p.time >= attack.link &&
+        p.combo < 3 &&
+        p.chain > p.combo &&
+        e.hp > 0
+      ) {
+        // Linked clips share this follow-through pose. Solo swings keep their recovery.
+        if (!this.beginAttack(p.combo + 1)) p.chain = p.combo;
+      } else if (p.time >= attack.duration) {
+        this.set(p, "idle");
+        p.combo = p.chain = 0;
       }
     }
     if (["idle", "move", "guard"].includes(p.mode)) {
@@ -460,6 +485,12 @@ export class CombatGame {
         (1 - Math.exp(-dt * 7));
     e.speed = 0;
     if (e.mode === "hit") {
+      if (e.recoil > 0)
+        this.move(
+          e,
+          Math.sin(p.yaw) * dt * e.recoil * 12,
+          Math.cos(p.yaw) * dt * e.recoil * 12,
+        );
       if (e.time > [0.4, 0.42, 0.46][e.reaction]) this.set(e, "recover");
       return;
     }
