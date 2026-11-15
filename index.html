@@ -12,7 +12,8 @@
   </head>
   <body>
     <div id="app">
-      <canvas id="world" aria-label="Трёхмерный зал архива"></canvas>
+      <canvas id="world" tabindex="0" aria-label="Трёхмерный зал архива"></canvas>
+      <canvas id="atmosphere" aria-hidden="true"></canvas>
       <canvas id="hud" aria-hidden="true"></canvas>
       <header>
         <a
@@ -36,11 +37,19 @@
             выход.
           </p>
           <button id="start" class="primary" disabled>Подготовка сцены…</button>
+          <label class="encounter-label"
+            >Встреча
+            <select id="encounter" aria-label="Противник">
+              <option value="gaoler">Носильщик</option>
+              <option value="effigy">Пустая кукла</option>
+              <option value="watcher">Смотритель</option>
+            </select></label
+          >
           <p class="intro-controls">
             WASD · движение &nbsp; Мышь · обзор<br />Клик · удар &nbsp; Пробел ·
             уклонение
           </p>
-          <small>На телефоне: стик, обзор пальцем и две кнопки.</small>
+          <small>На телефоне: стик, обзор пальцем, удар, шаг и блок.</small>
         </div>
         <span class="demo-note"
           >Локальная демка · без зачётных результатов</span
@@ -51,6 +60,9 @@
           <div id="joystick-knob"></div>
         </div>
         <div class="touch-actions">
+          <button id="guard" aria-label="Блокировать" aria-pressed="false">
+            <span>◇</span><small>БЛОК</small>
+          </button>
           <button id="dodge" aria-label="Уклониться">
             <span>↝</span><small>ШАГ</small></button
           ><button id="attack" aria-label="Атаковать">
@@ -81,20 +93,20 @@
               min="0.8"
               max="1.8"
               step="0.05"
-              value="1.1" /></label
+              value="1.0" /></label
           ><button id="resume" class="primary">Продолжить</button
           ><button id="restart">Начать заново</button>
           <details>
             <summary>Материалы и авторы</summary>
             <p>
-              Animated Knight by
+              Персонажи и базовые движения
               <a
-                href="https://patch.gg/create/toolbox/assets/anymove:knight"
+                href="https://patch.gg/create/toolbox"
                 target="_blank"
                 rel="noopener"
                 >Patch</a
               >, CC0. Исходная модель и базовые движения созданы с помощью AI.
-              Подготовлены для демки, добавлены боевые позы.
+              Для демки созданы одеяния, маски и отдельные боевые движения.
             </p>
             <p>
               Текстуры
@@ -131,6 +143,11 @@
       </section>
       <div id="toast" role="status" class="hidden"></div>
       <div id="review" class="hidden">
+        <select id="review-enemy" aria-label="Показать противника">
+          <option value="gaoler">Носильщик</option>
+          <option value="effigy">Пустая кукла</option>
+          <option value="watcher">Смотритель</option>
+        </select>
         <button id="showcase">Автопоказ</button
         ><button id="record">Записать 20 секунд</button
         ><a id="download" class="hidden" download="new0-realtime-demo.webm"

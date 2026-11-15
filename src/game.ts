@@ -19,7 +19,69 @@ export interface Fighter {
   time: number;
   speed: number;
   combo: number;
+  chain: number;
+  reaction: number;
+  recoil: number;
+  dodgeSide: "Left" | "Right" | "Back" | "Forward";
+  kind: "pilgrim" | EnemyKind;
+  maxHp: number;
 }
+export type EnemyKind = "gaoler" | "effigy" | "watcher";
+export const ENEMIES = {
+  gaoler: {
+    name: "НОСИЛЬЩИК",
+    hp: 112,
+    speed: 1.05,
+    reach: 2.8,
+    windup: 1.1,
+    recover: 1.25,
+    damage: 14,
+  },
+  effigy: {
+    name: "ПУСТАЯ КУКЛА",
+    hp: 80,
+    speed: 1.8,
+    reach: 2.05,
+    windup: 0.72,
+    recover: 0.9,
+    damage: 9,
+  },
+  watcher: {
+    name: "СМОТРИТЕЛЬ",
+    hp: 94,
+    speed: 1.35,
+    reach: 2.5,
+    windup: 0.92,
+    recover: 1.15,
+    damage: 11,
+  },
+} as const;
+export const ATTACKS = [
+  {
+    duration: 0.58,
+    contact: 0.235,
+    damage: 16,
+    cost: 16,
+    lunge: 1.5,
+    cancel: 0.3,
+  },
+  {
+    duration: 0.55,
+    contact: 0.22,
+    damage: 18,
+    cost: 18,
+    lunge: 1.8,
+    cancel: 0.43,
+  },
+  {
+    duration: 0.85,
+    contact: 0.34,
+    damage: 28,
+    cost: 24,
+    lunge: 2.3,
+    cancel: 0.7,
+  },
+] as const;
 export interface MoveInput {
   x: number;
   z: number;
@@ -50,11 +112,23 @@ const fighter = (x: number, z: number): Fighter => ({
   time: 0,
   speed: 0,
   combo: 0,
+  chain: 0,
+  reaction: 0,
+  recoil: 0,
+  dodgeSide: "Back",
+  kind: "pilgrim",
+  maxHp: 100,
 });
 
 export class CombatGame {
   player = fighter(0, 5);
-  enemy = { ...fighter(0, -3.8), hp: 80, yaw: 0 };
+  enemy = {
+    ...fighter(0, -3.8),
+    hp: 112,
+    maxHp: 112,
+    yaw: 0,
+    kind: "gaoler" as EnemyKind,
+  };
   phase: "intro" | "playing" | "won" | "lost" | "finished" = "intro";
   elapsed = 0;
   tutorial = 0;
@@ -67,7 +141,6 @@ export class CombatGame {
   private dodgeZ = -1;
   private swingHit = false;
   private enemyHit = false;
-  private attackBuffered = false;
   private dodgeRequest: { x: number; z: number; remaining: number } | null =
     null;
   private staminaDelay = 0;
@@ -75,9 +148,15 @@ export class CombatGame {
   private deathTime = 0;
   obstacles: { x: number; z: number; hx: number; hz: number }[] = [];
 
-  start() {
+  start(kind: EnemyKind = "gaoler") {
     this.player = fighter(0, 5);
-    this.enemy = { ...fighter(0, -3.8), hp: 80, yaw: 0 };
+    this.enemy = {
+      ...fighter(0, -3.8),
+      hp: ENEMIES[kind].hp,
+      maxHp: ENEMIES[kind].hp,
+      yaw: 0,
+      kind,
+    };
     this.phase = "playing";
     this.elapsed = 0;
     this.tutorial = 0;
@@ -85,7 +164,7 @@ export class CombatGame {
     this.events = [];
     this.vx = this.vz = 0;
     this.dodgeRequest = null;
-    this.swingHit = this.enemyHit = this.attackBuffered = false;
+    this.swingHit = this.enemyHit = false;
     this.staminaDelay = this.distanceWalked = this.deathTime = 0;
     this.lock = false;
   }
@@ -114,7 +193,8 @@ export class CombatGame {
     const p = this.player;
     if (this.phase !== "playing" || p.hp <= 0) return;
     if (p.mode === "attack") {
-      if (p.time > 0.28) this.attackBuffered = true;
+      // Consecutive taps request at most a double/triple chain, never restart a swing.
+      if (p.time >= 0.08) p.chain = Math.min(3, p.chain + 1);
       return;
     }
     if (
@@ -123,15 +203,23 @@ export class CombatGame {
       p.stamina < 16
     )
       return;
-    p.stamina -= 16;
+    this.beginAttack(1);
+    if (this.tutorial === 1) this.tutorial = 2;
+  }
+  private beginAttack(stage: number) {
+    const p = this.player,
+      a = ATTACKS[stage - 1];
+    if (p.stamina < a.cost) return false;
+    p.stamina -= a.cost;
     this.staminaDelay = 0.65;
     this.swingHit = false;
     if (this.distance < 4) p.yaw = this.enemyAngle;
-    p.combo = (p.combo + 1) % 2;
+    p.combo = stage;
+    if (stage === 1) p.chain = 1;
     this.set(p, "attack");
     p.time = 0;
     this.emit("swing");
-    if (this.tutorial === 1) this.tutorial = 2;
+    return true;
   }
   dodge(move: { x: number; z: number }) {
     const p = this.player;
@@ -142,8 +230,11 @@ export class CombatGame {
       p.stamina < 22
     )
       return;
-    if ((p.mode === "attack" && p.time < 0.3) || p.mode === "hit") {
-      this.dodgeRequest = { ...move, remaining: 0.45 };
+    if (
+      (p.mode === "attack" && p.time < ATTACKS[p.combo - 1].cancel) ||
+      p.mode === "hit"
+    ) {
+      this.dodgeRequest = { ...move, remaining: 0.8 };
       return;
     }
     let x = move.x,
@@ -156,10 +247,21 @@ export class CombatGame {
     }
     this.dodgeX = x / l;
     this.dodgeZ = z / l;
+    const side = this.dodgeX * Math.cos(p.yaw) - this.dodgeZ * Math.sin(p.yaw);
+    const forward =
+      this.dodgeX * Math.sin(p.yaw) + this.dodgeZ * Math.cos(p.yaw);
+    p.dodgeSide =
+      Math.abs(side) > 0.65
+        ? side > 0
+          ? "Right"
+          : "Left"
+        : forward > 0
+          ? "Forward"
+          : "Back";
     p.stamina -= 22;
     this.staminaDelay = 0.7;
     this.set(p, "dodge");
-    this.attackBuffered = false;
+    p.combo = p.chain = 0;
     this.emit("dodge");
     if (this.tutorial >= 1 && this.tutorial < 3) this.tutorial = 3;
   }
@@ -167,11 +269,14 @@ export class CombatGame {
     const p = this.player;
     if (p.hp <= 0 || this.phase !== "playing") return false;
     if (p.mode === "dodge" && p.time >= 0.05 && p.time <= 0.38) return false;
-    if (p.mode === "guard" && p.stamina > 10) {
+    if (p.mode === "guard" && p.stamina >= 12) {
       p.stamina -= 12;
       amount = Math.ceil(amount * 0.15);
+      p.recoil = 0.32;
       this.emit("block");
     } else {
+      p.reaction = (p.reaction + 1) % 3;
+      p.combo = p.chain = 0;
       this.set(p, "hit");
       this.emit("hurt");
     }
@@ -236,6 +341,7 @@ export class CombatGame {
       e = this.enemy;
     p.time += dt;
     e.time += dt;
+    p.recoil = Math.max(0, p.recoil - dt);
     if (p.hp <= 0) {
       this.deathTime += dt;
       e.speed = 0;
@@ -245,12 +351,13 @@ export class CombatGame {
     this.staminaDelay -= dt;
     if (this.staminaDelay < 0 && p.mode !== "guard")
       p.stamina = clamp(p.stamina + dt * 29, 0, 100);
-    if (p.mode === "hit" && p.time > 0.27) this.set(p, "idle");
+    if (p.mode === "hit" && p.time > [0.4, 0.42, 0.46][p.reaction])
+      this.set(p, "idle");
     if (this.dodgeRequest) {
       this.dodgeRequest.remaining -= dt;
       if (this.dodgeRequest.remaining <= 0) this.dodgeRequest = null;
       else if (
-        (p.mode === "attack" && p.time >= 0.3) ||
+        (p.mode === "attack" && p.time >= ATTACKS[p.combo - 1].cancel) ||
         p.mode === "idle" ||
         p.mode === "move"
       ) {
@@ -261,14 +368,16 @@ export class CombatGame {
     }
     if (p.mode === "dodge" && p.time > 0.52) this.set(p, "idle");
     if (p.mode === "attack") {
-      if (!this.swingHit && p.time >= 0.21) {
+      const attack = ATTACKS[p.combo - 1];
+      if (!this.swingHit && p.time >= attack.contact) {
         this.swingHit = true;
         const angle = Math.atan2(
           Math.sin(this.enemyAngle - p.yaw),
           Math.cos(this.enemyAngle - p.yaw),
         );
         if (e.hp > 0 && this.distance < 2.05 && Math.abs(angle) < 1.1) {
-          e.hp = Math.max(0, e.hp - 16);
+          e.hp = Math.max(0, e.hp - attack.damage);
+          e.reaction = (e.reaction + 1) % 3;
           this.emit("hit", e);
           if (e.hp === 0) {
             this.set(e, "dead");
@@ -279,11 +388,15 @@ export class CombatGame {
           }
         }
       }
-      if (p.time > 0.64) {
-        this.set(p, "idle");
-        if (this.attackBuffered) {
-          this.attackBuffered = false;
-          this.attack();
+      if (p.time >= attack.duration) {
+        const continued =
+          p.combo < 3 &&
+          p.chain > p.combo &&
+          e.hp > 0 &&
+          this.beginAttack(p.combo + 1);
+        if (!continued) {
+          this.set(p, "idle");
+          p.combo = p.chain = 0;
         }
       }
     }
@@ -309,9 +422,13 @@ export class CombatGame {
       dx = this.dodgeX * (3.4 + curve * 3.8);
       dz = this.dodgeZ * (3.4 + curve * 3.8);
     }
-    if (p.mode === "attack" && p.time > 0.12 && p.time < 0.3) {
-      dx += Math.sin(p.yaw) * 1.9;
-      dz += Math.cos(p.yaw) * 1.9;
+    if (
+      p.mode === "attack" &&
+      p.time > 0.1 &&
+      p.time < ATTACKS[p.combo - 1].contact + 0.07
+    ) {
+      dx += Math.sin(p.yaw) * ATTACKS[p.combo - 1].lunge;
+      dz += Math.cos(p.yaw) * ATTACKS[p.combo - 1].lunge;
     }
     const a = 1 - Math.exp(-dt * (p.mode === "dodge" ? 28 : 13));
     this.vx += (dx - this.vx) * a;
@@ -335,6 +452,7 @@ export class CombatGame {
     const e = this.enemy,
       p = this.player,
       d = this.distance;
+    const profile = ENEMIES[e.kind as EnemyKind];
     const angle = Math.atan2(p.x - e.x, p.z - e.z);
     if (e.mode !== "attack")
       e.yaw +=
@@ -342,11 +460,11 @@ export class CombatGame {
         (1 - Math.exp(-dt * 7));
     e.speed = 0;
     if (e.mode === "hit") {
-      if (e.time > 0.3) this.set(e, "recover");
+      if (e.time > [0.4, 0.42, 0.46][e.reaction]) this.set(e, "recover");
       return;
     }
     if (e.mode === "windup") {
-      if (e.time > 1.0) {
+      if (e.time > profile.windup) {
         this.set(e, "attack");
         this.enemyHit = false;
       }
@@ -357,29 +475,39 @@ export class CombatGame {
         this.move(e, Math.sin(e.yaw) * dt * 2.2, Math.cos(e.yaw) * dt * 2.2);
         e.speed = 2.2;
       }
-      if (e.time > 0.22 && !this.enemyHit) {
+      const clip = ATTACKS[Math.max(0, e.combo - 1)],
+        windupPose = clip.contact * 0.72;
+      const contactTime =
+        ((clip.contact - windupPose) / (clip.duration - windupPose)) * 0.68;
+      if (e.time > contactTime && !this.enemyHit) {
         this.enemyHit = true;
         const diff = Math.atan2(
           Math.sin(angle - e.yaw),
           Math.cos(angle - e.yaw),
         );
-        if (d < 2.8 && Math.abs(diff) < 1.15) this.damagePlayer(12);
+        if (d < profile.reach && Math.abs(diff) < 1.15)
+          this.damagePlayer(profile.damage);
       }
       if (e.time > 0.68) this.set(e, "recover");
       return;
     }
     if (e.mode === "recover") {
-      if (e.time > 1.35) this.set(e, "idle");
+      if (e.time > profile.recover) this.set(e, "idle");
       return;
     }
-    if (d < 2.9) {
+    if (d < profile.reach + 0.1) {
+      e.combo = (e.combo % 3) + 1;
       this.set(e, "windup");
       return;
     }
     if (d < 5.8) {
       this.set(e, "move");
-      e.speed = 1.35;
-      this.move(e, Math.sin(e.yaw) * dt * 1.35, Math.cos(e.yaw) * dt * 1.35);
+      e.speed = profile.speed;
+      this.move(
+        e,
+        Math.sin(e.yaw) * dt * e.speed,
+        Math.cos(e.yaw) * dt * e.speed,
+      );
     } else this.set(e, "idle");
   }
   private move(f: Fighter, dx: number, dz: number) {
@@ -397,9 +525,10 @@ export class CombatGame {
       const ox = f.x - other.x,
         oz = f.z - other.z,
         d = length(ox, oz);
-      if (d > 0 && d < 0.87) {
-        f.x = other.x + (ox / d) * 0.87;
-        f.z = other.z + (oz / d) * 0.87;
+      const separation = this.enemy.kind === "gaoler" ? 1.1 : 0.82;
+      if (d > 0 && d < separation) {
+        f.x = other.x + (ox / d) * separation;
+        f.z = other.z + (oz / d) * separation;
       }
     }
   }

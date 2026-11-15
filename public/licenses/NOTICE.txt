@@ -1,0 +1,12 @@
+Mediabunny 1.66.0
+Copyright (c) 2026-present, Vanilagy and contributors
+License: Mozilla Public License 2.0 (MPL-2.0)
+Unmodified npm library used by the optional review video recorder.
+
+Corresponding source code and license are available at:
+https://www.npmjs.com/package/mediabunny/v/1.66.0
+https://github.com/Vanilagy/mediabunny
+https://mediabunny.dev/
+
+The complete MPL-2.0 text is supplied alongside this notice as
+mediabunny-MPL-2.0.txt. No Mediabunny source files were modified.

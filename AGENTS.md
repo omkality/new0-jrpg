@@ -9,6 +9,11 @@
   The user explicitly rejected turn-based combat and action-selection menus.
 - The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
+- Latest art direction: dim dark fantasy, weak ambient fill, localized shimmering light
+  through dark depth fog, subtle monochrome grain and clean UI. Avoid uniform bright
+  lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.
+- One, two and three consecutive attacks use distinct clips. Block cannot cancel an
+  active chain or recovery. Preserve varied dodge/hit reactions and grounded death.
 - Iterate on the playable demo first. Provide a short real gameplay GIF/video with a
   focused visual/interaction change, then incorporate feedback before adding more systems.
 - Target at least 60 FPS on desktop and mobile. Never hard-cap touch rendering at 30 FPS.
@@ -16,8 +21,10 @@
 - Keep stone, floor and character silhouettes readable. Retro art comes from materials,
   lighting, fog and proportions, not crushed blacks or primitive rigid-part characters.
   Use skinned locomotion, smooth transitions and a grounded death pose without shrinking.
-- Capture actual gameplay video at 60 FPS using the in-app recorder, then prefer RTX 4070 Ti
-  SUPER H.264 NVENC for export. A low-FPS GIF is only an optional preview.
+- Capture actual gameplay at 60 FPS with the on-demand WebCodecs recorder, then prefer
+  RTX 4070 Ti SUPER H.264 NVENC for export. Capture advances simulation once per
+  accepted frame and respects encoder backpressure. Do not treat this as a realtime
+  FPS benchmark or hide dropped frames by merely relabelling a video as 60 FPS.
 - Keep all prize-relevant rules and score calculation on the Python API. Validate Telegram
   initData before trusting identity. Never accept a client-supplied user ID, score, HP or win flag.
 - The current real-time vertical slice is local and non-competitive. It uses the existing API

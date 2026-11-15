@@ -3,9 +3,11 @@
 ## Current scene
 
 The current scene uses [Goblinatron PSX Dungeon textures](dungeon/SOURCES.md), CC BY 4.0.
-The room geometry, cloth texture, humanoid figures and their animations are original
-prototype code. The Kenney files below are retained from the first iteration and are
-not loaded by the current scene.
+It uses the [new cast](cast/SOURCES.md), based on Patch CC0 woman/ogre assets with
+disclosed AI provenance and original skinned garments/masks, plus [authored combat
+motion variants](motion/SOURCES.md) retargeted to their rigs. Room geometry, weapons
+and temporary synthesized audio are original prototype work. The Kenney and knight
+files are retained from earlier iterations and are not loaded by the current scene.
 
 ## Kenney Graveyard Kit 5.0
 

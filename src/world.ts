@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Actor } from "./actor";
-import { CombatGame, type GameEvent } from "./game";
+import { CombatGame, ATTACKS, type GameEvent } from "./game";
 
 export class World {
   renderer: THREE.WebGLRenderer;
@@ -15,6 +15,9 @@ export class World {
   resolution = 1;
   device = "";
   private flickerLights: THREE.PointLight[] = [];
+  private playerFill = new THREE.PointLight(0x8caaa8, 3.4, 5.2, 2);
+  private flames: THREE.Mesh[] = [];
+  private beamMaterials: THREE.MeshBasicMaterial[] = [];
   private gate = new THREE.Group();
   private aim = new THREE.Vector3(0, 1.2, 4.4);
   private position = new THREE.Vector3(0.35, 2.3, 8.8);
@@ -25,6 +28,9 @@ export class World {
   private readyTextures: Promise<void>;
   private warning: THREE.Mesh;
   private swing: THREE.Mesh;
+  private trailPoints: { base: THREE.Vector3; tip: THREE.Vector3 }[] = [];
+  private lastTrailSample = 0;
+  private trailStage = 0;
   private impact: THREE.Sprite;
   private impactLife = 0;
   private blobs: THREE.Mesh[] = [];
@@ -46,18 +52,19 @@ export class World {
       : "WebGL2";
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.0;
     // No real-time shadow maps. Static vertex shading + soft contact patches.
     this.renderer.shadowMap.enabled = false;
-    this.scene.background = new THREE.Color(0x909c9d);
-    this.scene.fog = new THREE.Fog(0x909c9d, 11, 32);
-    this.scene.add(new THREE.HemisphereLight(0xdce8ea, 0x686b69, 1.35));
-    const sun = new THREE.DirectionalLight(0xd8e9f0, 2.1);
+    this.scene.background = new THREE.Color(0x111a20);
+    this.scene.fog = new THREE.FogExp2(0x111a20, 0.077);
+    this.scene.add(new THREE.HemisphereLight(0x8ca6b2, 0x191b1e, 0.32));
+    const sun = new THREE.DirectionalLight(0x9fbac6, 0.62);
     sun.position.set(-4, 8, 2);
     this.scene.add(sun);
-    const warm = new THREE.DirectionalLight(0xf5d2a4, 0.85);
+    const warm = new THREE.DirectionalLight(0xc5a581, 0.12);
     warm.position.set(4, 3, -5);
     this.scene.add(warm);
+    this.scene.add(this.playerFill);
     const manager = new THREE.LoadingManager();
     this.readyTextures = new Promise((resolve) => {
       manager.onLoad = () => resolve();
@@ -133,7 +140,7 @@ export class World {
         this.box(0.25, 0.18, 2.75, x, 0.2, z, stone);
       }
     // Pale clerestory openings make the room readable, with dark recesses below.
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0xe0e6de });
+    const lightMat = new THREE.MeshBasicMaterial({ color: 0x53666c });
     for (const sideSign of [-1, 1])
       for (const z of [-3.8, 4.7]) {
         const window = new THREE.Mesh(
@@ -223,8 +230,14 @@ export class World {
     this.warning.rotation.x = -Math.PI / 2;
     this.warning.position.y = 0.025;
     this.scene.add(this.warning);
+    const trailGeometry = new THREE.BufferGeometry();
+    trailGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(9 * 6 * 3), 3),
+    );
+    trailGeometry.setDrawRange(0, 0);
     this.swing = new THREE.Mesh(
-      new THREE.RingGeometry(0.9, 1.03, 24, 1, 0, Math.PI * 1.1),
+      trailGeometry,
       new THREE.MeshBasicMaterial({
         color: 0xd6e9e7,
         transparent: true,
@@ -233,6 +246,7 @@ export class World {
         depthWrite: false,
       }),
     );
+    this.swing.frustumCulled = false;
     this.scene.add(this.swing);
     this.impact = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -261,7 +275,7 @@ export class World {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
     this.scene.environment = pmrem.fromScene(room, 0.04).texture;
-    this.scene.environmentIntensity = 0.65;
+    this.scene.environmentIntensity = 0.12;
     room.dispose();
     pmrem.dispose();
     this.player.update(0.01, this.game.player);
@@ -412,29 +426,133 @@ export class World {
       ),
     );
     g.computeVertexNormals();
-    this.scene.add(
-      new THREE.Mesh(
-        g,
-        new THREE.MeshBasicMaterial({
-          color: 0xe1e9dc,
-          transparent: true,
-          opacity: 0.045,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          blending: THREE.AdditiveBlending,
-        }),
-      ),
+    g.setAttribute(
+      "uv",
+      new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0], 2),
     );
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d")!,
+      pixels = ctx.createImageData(64, 128);
+    for (let y = 0; y < 128; y++)
+      for (let x = 0; x < 64; x++) {
+        const u = (x + 0.5) / 64,
+          v = 1 - y / 128,
+          a =
+            Math.pow(Math.sin(u * Math.PI), 2) *
+            Math.sin(v * Math.PI * 0.9) *
+            0.85;
+        pixels.data.set([255, 255, 255, Math.round(a * 255)], (y * 64 + x) * 4);
+      }
+    ctx.putImageData(pixels, 0, 0);
+    const material = new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      color: 0x91a9b0,
+      transparent: true,
+      opacity: 0.065,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    this.beamMaterials.push(material);
+    this.scene.add(new THREE.Mesh(g, material));
   }
   private torch(x: number, z: number, m: THREE.Material) {
-    this.box(0.15, 0.85, 0.17, x, 1.7, z, m);
-    const flame = new THREE.Mesh(
-      new THREE.SphereGeometry(0.07, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffa459, toneMapped: false }),
+    const sign = Math.sign(x),
+      wallX = sign * 5.98,
+      tipX = sign * 5.42;
+    const iron = new THREE.MeshStandardMaterial({
+      color: 0x282d2e,
+      roughness: 0.94,
+      metalness: 0.3,
+      vertexColors: true,
+    });
+    const wood = new THREE.MeshStandardMaterial({
+      color: 0x48382c,
+      roughness: 1,
+      vertexColors: true,
+    });
+    const rod = (
+      a: THREE.Vector3,
+      b: THREE.Vector3,
+      r: number,
+      mat: THREE.Material,
+    ) => {
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, a.distanceTo(b), 10),
+        mat,
+      );
+      mesh.position.copy(a).add(b).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        b.clone().sub(a).normalize(),
+      );
+      this.part(mesh);
+    };
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.17, 0.035, 16),
+      iron,
     );
-    flame.position.set(x, 2.2, z);
-    flame.scale.y = 2.3;
+    plate.position.set(wallX, 1.85, z);
+    plate.rotation.z = Math.PI / 2;
+    plate.scale.z = 1.45;
+    this.part(plate);
+    rod(
+      new THREE.Vector3(wallX, 1.87, z),
+      new THREE.Vector3(sign * 5.57, 1.8, z),
+      0.035,
+      iron,
+    );
+    rod(
+      new THREE.Vector3(wallX, 1.58, z),
+      new THREE.Vector3(sign * 5.57, 1.8, z),
+      0.023,
+      iron,
+    );
+    rod(
+      new THREE.Vector3(sign * 5.64, 1.55, z),
+      new THREE.Vector3(tipX, 2.23, z),
+      0.049,
+      wood,
+    );
+    this.cylinder(0.13, 0.085, 0.18, 14, tipX, 2.23, z, iron);
+    for (const dy of [-0.07, 0.07]) {
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(0.124, 0.018, 5, 16),
+        iron,
+      );
+      band.position.set(tipX, 2.23 + dy, z);
+      band.rotation.x = Math.PI / 2;
+      this.part(band);
+    }
+    for (const side of [-1, 1])
+      rod(
+        new THREE.Vector3(tipX + side * 0.09, 2.17, z),
+        new THREE.Vector3(tipX + side * 0.14, 2.43, z),
+        0.015,
+        iron,
+      );
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.075, 0.38, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0xf2a056,
+        transparent: true,
+        opacity: 0.9,
+        toneMapped: false,
+        depthWrite: false,
+      }),
+    );
+    flame.position.set(tipX, 2.47, z);
     this.scene.add(flame);
+    this.flames.push(flame);
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffdba1, toneMapped: false }),
+    );
+    core.position.set(tipX, 2.35, z);
+    core.scale.y = 2;
+    this.scene.add(core);
     const glow = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: new THREE.CanvasTexture(this.radial("#ffd59f", 0.7)),
@@ -444,11 +562,11 @@ export class World {
       }),
     );
     glow.position.copy(flame.position);
-    glow.scale.setScalar(0.8);
+    glow.scale.setScalar(1.1);
     this.scene.add(glow);
-    if (z === 2) {
-      const light = new THREE.PointLight(0xffba79, 8, 5.5, 2);
-      light.position.set(x * 0.96, 2.15, z);
+    {
+      const light = new THREE.PointLight(0xf6b57b, 8, 5.6, 2);
+      light.position.set(tipX * 0.96, 2.46, z);
       this.scene.add(light);
       this.flickerLights.push(light);
     }
@@ -474,20 +592,36 @@ export class World {
   }
   event(e: GameEvent) {
     if (e.type === "hit" || e.type === "block" || e.type === "hurt") {
-      this.impact.position.set(e.x, 1.15, e.z);
+      this.impact.position.set(
+        e.x,
+        e.type === "hit" && this.game.enemy.kind === "gaoler" ? 1.7 : 1.15,
+        e.z,
+      );
       this.impact.visible = true;
       this.impactLife = 0.18;
     }
   }
   render(dt: number) {
     this.elapsed += dt;
+    for (let i = 0; i < this.beamMaterials.length; i++)
+      this.beamMaterials[i].opacity =
+        0.065 + Math.sin(this.elapsed * 0.7 + i) * 0.009;
     for (let i = 0; i < this.flickerLights.length; i++)
       this.flickerLights[i].intensity =
         8 +
         Math.sin(this.elapsed * 12 + i * 3) * 0.45 +
         Math.sin(this.elapsed * 19 + i) * 0.2;
+    for (let i = 0; i < this.flames.length; i++) {
+      this.flames[i].scale.set(
+        1 + Math.sin(this.elapsed * 14 + i) * 0.07,
+        1 + Math.sin(this.elapsed * 11 + i * 4) * 0.12,
+        1,
+      );
+      this.flames[i].rotation.z = Math.sin(this.elapsed * 7 + i) * 0.07;
+    }
     const p = this.game.player,
       e = this.game.enemy;
+    this.playerFill.position.set(p.x - 0.3, 2.5, p.z + 0.5);
     this.player.update(dt, p);
     this.enemy.update(dt, e);
     this.blobs[0].position.set(p.x, 0.012, p.z);
@@ -497,10 +631,44 @@ export class World {
     this.warning.rotation.set(-Math.PI / 2, 0, -e.yaw + Math.PI * 0.1);
     (this.warning.material as THREE.MeshBasicMaterial).opacity =
       e.mode === "windup" ? 0.13 + e.time * 0.12 : 0;
-    this.swing.position.set(p.x, 1.05, p.z);
-    this.swing.rotation.set(Math.PI / 2, 0, -p.yaw + Math.PI);
-    (this.swing.material as THREE.MeshBasicMaterial).opacity =
-      p.mode === "attack" && p.time > 0.17 && p.time < 0.34 ? 0.35 : 0;
+    const active =
+      p.mode === "attack" &&
+      p.time > ATTACKS[p.combo - 1].contact - 0.09 &&
+      p.time < ATTACKS[p.combo - 1].contact + 0.13;
+    if (active) {
+      if (this.trailStage !== p.combo) {
+        this.trailPoints = [];
+        this.trailStage = p.combo;
+      }
+      if (this.elapsed - this.lastTrailSample >= 1 / 60) {
+        this.lastTrailSample = this.elapsed;
+        const point = { base: new THREE.Vector3(), tip: new THREE.Vector3() };
+        if (this.player.sampleWeapon(point.base, point.tip))
+          this.trailPoints.push(point);
+        if (this.trailPoints.length > 10) this.trailPoints.shift();
+        const attr = this.swing.geometry.getAttribute(
+          "position",
+        ) as THREE.BufferAttribute;
+        let cursor = 0;
+        for (let i = 1; i < this.trailPoints.length; i++) {
+          const a = this.trailPoints[i - 1],
+            b = this.trailPoints[i];
+          for (const v of [a.base, a.tip, b.tip, a.base, b.tip, b.base])
+            attr.setXYZ(cursor++, v.x, v.y, v.z);
+        }
+        attr.needsUpdate = true;
+        this.swing.geometry.setDrawRange(0, cursor);
+      }
+      (this.swing.material as THREE.MeshBasicMaterial).opacity =
+        p.combo === 3 ? 0.23 : 0.15;
+    } else {
+      const m = this.swing.material as THREE.MeshBasicMaterial;
+      m.opacity = Math.max(0, m.opacity - dt * 2.5);
+      if (p.mode !== "attack") {
+        this.trailPoints = [];
+        this.trailStage = 0;
+      }
+    }
     if (this.impactLife > 0) {
       this.impactLife -= dt;
       this.impact.scale.setScalar(0.4 + (0.18 - this.impactLife) * 3);

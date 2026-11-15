@@ -1,9 +1,11 @@
 import "./style.css";
-import { CombatGame } from "./game";
+import { CombatGame, ENEMIES, type EnemyKind } from "./game";
 import { Input } from "./input";
 import { World } from "./world";
 import { Sound } from "./audio";
 import { API } from "./api";
+import { Showcase } from "./showcase";
+import type { FrameCapture } from "./recording";
 
 declare global {
   interface Window {
@@ -30,20 +32,34 @@ const game = new CombatGame(),
 const world = new World($<HTMLCanvasElement>("#world"), game);
 const hud = $<HTMLCanvasElement>("#hud"),
   h = hud.getContext("2d")!;
+const atmosphere = $<HTMLCanvasElement>("#atmosphere"),
+  noiseCtx = atmosphere.getContext("2d", { alpha: false })!;
+const noiseTile = document.createElement("canvas");
+noiseTile.width = noiseTile.height = 128;
+const noiseTileCtx = noiseTile.getContext("2d")!,
+  noisePixels = noiseTileCtx.createImageData(128, 128);
+let noiseSeed = 913;
+for (let i = 0; i < noisePixels.data.length; i += 4) {
+  noiseSeed ^= noiseSeed << 13;
+  noiseSeed ^= noiseSeed >>> 17;
+  noiseSeed ^= noiseSeed << 5;
+  const v = (noiseSeed >>> 24) & 255;
+  noisePixels.data.set([v, v, v, 255], i);
+}
+noiseTileCtx.putImageData(noisePixels, 0, 0);
+const noisePattern = noiseCtx.createPattern(noiseTile, "repeat")!;
+let lastNoise = 0;
 let paused = false,
   loaded = false,
   last = performance.now(),
   accumulator = 0,
   uiTick = 0;
 let recording = false,
-  recorder: MediaRecorder | null = null,
+  capture: FrameCapture | null = null,
   recordCanvas: HTMLCanvasElement | null = null,
   recordCtx: CanvasRenderingContext2D | null = null;
-let autoplay = false,
-  autoTime = 0,
-  autoLastAttack = -5,
-  autoLastDodge = -5,
-  wonAt = 0;
+let autoplay = false;
+let demonstration: Showcase | null = null;
 let toastUntil = 0,
   toastValue = "";
 let frames: number[] = [],
@@ -60,9 +76,10 @@ function toast(t: string) {
   visible("#toast", true);
 }
 function start() {
-  game.start();
+  game.start($<HTMLSelectElement>("#encounter").value as EnemyKind);
   paused = false;
   autoplay = false;
+  demonstration = null;
   world.yaw = 0;
   world.pitch = 0.08;
   input.reset();
@@ -70,6 +87,7 @@ function start() {
   visible("#intro", false);
   visible("#pause-panel", false);
   visible("#ending", false);
+  $('#world').focus({preventScroll:true});
   frames = [];
   accumulator = 0;
   last = performance.now();
@@ -93,6 +111,21 @@ input.onLock = () => {
 };
 input.onLook = (x, y) => world.orbit(x, y);
 input.bindLook($("#world"));
+input.bindGuard($("#guard"));
+$("#review-enemy").onchange = () => {
+  $<HTMLSelectElement>("#encounter").value =
+    $<HTMLSelectElement>("#review-enemy").value;
+  start();
+};
+$("#encounter").onchange = () => {
+  $<HTMLSelectElement>("#review-enemy").value =
+    $<HTMLSelectElement>("#encounter").value;
+  if (game.phase === "intro") {
+    const kind = $<HTMLSelectElement>("#encounter").value as EnemyKind;
+    game.enemy.kind = kind;
+    game.enemy.hp = game.enemy.maxHp = ENEMIES[kind].hp;
+  }
+};
 $("#start").onclick = start;
 $("#pause").onclick = pause;
 $("#resume").onclick = pause;
@@ -131,9 +164,28 @@ function fatal(t: string) {
 function resizeHUD() {
   hud.width = innerWidth;
   hud.height = innerHeight;
+  atmosphere.width = innerWidth;
+  atmosphere.height = innerHeight;
+  lastNoise = 0;
 }
 window.addEventListener("resize", resizeHUD);
 resizeHUD();
+function drawNoise(now: number) {
+  if (now - lastNoise < 125) return;
+  lastNoise = now;
+  const step = Math.floor(now / 125),
+    x = (step * 29) % 128,
+    y = (step * 47) % 128;
+  noiseCtx.setTransform(1, 0, 0, 1, x, y);
+  noiseCtx.fillStyle = noisePattern;
+  noiseCtx.fillRect(
+    -128,
+    -128,
+    atmosphere.width + 256,
+    atmosphere.height + 256,
+  );
+  noiseCtx.setTransform(1, 0, 0, 1, 0, 0);
+}
 function bar(x: number, y: number, w: number, value: number, color: string) {
   h.fillStyle = "#1e2b29b8";
   h.fillRect(x - 1, y - 1, w + 2, 9);
@@ -174,23 +226,33 @@ function drawHUD() {
   if (game.fighting || e.hp <= 0) {
     const ew = mobile ? 110 : 205,
       ex = w - ew - (mobile ? 20 : 32);
-    hudText("ХРАНИТЕЛЬ", ex, y - 9, mobile ? 8 : 9);
-    bar(ex, y, ew, e.hp / 80, "#b99a85");
+    hudText(ENEMIES[e.kind as EnemyKind].name, ex, y - 9, mobile ? 8 : 9);
+    bar(ex, y, ew, e.hp / e.maxHp, "#b99a85");
     if (e.mode === "windup")
       hudText("ЗАМАХ", ex, y + 27, mobile ? 8 : 10, "#ffe2a8");
   }
+  if (p.mode === "attack")
+    hudText(
+      `ЦЕПОЧКА  ${"I".repeat(p.combo)}${p.chain > p.combo ? "  →  " + "I".repeat(p.chain) : ""}`,
+      x,
+      y + 39,
+      mobile ? 8 : 10,
+      "#ded8bd",
+    );
+  else if (p.mode === "guard")
+    hudText("БЛОК", x, y + 39, mobile ? 8 : 10, "#bdcbb4");
   const hints = input.touch
     ? [
         "Сдвинь стик и пройди вперёд",
         "Коснись «Удар»",
         "Коснись «Шаг», чтобы уклониться",
-        "Подойди к стражу. Двигайся между ударами",
+        "Повторные удары продолжают цепочку. Блок удерживай",
       ]
     : [
         "WASD · движение. Потяни мышью для обзора",
         "Клик мышью · удар мечом",
         "Пробел · быстрый шаг в сторону движения",
-        "Подойди к стражу. Уклоняйся от замаха",
+        "До трёх кликов: комбо. Блок доступен после цепочки",
       ];
   let hint =
     game.phase === "won"
@@ -224,127 +286,86 @@ function drawHUD() {
       "right",
     );
   }
+  if (review && autoplay && demonstration)
+    hudText(
+      demonstration.label,
+      w / 2,
+      hh - (mobile ? 190 : 51),
+      mobile ? 10 : 12,
+      "#d6d6c0",
+      "center",
+    );
   if (recording) {
-    hudText("new0 · Нулевой архив", w - 25, hh - 24, 11, "#f3f2e1", "right");
+    hudText("new0 · Нулевой архив", w - 25, hh - 10, 9, "#b9c3b1", "right");
   }
 }
 
 function autoControl(dt: number) {
-  autoTime += dt;
-  const p = game.player,
-    e = game.enemy;
-  if (game.phase === "won") {
-    if (!wonAt) wonAt = autoTime;
-    if (autoTime - wonAt < 2.2) return { x: 0, z: 0, guard: false };
-    const dx = -p.x,
-      dz = -7 - p.z,
-      d = Math.hypot(dx, dz);
-    if (d < 0.5) {
-      game.interact();
-      return { x: 0, z: 0, guard: false };
-    }
-    return { x: dx / d, z: dz / d, guard: false };
-  }
-  if (autoTime < 1.0) return { x: 0, z: -1, guard: false };
-  if (autoTime < 1.2) {
-    if (autoLastAttack < 0) {
-      game.attack();
-      autoLastAttack = autoTime;
-    }
-    return { x: 0, z: 0, guard: false };
-  }
-  if (autoTime < 1.8) {
-    if (autoLastDodge < 0) {
-      game.dodge({ x: 1, z: 0 });
-      autoLastDodge = autoTime;
-    }
-    return { x: 0, z: 0, guard: false };
-  }
-  const dx = e.x - p.x,
-    dz = e.z - p.z,
-    d = Math.hypot(dx, dz);
-  if (e.mode === "windup" && e.time > 0.65 && autoTime - autoLastDodge > 1.2) {
-    game.dodge({ x: 1, z: 0.15 });
-    autoLastDodge = autoTime;
-  }
-  if (
-    d < 1.9 &&
-    autoTime - autoLastAttack > 1.02 &&
-    e.mode !== "windup" &&
-    p.mode !== "dodge"
-  ) {
-    game.attack();
-    autoLastAttack = autoTime;
-  }
-  if (e.mode === "windup" || p.mode === "dodge" || p.mode === "attack")
-    return { x: 0, z: 0, guard: false };
-  return d > 1.55
-    ? { x: dx / d, z: dz / d, guard: false }
-    : { x: 0, z: 0, guard: false };
+  return demonstration?.update(dt) ?? { x: 0, z: 0, guard: false };
 }
 function beginShowcase() {
   start();
   autoplay = true;
-  autoTime = 0;
-  autoLastAttack = autoLastDodge = -5;
-  wonAt = 0;
+  demonstration = new Showcase(game);
 }
 $("#showcase").onclick = beginShowcase;
 
-function stopRecording() {
-  if (recorder?.state === "recording") recorder.stop();
-}
-function beginRecording() {
-  if (recording) return;
-  if (!("MediaRecorder" in window)) {
-    toast("Этот браузер не поддерживает запись canvas");
-    return;
-  }
-  recordCanvas = document.createElement("canvas");
-  const scale = Math.min(1, 1280 / hud.width, 720 / hud.height);
-  recordCanvas.width = Math.floor((hud.width * scale) / 2) * 2;
-  recordCanvas.height = Math.floor((hud.height * scale) / 2) * 2;
-  recordCtx = recordCanvas.getContext("2d", { alpha: false });
-  const mime = [
-    "video/mp4;codecs=avc1.42E01E",
-    "video/webm;codecs=h264",
-    "video/webm;codecs=vp8",
-  ].find((m) => MediaRecorder.isTypeSupported(m));
-  if (!mime) {
-    toast("Нет доступного видеокодека");
-    return;
-  }
-  const chunks: Blob[] = [];
-  recorder = new MediaRecorder(recordCanvas.captureStream(60), {
-    mimeType: mime,
-    videoBitsPerSecond: 7_000_000,
-  });
-  recorder.ondataavailable = (e) => {
-    if (e.data.size) chunks.push(e.data);
-  };
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: mime }),
+async function stopRecording() {
+  const current = capture;
+  if (!current) return;
+  capture = null;
+  recording = false;
+  $("#record").textContent = "Сохраняю запись…";
+  try {
+    const blob = await current.finish(),
       a = $<HTMLAnchorElement>("#download");
+    if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-realtime-demo.${mime.includes("mp4") ? "mp4" : "webm"}`;
+    a.download = "new0-atmosphere-combo.mp4";
     visible("#download", true);
+  } catch (error) {
+    toast(error instanceof Error ? error.message : "Запись прервана");
+  }
+  $("#record").textContent = "Записать 20 секунд";
+}
+async function beginRecording() {
+  if (recording) return;
+  if (!("VideoEncoder" in window)) {
+    toast("Для записи нужен браузер с WebCodecs");
+    return;
+  }
+  $("#record").textContent = "Подготовка записи…";
+  try {
+    const { FrameCapture } = await import("./recording");
+    recordCanvas = document.createElement("canvas");
+    const scale = Math.min(1, 1280 / hud.width, 720 / hud.height);
+    recordCanvas.width = Math.floor((hud.width * scale) / 2) * 2;
+    recordCanvas.height = Math.floor((hud.height * scale) / 2) * 2;
+    recordCtx = recordCanvas.getContext("2d", { alpha: false });
+    capture = new FrameCapture(recordCanvas);
+    await capture.start();
+    beginShowcase();
+    recording = true;
+    lastCapture = performance.now();
+    $("#record").textContent = "Идёт запись…";
+    visible("#download", false);
+  } catch (error) {
+    capture = null;
     recording = false;
     $("#record").textContent = "Записать 20 секунд";
-    recorder?.stream.getTracks().forEach((t) => t.stop());
-  };
-  beginShowcase();
-  recording = true;
-  $("#record").textContent = "Идёт запись…";
-  visible("#download", false);
-  recorder.start(1000);
-  setTimeout(stopRecording, 20000);
+    toast(error instanceof Error ? error.message : "Кодек недоступен");
+  }
 }
-$("#record").onclick = beginRecording;
+$("#record").onclick = () => void beginRecording();
 
 function frame(now: number) {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000,
-    dt = Math.min(raw, 0.06);
+    dt = recording
+      ? capture && !capture.busy && now - lastCapture >= 1000 / 60
+        ? 1 / 60
+        : 0
+      : Math.min(raw, 0.06);
   last = now;
   if (loaded && !paused && game.phase !== "intro") {
     accumulator += dt;
@@ -378,12 +399,15 @@ function frame(now: number) {
     frameNumber++;
   }
   world.render(paused ? 0 : dt);
+  drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
   drawHUD();
   if (
     recording &&
     recordCanvas &&
     recordCtx &&
-    now - lastCapture >= 1000 / 60
+    capture &&
+    !capture.busy &&
+    dt > 0
   ) {
     lastCapture = now - ((now - lastCapture) % (1000 / 60));
     recordCtx.drawImage(
@@ -393,10 +417,34 @@ function frame(now: number) {
       recordCanvas.width,
       recordCanvas.height,
     );
+    recordCtx.globalCompositeOperation = "soft-light";
+    recordCtx.globalAlpha = 0.16;
+    recordCtx.drawImage(
+      atmosphere,
+      0,
+      0,
+      recordCanvas.width,
+      recordCanvas.height,
+    );
+    recordCtx.globalAlpha = 1;
+    recordCtx.globalCompositeOperation = "source-over";
     recordCtx.drawImage(hud, 0, 0, recordCanvas.width, recordCanvas.height);
+    const current = capture;
+    void current
+      .add()
+      .then(() => {
+        if (current === capture && current.frames >= 1200) void stopRecording();
+      })
+      .catch((error) => {
+        toast(error instanceof Error ? error.message : "Запись прервана");
+        void stopRecording();
+      });
   }
   if (now - uiTick > 150) {
     uiTick = now;
+    if (recording && capture)
+      $("#record").textContent =
+        `Запись ${Math.floor(capture.frames / 60)} / 20 с`;
     visible(
       "#touch-controls",
       input.touch &&
@@ -407,6 +455,11 @@ function frame(now: number) {
     );
     visible("#interact", !!game.nearby && !paused);
     $("#interact").textContent = (input.touch ? "✧ · " : "E · ") + game.nearby;
+    $("#guard").setAttribute(
+      "aria-pressed",
+      String(game.player.mode === "guard"),
+    );
+    $("#guard").classList.toggle("locked", game.player.mode === "attack");
     if (toastValue && now > toastUntil) {
       visible("#toast", false);
       toastValue = "";
@@ -445,7 +498,9 @@ function frame(now: number) {
 
 async function boot() {
   try {
-    const tg = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : undefined;
+    const tg = window.Telegram?.WebApp?.initData
+      ? window.Telegram.WebApp
+      : undefined;
     tg?.ready();
     tg?.expand();
     tg?.disableVerticalSwipes?.();
