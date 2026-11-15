@@ -1,812 +1,470 @@
 import "./style.css";
-import { API, APIError, type Action, type Run, type Board } from "./api";
+import { CombatGame } from "./game";
 import { Input } from "./input";
+import { World } from "./world";
 import { Sound } from "./audio";
-import { World, type Target } from "./world";
+import { API } from "./api";
 
-interface TelegramApp {
-  initData: string;
-  ready(): void;
-  expand(): void;
-  setHeaderColor?(color: string): void;
-  setBackgroundColor?(color: string): void;
-  disableVerticalSwipes?(): void;
-  onEvent?(event: string, callback: () => void): void;
-  openLink?(url: string): void;
-}
 declare global {
   interface Window {
-    Telegram?: { WebApp?: TelegramApp };
-  }
-}
-
-const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
-  document.querySelector<T>(selector)!;
-const show = (selector: string, visible: boolean) =>
-  $(selector).classList.toggle("hidden", !visible);
-const text = (selector: string, value: string | number) => {
-  $(selector).textContent = String(value);
-};
-const api = new API();
-const input = new Input();
-const sound = new Sound();
-let world: World;
-let run: Run | null = null;
-let started = false,
-  busy = false,
-  modalOpen = false,
-  paused = false,
-  canClose = true;
-let lastFocus: HTMLElement | null = null;
-let toastTimer = 0;
-let lastFrame = performance.now();
-let lastRender = 0;
-let nearest: Target | null = null;
-let demoAxis: { x: number; y: number } | null = null;
-let demoRunning = false;
-
-function toast(message: string) {
-  text("#toast", message);
-  show("#toast", true);
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => show("#toast", false), 4200);
-}
-
-function fail(error: unknown) {
-  show("#loading", false);
-  text(
-    "#fatal-text",
-    error instanceof Error
-      ? error.message
-      : "Не удалось открыть архив. Попробуй перезагрузить страницу",
-  );
-  show("#fatal", true);
-}
-
-function button(label: string, callback: () => void, primary = false) {
-  const node = document.createElement("button");
-  node.className = primary ? "primary-button" : "secondary-button";
-  node.textContent = label;
-  node.addEventListener("click", callback);
-  return node;
-}
-function paragraph(value: string, className = "") {
-  const node = document.createElement("p");
-  node.textContent = value;
-  node.className = className;
-  return node;
-}
-
-function modal(
-  label: string,
-  title: string,
-  paragraphs: string[],
-  actions: { label: string; callback: () => void; primary?: boolean }[],
-  closeable = true,
-) {
-  input.reset();
-  if (!modalOpen) lastFocus = document.activeElement as HTMLElement | null;
-  modalOpen = true;
-  canClose = closeable;
-  text("#modal-label", label);
-  text("#modal-title", title);
-  $("#modal-body").replaceChildren(...paragraphs.map((p) => paragraph(p)));
-  $("#modal-actions").replaceChildren(
-    ...actions.map((a) => button(a.label, a.callback, a.primary)),
-  );
-  show("#modal-close", closeable);
-  show("#modal", true);
-  updateControls();
-  requestAnimationFrame(() => $("#modal-actions button")?.focus());
-}
-
-function closeModal() {
-  modalOpen = false;
-  paused = false;
-  show("#modal", false);
-  input.reset();
-  sound.resume();
-  updateControls();
-  lastFocus?.focus();
-}
-
-function updateControls() {
-  const exploring =
-    !!run &&
-    (run.state.phase === "explore" || run.state.phase === "won") &&
-    run.status === "active";
-  input.enabled = started && !busy && !modalOpen && !paused;
-  show("#touch-controls", input.touch && input.enabled && exploring);
-  show("#interaction", !!nearest && input.enabled && exploring);
-  $<HTMLButtonElement>("#touch-interact").disabled = !nearest;
-}
-
-function renderState() {
-  if (!run) return;
-  const state = run.state;
-  world.setState(state);
-  const fighting =
-    state.phase === "combat" || (busy && ["won", "lost"].includes(state.phase));
-  show("#battle", fighting);
-  show("#quest", started && !fighting);
-  show("#explore-hud", started && !fighting);
-  text("#found-count", `${state.secrets.length} / ${state.secret_total}`);
-  if (state.phase === "won")
-    text(
-      "#quest-text",
-      state.secrets.length === 2
-        ? "Пройди к арке и покинь архив"
-        : "Путь открыт. В зале ещё остались отголоски",
-    );
-  else text("#quest-text", "Найди стража у северной арки");
-  $("#quest-progress-fill").style.width =
-    `${state.phase === "won" ? 85 : 18 + state.secrets.length * 15}%`;
-  text("#player-hp", `${state.hp}/${state.max_hp}`);
-  text("#enemy-hp", `${state.enemy_hp}/${state.enemy_max_hp}`);
-  $("#player-hp-fill").style.width = `${(100 * state.hp) / state.max_hp}%`;
-  $("#enemy-hp-fill").style.width =
-    `${(100 * state.enemy_hp) / state.enemy_max_hp}%`;
-  text("#turn-number", String(state.turn + 1).padStart(2, "0"));
-  text("#battle-log", state.log);
-  text(
-    "#enemy-intent",
-    state.intent === "heavy"
-      ? "✦ Готовит тяжёлый удар. Защищайся"
-      : state.intent === "recover"
-        ? "◇ Восстанавливается. Время атаковать"
-        : "† Готовит обычный удар",
-  );
-  $("#charge-display")
-    .querySelectorAll("i")
-    .forEach((n, i) => n.classList.toggle("active", i < state.charge));
-  document
-    .querySelectorAll<HTMLButtonElement>("[data-action]")
-    .forEach((node) => {
-      node.disabled =
-        busy ||
-        state.phase !== "combat" ||
-        (node.dataset.action === "pulse" && state.charge < 2);
-    });
-  updateControls();
-}
-
-async function start() {
-  if (busy) return;
-  busy = true;
-  $<HTMLButtonElement>("#start-button").disabled = true;
-  try {
-    run = await api.start();
-    world.reset(run.state);
-    started = true;
-    paused = false;
-    nearest = null;
-    show("#intro", false);
-    closeModal();
-    renderState();
-    toast("WASD или стик: ходьба. Потяни по сцене, чтобы повернуть камеру");
-  } catch (error) {
-    toast(error instanceof Error ? error.message : "Не удалось войти");
-  } finally {
-    busy = false;
-    $<HTMLButtonElement>("#start-button").disabled = false;
-    renderState();
-  }
-}
-
-async function resync() {
-  if (!run) return;
-  try {
-    run = await api.getRun(run.id);
-    renderState();
-  } catch {
-    /* Keep last canonical state until retry. */
-  }
-}
-
-async function battleAction(action: Action) {
-  if (!run || busy || modalOpen || run.state.phase !== "combat") return;
-  if (action === "pulse" && run.state.charge < 2) return;
-  busy = true;
-  input.reset();
-  renderState();
-  try {
-    const result = await api.action(run, action);
-    world.animateAction(action);
-    sound.play(
-      action === "attack" ? "hit" : action === "guard" ? "guard" : "pulse",
-    );
-    run = result;
-    renderState();
-    $("#world").classList.remove("battle-flash");
-    void $("#world").offsetWidth;
-    $("#world").classList.add("battle-flash");
-    await new Promise((resolve) => setTimeout(resolve, 950));
-  } catch (error) {
-    await resync();
-    toast(
-      error instanceof Error ? error.message : "Сигнал потерян. Попробуй снова",
-    );
-  } finally {
-    busy = false;
-    renderState();
-    if (run.state.phase === "won") {
-      sound.play("win");
-      modal(
-        "СИГНАЛ ВОССТАНОВЛЕН",
-        "Арка открыта",
-        [
-          "Страж больше не держит тебя здесь. Осмотрись: после боя зал звучит иначе.",
-          `За бой получено ${run.state.battle_score} очков. Чтобы завершить прохождение, подойди к северной арке.`,
-        ],
-        [{ label: "Вернуться в зал ↗", callback: closeModal, primary: true }],
-      );
-    } else if (run.state.phase === "lost") {
-      modal(
-        "СИГНАЛ ПОГАС",
-        "Ещё один шаг",
-        [
-          "Архив не закрывает двери навсегда. Попробуй защищаться перед тяжёлым ударом и использовать импульс, когда страж восстанавливается.",
-        ],
-        [
-          {
-            label: "Начать заново ↗",
-            callback: () => void start(),
-            primary: true,
-          },
-          { label: "Таблица результатов", callback: () => void leaderboard() },
-        ],
-        false,
-      );
-    }
-  }
-}
-
-async function engage() {
-  if (!run || busy) return;
-  busy = true;
-  updateControls();
-  try {
-    run = await api.action(run, "engage");
-    sound.play("click");
-    closeModal();
-    renderState();
-  } catch (error) {
-    await resync();
-    toast(error instanceof Error ? error.message : "Не удалось начать бой");
-  } finally {
-    busy = false;
-    renderState();
-  }
-}
-
-async function secret(id: "inscription" | "echo") {
-  if (!run || busy) return;
-  if (run.state.secrets.includes(id)) {
-    modal(
-      "ЗНАК УЖЕ НАЙДЕН",
-      "Знакомый мотив",
-      [
-        "Ты уже восстановил этот фрагмент сигнала. Он останется с тобой до конца пути.",
-      ],
-      [{ label: "Продолжить", callback: closeModal, primary: true }],
-    );
-    return;
-  }
-  busy = true;
-  updateControls();
-  try {
-    const prompt = await api.secret(run, id);
-    modal(
-      "ФРАГМЕНТ ПАМЯТИ",
-      prompt.title,
-      [prompt.text],
-      prompt.options.map((option) => ({
-        label: option.text,
-        callback: () => void solve(id, option.id),
-      })),
-    );
-  } catch (error) {
-    toast(error instanceof Error ? error.message : "Здесь пока тихо");
-  } finally {
-    busy = false;
-    updateControls();
-  }
-}
-
-async function solve(id: string, answer: string) {
-  if (!run || busy) return;
-  busy = true;
-  $("#modal-actions")
-    .querySelectorAll("button")
-    .forEach((b) => (b.disabled = true));
-  try {
-    run = await api.answer(run, id, answer);
-    sound.play("secret");
-    renderState();
-    closeModal();
-    toast("Фрагмент памяти найден · +120 очков");
-  } catch (error) {
-    await resync();
-    toast(error instanceof Error ? error.message : "Попробуй ещё раз");
-  } finally {
-    busy = false;
-    updateControls();
-    $("#modal-actions")
-      .querySelectorAll("button")
-      .forEach((b) => (b.disabled = false));
-  }
-}
-
-function interact() {
-  if (!input.enabled || !nearest || !run || busy) return;
-  sound.play("click");
-  switch (nearest) {
-    case "keeper":
-      modal(
-        "ХРАНИТЕЛЬ АРХИВА",
-        "Кто идёт?",
-        [
-          "«Я охраняю то, о чём все забыли. Покажи, что умеешь слушать».",
-          "Бой пошаговый. Следи за намерением стража. Удар и защита дают заряд, а два заряда открывают импульс.",
-        ],
-        [
-          {
-            label: "Вступить в бой ↗",
-            callback: () => void engage(),
-            primary: true,
-          },
-          { label: "Пока осмотреться", callback: closeModal },
-        ],
-      );
-      break;
-    case "inscription":
-      void secret("inscription");
-      break;
-    case "echo":
-      void secret("echo");
-      break;
-    case "exit":
-      if (run.state.phase === "won") {
-        modal(
-          "ПОРОГ",
-          "Дальше есть свет",
-          [
-            run.state.secrets.length < 2
-              ? "В зале ещё остались фрагменты памяти. Можно вернуться за ними или закончить путь сейчас."
-              : "Ты услышал всё, что хранил этот зал. Пора идти дальше.",
-          ],
-          [
-            {
-              label: "Завершить прохождение ↗",
-              callback: () => void finish(),
-              primary: true,
-            },
-            { label: "Остаться в зале", callback: closeModal },
-          ],
-        );
-      } else toast("Арку удерживает страж. Сначала поговори с ним");
-  }
-}
-
-async function finish() {
-  if (!run || busy) return;
-  busy = true;
-  updateControls();
-  try {
-    run = await api.finish(run);
-    renderState();
-    sound.play("win");
-    modal(
-      "КОНЕЦ ПЕРВОЙ ГЛАВЫ",
-      "Сигнал дошёл.",
-      [
-        "Некоторые двери открываются, когда перестаёшь торопиться.",
-        api.user.is_guest
-          ? "Это локальное гостевое прохождение. Его результат хранится отдельно от рейтинга Telegram."
-          : api.config.competition_open
-            ? "Результат сохранён в этой версии рейтинга."
-            : "Результат сохранён в тестовом рейтинге. Призовой запуск ещё не начался.",
-      ],
-      [
-        {
-          label: "Таблица результатов ↗",
-          callback: () => void leaderboard(),
-          primary: true,
-        },
-        { label: "К магазину new0", callback: () => openShop() },
-        { label: "Пройти ещё раз", callback: () => void start() },
-      ],
-      false,
-    );
-    const score = document.createElement("div");
-    score.className = "score-big";
-    score.textContent = String(run.state.score);
-    const small = document.createElement("small");
-    small.textContent = "ОЧКОВ";
-    score.append(small);
-    const details = document.createElement("div");
-    details.className = "score-details";
-    details.append(
-      paragraph(`За бой: ${run.state.battle_score}`),
-      paragraph(`Пасхалки: ${run.state.secrets.length} × 120`),
-    );
-    $("#modal-body").prepend(score);
-    $("#modal-body").append(details);
-  } catch (error) {
-    toast(
-      error instanceof Error ? error.message : "Не удалось сохранить результат",
-    );
-  } finally {
-    busy = false;
-    updateControls();
-  }
-}
-
-function openShop() {
-  const url = "https://new0.shop/";
-  if (window.Telegram?.WebApp?.openLink) window.Telegram.WebApp.openLink(url);
-  else window.open(url, "_blank", "noopener,noreferrer");
-}
-
-async function leaderboard() {
-  if (busy || !api.user) return;
-  modal(
-    "ОТГОЛОСКИ",
-    "Таблица результатов",
-    ["Загружаем записи архива…"],
-    [{ label: "Продолжить", callback: closeModal, primary: true }],
-    run?.status !== "finished",
-  );
-  try {
-    const versions = await api.versions();
-    const select = document.createElement("select");
-    select.className = "version-select";
-    select.setAttribute("aria-label", "Версия рейтинга");
-    for (const v of versions) {
-      const option = document.createElement("option");
-      option.value = v.version;
-      option.textContent = `${v.title}${v.prize ? " · призовая" : " · тестовая"}`;
-      option.selected = v.current;
-      select.append(option);
-    }
-    const list = document.createElement("div");
-    list.id = "board-list";
-    $("#modal-body").replaceChildren(select, list);
-    const draw = (board: Board) => {
-      list.replaceChildren();
-      list.append(
-        paragraph(
-          board.is_guest_board
-            ? "Локальная гостевая таблица. Она отделена от Telegram-рейтинга."
-            : board.prize
-              ? "Лучший результат каждого Telegram-аккаунта."
-              : "Тестовая версия. Эти результаты не участвуют в розыгрыше.",
-          "rule-note",
-        ),
-      );
-      for (const entry of board.entries) {
-        const row = document.createElement("div");
-        row.className = `board-row${entry.is_me ? " me" : ""}`;
-        const rank = document.createElement("span");
-        rank.className = "board-place";
-        rank.textContent = String(entry.rank).padStart(2, "0");
-        const name = document.createElement("span");
-        name.textContent = entry.name + (entry.is_me ? " · ты" : "");
-        const score = document.createElement("span");
-        score.className = "board-score";
-        score.textContent = String(entry.score);
-        row.append(rank, name, score);
-        list.append(row);
-      }
-      if (!board.entries.length)
-        list.append(
-          paragraph(
-            "Пока здесь тихо. Заверши прохождение, чтобы оставить свой след.",
-            "empty-board",
-          ),
-        );
-      list.append(
-        paragraph(
-          "1000 за победу + 25 за каждое оставшееся здоровье + 40 за защиту от тяжёлого удара − 30 за ход + 120 за каждую пасхалку. Время не учитывается.",
-          "rule-note",
-        ),
-      );
-      list.append(
-        paragraph(
-          "При равных очках место общее. Правило определения получателя приза ещё предстоит согласовать.",
-          "rule-note",
-        ),
-      );
+    Telegram?: {
+      WebApp?: {
+        initData: string;
+        ready(): void;
+        expand(): void;
+        disableVerticalSwipes?(): void;
+        setHeaderColor?(s: string): void;
+        setBackgroundColor?(s: string): void;
+        onEvent?(s: string, f: () => void): void;
+      };
     };
-    select.addEventListener("change", () => {
-      select.disabled = true;
-      void api
-        .board(select.value)
-        .then(draw)
-        .catch((e) => toast(e.message))
-        .finally(() => (select.disabled = false));
-    });
-    draw(await api.board());
-    if (run?.status === "finished") {
-      $("#modal-actions").replaceChildren(
-        button("Пройти ещё раз ↗", () => void start(), true),
-        button("К магазину new0", openShop),
-      );
-    }
-  } catch (error) {
-    $("#modal-body").replaceChildren(
-      paragraph(
-        error instanceof Error ? error.message : "Не удалось загрузить рейтинг",
-      ),
-    );
   }
 }
+const $ = <T extends HTMLElement = HTMLElement>(s: string) =>
+  document.querySelector<T>(s)!;
+const visible = (s: string, v: boolean) => $(s).classList.toggle("hidden", !v);
+const game = new CombatGame(),
+  input = new Input(),
+  sound = new Sound(),
+  api = new API();
+const world = new World($<HTMLCanvasElement>("#world"), game);
+const hud = $<HTMLCanvasElement>("#hud"),
+  h = hud.getContext("2d")!;
+let paused = false,
+  loaded = false,
+  last = performance.now(),
+  accumulator = 0,
+  uiTick = 0;
+let recording = false,
+  recorder: MediaRecorder | null = null,
+  recordCanvas: HTMLCanvasElement | null = null,
+  recordCtx: CanvasRenderingContext2D | null = null;
+let autoplay = false,
+  autoTime = 0,
+  autoLastAttack = -5,
+  autoLastDodge = -5,
+  wonAt = 0;
+let toastUntil = 0,
+  toastValue = "";
+let frames: number[] = [],
+  frameNumber = 0;
+let performanceText = "";
+let lastCapture = 0,
+  lastQualityChange = 0;
+const review = new URLSearchParams(location.search).get("review") === "1";
 
+function toast(t: string) {
+  toastValue = t;
+  toastUntil = performance.now() + 2800;
+  $("#toast").textContent = t;
+  visible("#toast", true);
+}
+function start() {
+  game.start();
+  paused = false;
+  autoplay = false;
+  world.yaw = 0;
+  world.pitch = 0.08;
+  input.reset();
+  input.enabled = true;
+  visible("#intro", false);
+  visible("#pause-panel", false);
+  visible("#ending", false);
+  frames = [];
+  accumulator = 0;
+  last = performance.now();
+}
 function pause() {
-  if (!started || busy) return;
-  if (modalOpen) {
-    if (canClose) closeModal();
-    return;
-  }
-  paused = true;
-  sound.suspend();
-  modal(
-    "ПАУЗА",
-    "Архив подождёт",
-    [
-      "WASD или экранный стик: движение. Потяни мышью или пальцем по сцене, чтобы повернуть камеру. Подходи к знакам и взаимодействуй. В бою следи за намерением стража.",
-    ],
-    [
-      { label: "Продолжить ↗", callback: closeModal, primary: true },
-      {
-        label: "Таблица результатов",
-        callback: () => {
-          paused = false;
-          void leaderboard();
-        },
-      },
-      { label: "Начать заново", callback: () => void start() },
-      { label: "Авторы и материалы", callback: credits },
-    ],
-  );
+  if (!loaded || game.phase === "intro") return;
+  paused = !paused;
+  input.reset();
+  input.enabled = !paused;
+  visible("#pause-panel", paused);
+  if (paused) sound.suspend();
+  else sound.resume();
 }
-
-function credits() {
-  modal(
-    "МАТЕРИАЛЫ ПРОТОТИПА",
-    "Нулевой архив",
-    [
-      "Герои, геометрия зала, анимации и временный синтезированный звук созданы для этой демки.",
-      "Текстуры PSX Dungeon: Goblinatron, лицензия CC BY 4.0. Исходные PNG не изменены. В игре применены тонирование, повторение и освещение.",
-    ],
-    [
-      {
-        label: "Вернуться к паузе",
-        callback: () => {
-          closeModal();
-          pause();
-        },
-        primary: true,
-      },
-    ],
-  );
-  const links = paragraph("");
-  for (const [label, url] of [
-    ["PSX Dungeon by Goblinatron", "https://goblinatron.itch.io/psx-dungeon"],
-    ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/"],
-  ]) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.textContent = label;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    links.append(link, document.createTextNode(" · "));
-  }
-  $("#modal-body").append(links);
-}
-
-input.onInteract = interact;
 input.onPause = pause;
-input.onAction = (n) => {
-  if (!modalOpen)
-    void battleAction((["attack", "guard", "pulse"] as Action[])[n - 1]);
+input.onAttack = () => game.attack();
+input.onInteract = () => game.interact();
+input.onDodge = () => game.dodge(world.moveAxis(input.axis()));
+input.onLock = () => {
+  game.lock = !game.lock;
+  toast(game.lock ? "Цель захвачена" : "Свободное движение");
 };
-$("#start-button").addEventListener("click", () => void start());
-$("#interact-button").addEventListener("click", interact);
-$("#touch-interact").addEventListener("click", interact);
-$("#pause-button").addEventListener("click", pause);
-$("#leaderboard-button").addEventListener("click", () => void leaderboard());
-$("#modal-close").addEventListener("click", () => {
-  if (canClose) closeModal();
-});
-$("#sound-button").addEventListener("click", () => {
-  void sound
-    .toggle()
-    .then((enabled) => {
-      show(".sound-slash", !enabled);
-      $("#sound-button").setAttribute("aria-pressed", String(enabled));
-      $("#sound-button").setAttribute(
-        "aria-label",
-        enabled ? "Выключить звук" : "Включить звук",
-      );
-      $("#sound-button").title = enabled ? "Выключить звук" : "Включить звук";
-      if (enabled) sound.play("click");
-    })
-    .catch(() => toast("Нажми ещё раз, чтобы разрешить звук"));
-});
-document
-  .querySelectorAll<HTMLButtonElement>("[data-action]")
-  .forEach((node) =>
-    node.addEventListener(
-      "click",
-      () => void battleAction(node.dataset.action as Action),
-    ),
+input.onLook = (x, y) => world.orbit(x, y);
+input.bindLook($("#world"));
+$("#start").onclick = start;
+$("#pause").onclick = pause;
+$("#resume").onclick = pause;
+$("#restart").onclick = start;
+$("#retry").onclick = start;
+$("#attack").onclick = () => game.attack();
+$("#dodge").onclick = () => game.dodge(world.moveAxis(input.axis()));
+$("#interact").onclick = () => game.interact();
+$<HTMLInputElement>("#brightness").oninput = (e) => {
+  world.renderer.toneMappingExposure = Number(
+    (e.target as HTMLInputElement).value,
   );
+};
+$("#sound").onclick = () =>
+  void sound.toggle().then((on) => {
+    $("#sound").setAttribute(
+      "aria-label",
+      on ? "Выключить звук" : "Включить звук",
+    );
+    $("#sound").textContent = on ? "♫" : "♪";
+  });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    input.reset();
-    sound.suspend();
-    if (started && !modalOpen && !busy) pause();
-  }
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Tab" || !modalOpen) return;
-  const focusable = [
-    ...$("#modal").querySelectorAll<HTMLElement>(
-      "button:not([disabled]),select,a[href]",
-    ),
-  ].filter((n) => n.offsetParent !== null);
-  if (!focusable.length) return;
-  const first = focusable[0],
-    last = focusable[focusable.length - 1];
-  if (e.shiftKey && document.activeElement === first) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && document.activeElement === last) {
-    e.preventDefault();
-    first.focus();
+  if (document.hidden && game.phase !== "intro" && !paused) {
+    pause();
+    stopRecording();
   }
 });
 window.addEventListener("game-context-lost", () =>
-  fail(
-    new Error("Графика была приостановлена устройством. Перезагрузи страницу"),
-  ),
+  fatal("Графика была приостановлена. Перезагрузи страницу"),
 );
+function fatal(t: string) {
+  $("#fatal-text").textContent = t;
+  visible("#fatal", true);
+}
+
+function resizeHUD() {
+  hud.width = innerWidth;
+  hud.height = innerHeight;
+}
+window.addEventListener("resize", resizeHUD);
+resizeHUD();
+function bar(x: number, y: number, w: number, value: number, color: string) {
+  h.fillStyle = "#1e2b29b8";
+  h.fillRect(x - 1, y - 1, w + 2, 9);
+  h.fillStyle = color;
+  h.fillRect(x, y, w * Math.max(0, value), 7);
+}
+function hudText(
+  t: string,
+  x: number,
+  y: number,
+  size = 12,
+  color = "#f4f3e4",
+  align: CanvasTextAlign = "left",
+) {
+  h.font = `${size}px Arial`;
+  h.textAlign = align;
+  h.fillStyle = color;
+  h.shadowColor = "#152321a0";
+  h.shadowBlur = 4;
+  h.fillText(t, x, y);
+  h.shadowBlur = 0;
+}
+function drawHUD() {
+  const w = hud.width,
+    hh = hud.height,
+    mobile = input.touch || w < 700,
+    p = game.player,
+    e = game.enemy;
+  h.clearRect(0, 0, w, hh);
+  if (game.phase === "intro") return;
+  const x = mobile ? 20 : 32,
+    y = mobile ? 85 : 95,
+    bw = mobile ? 136 : 215;
+  hudText("ПУТНИК", x, y - 9, mobile ? 8 : 9);
+  bar(x, y, bw, p.hp / 100, "#c3a8a0");
+  bar(x, y + 14, bw, p.stamina / 100, "#bdcaa6");
+  hudText(`${Math.ceil(p.hp)} / 100`, x + bw + 8, y + 7, mobile ? 8 : 10);
+  if (game.fighting || e.hp <= 0) {
+    const ew = mobile ? 110 : 205,
+      ex = w - ew - (mobile ? 20 : 32);
+    hudText("ХРАНИТЕЛЬ", ex, y - 9, mobile ? 8 : 9);
+    bar(ex, y, ew, e.hp / 80, "#b99a85");
+    if (e.mode === "windup")
+      hudText("ЗАМАХ", ex, y + 27, mobile ? 8 : 10, "#ffe2a8");
+  }
+  const hints = input.touch
+    ? [
+        "Сдвинь стик и пройди вперёд",
+        "Коснись «Удар»",
+        "Коснись «Шаг», чтобы уклониться",
+        "Подойди к стражу. Двигайся между ударами",
+      ]
+    : [
+        "WASD · движение. Потяни мышью для обзора",
+        "Клик мышью · удар мечом",
+        "Пробел · быстрый шаг в сторону движения",
+        "Подойди к стражу. Уклоняйся от замаха",
+      ];
+  let hint =
+    game.phase === "won"
+      ? "Путь открыт. Исследуй зал или пройди к арке"
+      : hints[game.tutorial];
+  if (game.phase === "lost") hint = "Сигнал гаснет…";
+  if (hint && game.phase !== "finished") {
+    const maxWidth = w - 35;
+    h.font = `${mobile ? 10 : 12}px Arial`;
+    const tw = Math.min(maxWidth, h.measureText(hint).width + 32),
+      hy = mobile ? 156 : 148;
+    h.fillStyle = "#263d34b8";
+    h.fillRect((w - tw) / 2, hy - 18, tw, 31);
+    hudText(hint, w / 2, hy + 2, mobile ? 10 : 12, "#f4f3df", "center");
+  }
+  if (!mobile) {
+    hudText(
+      "КЛИК  удар     ПРОБЕЛ  уклонение     ПКМ  блок     E  исследовать",
+      w / 2,
+      hh - 28,
+      10,
+      "#f3f2e1",
+      "center",
+    );
+    hudText(
+      `ОТГОЛОСКИ   ${game.secrets.size} / 2`,
+      w - 32,
+      hh - 28,
+      10,
+      "#e1e6d6",
+      "right",
+    );
+  }
+  if (recording) {
+    hudText("new0 · Нулевой архив", w - 25, hh - 24, 11, "#f3f2e1", "right");
+  }
+}
+
+function autoControl(dt: number) {
+  autoTime += dt;
+  const p = game.player,
+    e = game.enemy;
+  if (game.phase === "won") {
+    if (!wonAt) wonAt = autoTime;
+    if (autoTime - wonAt < 2.2) return { x: 0, z: 0, guard: false };
+    const dx = -p.x,
+      dz = -7 - p.z,
+      d = Math.hypot(dx, dz);
+    if (d < 0.5) {
+      game.interact();
+      return { x: 0, z: 0, guard: false };
+    }
+    return { x: dx / d, z: dz / d, guard: false };
+  }
+  if (autoTime < 1.0) return { x: 0, z: -1, guard: false };
+  if (autoTime < 1.2) {
+    if (autoLastAttack < 0) {
+      game.attack();
+      autoLastAttack = autoTime;
+    }
+    return { x: 0, z: 0, guard: false };
+  }
+  if (autoTime < 1.8) {
+    if (autoLastDodge < 0) {
+      game.dodge({ x: 1, z: 0 });
+      autoLastDodge = autoTime;
+    }
+    return { x: 0, z: 0, guard: false };
+  }
+  const dx = e.x - p.x,
+    dz = e.z - p.z,
+    d = Math.hypot(dx, dz);
+  if (e.mode === "windup" && e.time > 0.65 && autoTime - autoLastDodge > 1.2) {
+    game.dodge({ x: 1, z: 0.15 });
+    autoLastDodge = autoTime;
+  }
+  if (
+    d < 1.9 &&
+    autoTime - autoLastAttack > 1.02 &&
+    e.mode !== "windup" &&
+    p.mode !== "dodge"
+  ) {
+    game.attack();
+    autoLastAttack = autoTime;
+  }
+  if (e.mode === "windup" || p.mode === "dodge" || p.mode === "attack")
+    return { x: 0, z: 0, guard: false };
+  return d > 1.55
+    ? { x: dx / d, z: dz / d, guard: false }
+    : { x: 0, z: 0, guard: false };
+}
+function beginShowcase() {
+  start();
+  autoplay = true;
+  autoTime = 0;
+  autoLastAttack = autoLastDodge = -5;
+  wonAt = 0;
+}
+$("#showcase").onclick = beginShowcase;
+
+function stopRecording() {
+  if (recorder?.state === "recording") recorder.stop();
+}
+function beginRecording() {
+  if (recording) return;
+  if (!("MediaRecorder" in window)) {
+    toast("Этот браузер не поддерживает запись canvas");
+    return;
+  }
+  recordCanvas = document.createElement("canvas");
+  const scale = Math.min(1, 1280 / hud.width, 720 / hud.height);
+  recordCanvas.width = Math.floor((hud.width * scale) / 2) * 2;
+  recordCanvas.height = Math.floor((hud.height * scale) / 2) * 2;
+  recordCtx = recordCanvas.getContext("2d", { alpha: false });
+  const mime = [
+    "video/mp4;codecs=avc1.42E01E",
+    "video/webm;codecs=h264",
+    "video/webm;codecs=vp8",
+  ].find((m) => MediaRecorder.isTypeSupported(m));
+  if (!mime) {
+    toast("Нет доступного видеокодека");
+    return;
+  }
+  const chunks: Blob[] = [];
+  recorder = new MediaRecorder(recordCanvas.captureStream(60), {
+    mimeType: mime,
+    videoBitsPerSecond: 7_000_000,
+  });
+  recorder.ondataavailable = (e) => {
+    if (e.data.size) chunks.push(e.data);
+  };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mime }),
+      a = $<HTMLAnchorElement>("#download");
+    a.href = URL.createObjectURL(blob);
+    a.download = `new0-realtime-demo.${mime.includes("mp4") ? "mp4" : "webm"}`;
+    visible("#download", true);
+    recording = false;
+    $("#record").textContent = "Записать 20 секунд";
+    recorder?.stream.getTracks().forEach((t) => t.stop());
+  };
+  beginShowcase();
+  recording = true;
+  $("#record").textContent = "Идёт запись…";
+  visible("#download", false);
+  recorder.start(1000);
+  setTimeout(stopRecording, 20000);
+}
+$("#record").onclick = beginRecording;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
-  if (now - lastRender < 1000 / (input.touch ? 30 : 60)) return;
-  const dt = Math.min((now - lastFrame) / 1000, 0.05);
-  lastFrame = now;
-  lastRender = now;
-  if (!world) return;
-  const active =
-    started &&
-    !modalOpen &&
-    !busy &&
-    !paused &&
-    run?.status === "active" &&
-    ["explore", "won"].includes(run.state.phase);
-  world.update(paused ? 0 : dt, demoAxis ?? input.axis(), !!active);
-  const target = active ? world.nearest() : null;
-  nearest = target?.id ?? null;
-  if (target) text("#interaction-name", target.title);
-  updateControls();
+  const raw = (now - last) / 1000,
+    dt = Math.min(raw, 0.06);
+  last = now;
+  if (loaded && !paused && game.phase !== "intro") {
+    accumulator += dt;
+    while (accumulator >= 1 / 120) {
+      const move = autoplay
+        ? autoControl(1 / 120)
+        : { ...world.moveAxis(input.axis()), guard: input.guarding };
+      game.update(1 / 120, move);
+      accumulator -= 1 / 120;
+    }
+    for (const e of game.events) {
+      world.event(e);
+      sound.play(
+        e.type === "hit"
+          ? "hit"
+          : e.type === "block"
+            ? "guard"
+            : e.type === "win"
+              ? "win"
+              : e.type === "secret"
+                ? "secret"
+                : e.type === "dodge"
+                  ? "step"
+                  : "click",
+      );
+      if (e.type === "secret") toast("Отголосок найден");
+    }
+    game.events.length = 0;
+    frames.push(raw * 1000);
+    if (frames.length > 300) frames.shift();
+    frameNumber++;
+  }
+  world.render(paused ? 0 : dt);
+  drawHUD();
+  if (
+    recording &&
+    recordCanvas &&
+    recordCtx &&
+    now - lastCapture >= 1000 / 60
+  ) {
+    lastCapture = now - ((now - lastCapture) % (1000 / 60));
+    recordCtx.drawImage(
+      world.renderer.domElement,
+      0,
+      0,
+      recordCanvas.width,
+      recordCanvas.height,
+    );
+    recordCtx.drawImage(hud, 0, 0, recordCanvas.width, recordCanvas.height);
+  }
+  if (now - uiTick > 150) {
+    uiTick = now;
+    visible(
+      "#touch-controls",
+      input.touch &&
+        !paused &&
+        game.phase !== "intro" &&
+        game.phase !== "lost" &&
+        game.phase !== "finished",
+    );
+    visible("#interact", !!game.nearby && !paused);
+    $("#interact").textContent = (input.touch ? "✧ · " : "E · ") + game.nearby;
+    if (toastValue && now > toastUntil) {
+      visible("#toast", false);
+      toastValue = "";
+    }
+    if (
+      (game.phase === "lost" && game.player.time > 2) ||
+      game.phase === "finished"
+    ) {
+      visible("#ending", true);
+      input.enabled = false;
+      const lost = game.phase === "lost";
+      $("#ending-label").textContent = lost ? "СИГНАЛ ПОГАС" : "КОНЕЦ ДЕМКИ";
+      $("#ending-title").textContent = lost ? "Ещё один шаг" : "Свет за аркой";
+      $("#ending-text").textContent = lost
+        ? "Перед ударом страж делает заметный замах. Можно отойти, уклониться или поставить блок."
+        : "Ты прошёл зал и открыл путь. Следы ещё хранятся в камне.";
+    }
+    if (frames.length > 30) {
+      const sorted = [...frames].sort((a, b) => a - b),
+        avg = frames.reduce((a, b) => a + b, 0) / frames.length;
+      performanceText = `${(1000 / avg).toFixed(1)} FPS · p95 ${sorted[Math.floor(sorted.length * 0.95)].toFixed(1)} ms · ${world.renderer.info.render.calls} calls · ${Math.round(world.renderer.info.render.triangles / 1000)}k tris`;
+      if (review) $("#performance").textContent = performanceText;
+      if (
+        frameNumber > 180 &&
+        now - lastQualityChange > 2500 &&
+        avg > 19 &&
+        world.resolution > 0.66
+      ) {
+        world.resolution = Math.max(0.65, world.resolution * 0.9);
+        world.resize();
+        lastQualityChange = now;
+      }
+    }
+  }
 }
 
 async function boot() {
   try {
-    const tg = window.Telegram?.WebApp?.initData
-      ? window.Telegram.WebApp
-      : undefined;
+    const tg = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : undefined;
     tg?.ready();
     tg?.expand();
-    try {
-      tg?.setHeaderColor?.("#141715");
-      tg?.setBackgroundColor?.("#141715");
-      tg?.disableVerticalSwipes?.();
-    } catch {
-      /* Older Telegram clients. */
-    }
+    tg?.disableVerticalSwipes?.();
+    tg?.setHeaderColor?.("#343d3b");
+    tg?.setBackgroundColor?.("#343d3b");
     tg?.onEvent?.("deactivated", () => {
-      input.reset();
-      sound.suspend();
-      if (started && !modalOpen && !busy) pause();
+      if (!paused && game.phase !== "intro") pause();
     });
-    tg?.onEvent?.("viewportChanged", () => world?.resize());
-    world = new World($<HTMLCanvasElement>("#world"), input.touch);
-    input.bindLook($("#world"));
-    input.onLook = (dx, dy) => world.orbit(dx, dy);
-    world.onStep = () => sound.play("step");
-    requestAnimationFrame(frame);
     await Promise.all([world.load(), api.connect(tg?.initData ?? "")]);
-    text("#player-name", api.user.name.toLocaleUpperCase("ru"));
-    text(
-      "#account-label",
-      api.user.is_guest
-        ? "Гостевой путь · отдельный рейтинг"
-        : "Аккаунт Telegram подтверждён",
-    );
-    text(
-      "#connection-status",
-      api.user.is_guest
-        ? "ГОСТЕВОЙ ПУТЬ"
-        : `ТВОЙ ПУТЬ, ${api.user.name.toLocaleUpperCase("ru")}`,
-    );
-    text("#start-button span", "Войти в архив");
-    $<HTMLButtonElement>("#start-button").disabled = false;
-    show("#loading", false);
-    if (
-      new URLSearchParams(location.search).get("showcase") === "1" &&
-      api.user.is_guest
-    ) {
-      const demo = document.createElement("button");
-      demo.id = "showcase-button";
-      demo.className = "showcase-button";
-      demo.textContent = "Автопоказ · 20 секунд";
-      demo.addEventListener("click", () => void showcase(demo));
-      $("#app").append(demo);
-    }
+    loaded = true;
+    $("#performance").title = world.device;
+    $<HTMLButtonElement>("#start").disabled = false;
+    $("#start").textContent = "Войти в архив ↗";
+    visible("#review", review && api.user.is_guest);
   } catch (error) {
-    if (error instanceof APIError && error.status === 401)
-      fail(
-        new Error(
-          "Telegram не подтвердил вход. Закрой мини-приложение и открой его заново",
-        ),
-      );
-    else fail(error);
+    fatal(
+      error instanceof Error ? error.message : "Не удалось загрузить сцену",
+    );
   }
 }
-
-async function showcase(control: HTMLButtonElement) {
-  if (demoRunning) return;
-  demoRunning = true;
-  control.disabled = true;
-  control.textContent = "Автопоказ · реальный движок";
-  const wait = (ms: number) =>
-    new Promise<void>((resolve) => setTimeout(resolve, ms));
-  const move = async (ms: number, axis: { x: number; y: number }) => {
-    demoAxis = axis;
-    await wait(ms);
-    demoAxis = { x: 0, y: 0 };
-  };
-  try {
-    if (modalOpen) closeModal();
-    await start();
-    await wait(700);
-    await move(2450, { x: 0, y: -1 });
-    await wait(500);
-    world.orbit(95, 0);
-    await wait(1000);
-    world.orbit(-95, 0);
-    await wait(600);
-    interact();
-    await wait(900);
-    await engage();
-    await wait(700);
-    for (const action of [
-      "attack",
-      "guard",
-      "pulse",
-      "attack",
-      "guard",
-      "pulse",
-    ] as Action[]) {
-      await battleAction(action);
-      await wait(180);
-    }
-    await wait(1200);
-    if (modalOpen) closeModal();
-    await wait(500);
-    await move(700, { x: 0, y: -1 });
-    await wait(1000);
-  } catch (error) {
-    toast(error instanceof Error ? error.message : "Показ прерван");
-  } finally {
-    demoAxis = null;
-    demoRunning = false;
-    control.disabled = false;
-    control.textContent = "Повторить автопоказ";
-  }
-}
+requestAnimationFrame(frame);
 void boot();

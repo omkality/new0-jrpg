@@ -125,3 +125,37 @@ test("camera drag and movement stick use independent fingers and stop on cancel"
   dispatch(canvas, "pointermove", { pointerId: 4, clientX: 30, clientY: 10 });
   assert.equal(deltas.length, 1);
 });
+
+test("a tap attacks, dragging only looks, and cancelled right mouse releases guard", () => {
+  const { input } = setup(),
+    canvas = new FakeElement();
+  let attacks = 0;
+  input.bindLook(canvas);
+  input.onAttack = () => attacks++;
+  dispatch(canvas, "pointerdown", {
+    pointerId: 1,
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+  });
+  dispatch(canvas, "pointerup", { pointerId: 1, button: 0 });
+  assert.equal(attacks, 1);
+  dispatch(canvas, "pointerdown", {
+    pointerId: 2,
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+  });
+  dispatch(canvas, "pointermove", { pointerId: 2, clientX: 30, clientY: 0 });
+  dispatch(canvas, "pointerup", { pointerId: 2, button: 0 });
+  assert.equal(attacks, 1);
+  dispatch(canvas, "pointerdown", {
+    pointerId: 3,
+    button: 2,
+    clientX: 0,
+    clientY: 0,
+  });
+  assert.equal(input.guarding, true);
+  dispatch(canvas, "pointercancel", { pointerId: 3, button: -1 });
+  assert.equal(input.guarding, false);
+});
