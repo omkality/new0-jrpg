@@ -1,6 +1,6 @@
 import { NodeIO } from "@gltf-transform/core";
 import * as T from "three";
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import assert from "node:assert/strict";
@@ -323,8 +323,10 @@ await writeFile(
   path.join(out, "contract.json"),
   JSON.stringify(contract, null, 2),
 );
+const reportDirectory = path.join(project, "work/props-v7");
+await mkdir(reportDirectory, { recursive: true });
 await writeFile(
-  path.join(project, "work/props-v7/validation-report.json"),
+  path.join(reportDirectory, "validation-report.json"),
   JSON.stringify(report, null, 2),
 );
 console.log(
