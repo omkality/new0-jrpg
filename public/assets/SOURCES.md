@@ -1,5 +1,12 @@
 # Asset sources
 
+## Current scene
+
+The current scene uses [Goblinatron PSX Dungeon textures](dungeon/SOURCES.md), CC BY 4.0.
+The room geometry, cloth texture, humanoid figures and their animations are original
+prototype code. The Kenney files below are retained from the first iteration and are
+not loaded by the current scene.
+
 ## Kenney Graveyard Kit 5.0
 
 The files in `kenney/` are an unmodified subset of Kenney's Graveyard Kit 5.0, downloaded from the official asset page on 2026-11-15.

@@ -856,3 +856,53 @@ kbd {
     transition: none !important;
   }
 }
+/* Review-only control, shown exclusively with ?showcase=1 in guest mode. */
+.showcase-button {
+  position: absolute;
+  right: 36px;
+  top: 84px;
+  z-index: 12;
+  background: #15151ac9;
+  border: 1px solid #a9a29b55;
+  color: #c9c0b7;
+  padding: 9px 13px;
+  font: 9px Arial;
+  letter-spacing: 1px;
+}
+:root {
+  --accent: #c4b7a6;
+  --muted: #929098;
+}
+#app {
+  background: #141418;
+}
+.vignette {
+  background: radial-gradient(
+    ellipse at 50% 47%,
+    transparent 38%,
+    rgba(8, 8, 14, 0.45) 100%
+  );
+}
+.intro {
+  background: linear-gradient(
+    90deg,
+    rgba(10, 10, 16, 0.92),
+    rgba(10, 10, 16, 0.56) 35%,
+    rgba(10, 10, 16, 0.04) 75%
+  );
+}
+@media (max-width: 700px) {
+  .showcase-button {
+    top: 85px;
+    right: 18px;
+    font-size: 7px;
+  }
+  .intro {
+    background: linear-gradient(
+      90deg,
+      #0b0c10e0,
+      #0b0c1090 75%,
+      #0b0c1055
+    ) !important;
+  }
+}
