@@ -7,7 +7,7 @@ import {
 } from "./locations";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Actor } from "./actor";
-import { CombatGame, ATTACKS, type GameEvent } from "./game";
+import { CombatGame, type GameEvent } from "./game";
 
 export class World {
   renderer: THREE.WebGLRenderer;
@@ -24,7 +24,7 @@ export class World {
   private get stage() {
     return this.stages.get(this.location)!;
   }
-  private playerFill = new THREE.PointLight(0x8caaa8, 3.4, 5.2, 2);
+  private playerFill = new THREE.PointLight(0xc1cedc, 4.2, 5.2, 2);
 
   private aim = new THREE.Vector3(0, 1.2, 4.4);
   private position = new THREE.Vector3(0.35, 2.3, 8.8);
@@ -33,11 +33,6 @@ export class World {
 
   private elapsed = 0;
   private readyTextures: Promise<void>;
-  private warning: THREE.Mesh;
-  private swing: THREE.Mesh;
-  private trailPoints: { base: THREE.Vector3; tip: THREE.Vector3 }[] = [];
-  private lastTrailSample = 0;
-  private trailStage = 0;
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
@@ -97,37 +92,6 @@ export class World {
       this.blobs.push(blob);
       this.scene.add(blob);
     }
-    this.warning = new THREE.Mesh(
-      new THREE.RingGeometry(0.5, 2.45, 40, 1, Math.PI * 0.1, Math.PI * 0.8),
-      new THREE.MeshBasicMaterial({
-        color: 0xe3b675,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
-    this.warning.rotation.x = -Math.PI / 2;
-    this.warning.position.y = 0.025;
-    this.scene.add(this.warning);
-    const trailGeometry = new THREE.BufferGeometry();
-    trailGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(9 * 6 * 3), 3),
-    );
-    trailGeometry.setDrawRange(0, 0);
-    this.swing = new THREE.Mesh(
-      trailGeometry,
-      new THREE.MeshBasicMaterial({
-        color: 0xd6e9e7,
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    );
-    this.swing.frustumCulled = false;
-    this.scene.add(this.swing);
     this.impact = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: new THREE.CanvasTexture(this.radial("#fff2c9", 1)),
@@ -155,7 +119,7 @@ export class World {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
     this.scene.environment = pmrem.fromScene(room, 0.04).texture;
-    this.scene.environmentIntensity = 0.12;
+    this.scene.environmentIntensity = 0.18;
     room.dispose();
     pmrem.dispose();
     this.player.update(0.01, this.game.player);
@@ -176,10 +140,9 @@ export class World {
     this.playerFill.color.set(spec.fill);
     this.game.obstacles = this.stage.obstacles;
     this.stage.gate.position.y = 0;
+    this.stage.reset();
     this.aim.set(0, 1.2, 4.4);
     this.position.set(0.35, 2.3, 8.8);
-    this.trailPoints = [];
-    this.trailStage = 0;
   }
   private radial(color: string, alpha: number) {
     const c = document.createElement("canvas");
@@ -231,7 +194,13 @@ export class World {
   }
   render(dt: number) {
     this.elapsed += dt;
-    this.stage.update(this.elapsed, dt, this.game.enemy.hp <= 0);
+    this.stage.update(
+      this.elapsed,
+      dt,
+      this.game.enemy.hp <= 0,
+      this.game.chestOpened,
+      this.game.secrets,
+    );
     const p = this.game.player,
       e = this.game.enemy;
     this.playerFill.position.set(p.x - 0.3, 2.5, p.z + 0.5);
@@ -240,48 +209,6 @@ export class World {
     this.blobs[0].position.set(p.x, 0.012, p.z);
     this.blobs[1].position.set(e.x, 0.013, e.z);
     this.blobs[1].scale.setScalar(e.hp <= 0 ? 1.4 : 1);
-    this.warning.position.set(e.x, 0.025, e.z);
-    this.warning.rotation.set(-Math.PI / 2, 0, -e.yaw + Math.PI * 0.1);
-    (this.warning.material as THREE.MeshBasicMaterial).opacity =
-      e.mode === "windup" ? 0.13 + e.time * 0.12 : 0;
-    const active =
-      p.mode === "attack" &&
-      p.time > ATTACKS[p.combo - 1].contact - 0.09 &&
-      p.time < ATTACKS[p.combo - 1].contact + 0.13;
-    if (active) {
-      if (this.trailStage !== p.combo) {
-        this.trailPoints = [];
-        this.trailStage = p.combo;
-      }
-      if (this.elapsed - this.lastTrailSample >= 1 / 60) {
-        this.lastTrailSample = this.elapsed;
-        const point = { base: new THREE.Vector3(), tip: new THREE.Vector3() };
-        if (this.player.sampleWeapon(point.base, point.tip))
-          this.trailPoints.push(point);
-        if (this.trailPoints.length > 10) this.trailPoints.shift();
-        const attr = this.swing.geometry.getAttribute(
-          "position",
-        ) as THREE.BufferAttribute;
-        let cursor = 0;
-        for (let i = 1; i < this.trailPoints.length; i++) {
-          const a = this.trailPoints[i - 1],
-            b = this.trailPoints[i];
-          for (const v of [a.base, a.tip, b.tip, a.base, b.tip, b.base])
-            attr.setXYZ(cursor++, v.x, v.y, v.z);
-        }
-        attr.needsUpdate = true;
-        this.swing.geometry.setDrawRange(0, cursor);
-      }
-      (this.swing.material as THREE.MeshBasicMaterial).opacity =
-        p.combo === 3 ? 0.23 : 0.15;
-    } else {
-      const m = this.swing.material as THREE.MeshBasicMaterial;
-      m.opacity = Math.max(0, m.opacity - dt * 2.5);
-      if (p.mode !== "attack") {
-        this.trailPoints = [];
-        this.trailStage = 0;
-      }
-    }
     if (this.impactLife > 0) {
       this.impactLife -= dt;
       this.impact.scale.setScalar(0.4 + (0.18 - this.impactLife) * 3);
@@ -297,9 +224,9 @@ export class World {
       p.z - Math.cos(this.yaw) * 0.65,
     );
     this.desiredPosition.set(
-      p.x + Math.sin(this.yaw) * d + 0.25,
+      p.x + Math.sin(this.yaw) * d + Math.cos(this.yaw) * 0.7,
       2.35 + this.pitch * 2,
-      p.z + Math.cos(this.yaw) * d,
+      p.z + Math.cos(this.yaw) * d - Math.sin(this.yaw) * 0.7,
     );
     this.desiredPosition.x = THREE.MathUtils.clamp(
       this.desiredPosition.x,

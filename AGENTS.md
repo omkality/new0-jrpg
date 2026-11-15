@@ -5,19 +5,29 @@
 - Track concrete open work in GitHub Issues with `priority:P0`, `priority:P1`, or `priority:P2`.
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
 - Current scope is a one-week prototype: three small visual Three.js stages,
-  mobile-first Telegram play, casual real-time combat, tutorial, two secrets, Compose.
+  mobile-first Telegram play, casual real-time combat, two secrets, one chest, Compose.
+  The current public demo exposes one autoplay button. Keep developer review tools
+  guest-only and off the normal Mini App screen.
   The user explicitly rejected turn-based combat and action-selection menus.
 - The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
-- Latest art direction: dim dark fantasy, weak ambient fill, localized shimmering light
+- Latest art direction: dim dark fantasy, readable cool midtones, localized shimmering light
   through dark depth fog, subtle monochrome grain and clean UI. Avoid uniform bright
   lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.
 - One, two and three consecutive attacks use distinct clips. Block cannot cancel an
   active chain or recovery. Preserve varied dodge/hit reactions and grounded death.
+  Full rolls have planted compression and landing. Choose a skinned front/back/side
+  fall from the last impact direction, never ragdoll. Do not restore floor attack cones
+  or broad solid sword ribbons. Autoplay explores, collects and fights via normal input.
 - Keep gameplay timings aligned with public/assets/motion/contract.json. Linked attacks
   continue at the authored follow-through timestamps instead of resetting to Guard.
-- Player documentation describes phone/touch controls only. Keep technology badges
-  generated from project files with scripts/update_badges.py and verified by CI.
+- Player documentation describes phone/touch controls only.
+- README badges show only technologies actually used and useful, verifiable project
+  statuses. Do not add zero-value counters, empty download/star statistics, broken
+  badges or unverified release claims. Keep the badge row small and relevant.
+- When dependencies, runtime versions or workflows change, update the badges through
+  scripts/update_badges.py. Versions come from project files, never manual guesses.
+  Run scripts/update_badges.py --check before committing. CI checks the same rule.
 - The on-device autocheck runs at normal wall-clock speed, records RAF intervals including
   long frames and interruptions, and stores bounded owner-only demo reports. Never use
   these client-reported diagnostics as competition scores or evidence of input security.

@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
 import { assetUrl } from "./assets";
+import { makeWeapon } from "./weapons";
 
 type Kind = "pilgrim" | EnemyKind;
 interface RigState {
@@ -11,6 +12,7 @@ interface RigState {
   actions: Map<string, THREE.AnimationAction>;
   hand?: THREE.Object3D;
   weapon: THREE.Group;
+  weapons: Map<string, THREE.Group>;
   current: string;
   action?: THREE.AnimationAction;
   dropped: boolean;
@@ -77,79 +79,26 @@ export class Actor {
         for (const clip of [...gltf.animations, ...combat.animations])
           actions.set(clip.name, mixer.clipAction(clip));
         const hand = rig.getObjectByName("hand_R"),
-          weapon = this.makeWeapon(kind);
-        hand?.add(weapon);
+          weapon = makeWeapon(kind);
+        const weapons = new Map([["sword", weapon]]);
+        if (kind === "pilgrim") {
+          const relic = makeWeapon(kind, true);
+          relic.visible = false;
+          weapons.set("relic", relic);
+        }
+        for (const item of weapons.values()) hand?.add(item);
         this.states.set(kind, {
           rig,
           mixer,
           actions,
           hand,
           weapon,
+          weapons,
           current: "",
           dropped: false,
         });
       }),
     );
-  }
-  private makeWeapon(kind: Kind) {
-    const g = new THREE.Group();
-    const steel = new THREE.MeshStandardMaterial({
-      color: 0x7d8581,
-      metalness: 0.25,
-      roughness: 0.8,
-      flatShading: true,
-    });
-    const grip = new THREE.MeshStandardMaterial({
-      color: 0x352d27,
-      roughness: 1,
-    });
-    const shape = new THREE.Shape();
-    if (kind === "gaoler") {
-      shape.moveTo(-0.055, 0);
-      shape.lineTo(0.1, 0);
-      shape.lineTo(0.18, 0.48);
-      shape.lineTo(0.13, 0.68);
-      shape.lineTo(-0.04, 0.61);
-      shape.closePath();
-    } else {
-      const width = kind === "watcher" ? 0.026 : 0.037,
-        len = kind === "watcher" ? 1.03 : 0.83;
-      shape.moveTo(-width, 0);
-      shape.lineTo(width, 0);
-      shape.lineTo(width * 0.7, len - 0.14);
-      shape.lineTo(0, len);
-      shape.lineTo(-width * 0.9, len - 0.12);
-      shape.closePath();
-    }
-    const blade = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(shape, {
-        depth: kind === "gaoler" ? 0.038 : 0.016,
-        bevelEnabled: true,
-        bevelSize: 0.007,
-        bevelThickness: 0.005,
-        bevelSegments: 1,
-      }),
-      steel,
-    );
-    blade.position.y = 0.11;
-    g.add(blade);
-    const guard = new THREE.Mesh(
-      new THREE.BoxGeometry(kind === "gaoler" ? 0.22 : 0.19, 0.032, 0.04),
-      steel,
-    );
-    guard.position.y = 0.085;
-    g.add(guard);
-    const handle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.024, 0.028, 0.19, 8),
-      grip,
-    );
-    g.add(handle);
-    const end = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), steel);
-    end.position.y = -0.12;
-    g.add(end);
-    g.position.set(0, 0.06, 0);
-    g.rotation.x = -Math.PI / 2;
-    return g;
   }
   private change(s: RigState, name: string, once: boolean) {
     if (s.current === name) return;
@@ -169,7 +118,7 @@ export class Actor {
       ? 0.09
       : name.startsWith("Hit")
         ? 0.055
-        : name === "Death"
+        : name.startsWith("Death")
           ? 0.16
           : once
             ? 0.09
@@ -206,13 +155,23 @@ export class Actor {
       this.kind = kind;
       this.active = s;
     }
+    const weapon = s.weapons.get(f.weapon) ?? s.weapons.get("sword")!;
+    if (weapon !== s.weapon) {
+      s.hand?.add(s.weapon);
+      s.weapon.visible = false;
+      s.weapon.position.set(0, 0.06, 0);
+      s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      s.weapon = weapon;
+      s.weapon.visible = true;
+      s.dropped = false;
+    }
     this.root.position.set(f.x, 0, f.z);
     this.root.rotation.set(0, f.yaw, 0);
     const mode = f.mode;
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
     const name =
       mode === "dead"
-        ? "Death"
+        ? `Death${f.death}`
         : mode === "attack" || mode === "windup"
           ? `Attack${attackIndex}`
           : mode === "dodge"

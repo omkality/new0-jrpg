@@ -4,8 +4,9 @@ import { Matrix4, Vector3, Quaternion } from "three";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, writeFile, stat, readFile } from "node:fs/promises";
 import { animationDigest } from "./animation-io.mjs";
+import { RELIC_BLADE } from "../../src/weapon-spec.ts";
 
 const project = fileURLToPath(new URL("../../", import.meta.url));
 const inputDirectory = process.argv[2]
@@ -17,16 +18,25 @@ const expected = {
   Attack1: 0.74,
   Attack2: 0.7,
   Attack3: 1,
-  DodgeLeft: 0.52,
-  DodgeRight: 0.52,
-  DodgeBack: 0.52,
-  DodgeForward: 0.52,
+  DodgeLeft: 0.82,
+  DodgeRight: 0.82,
+  DodgeBack: 0.82,
+  DodgeForward: 0.82,
   HitFront: 0.4,
   HitLeft: 0.42,
   HitRight: 0.46,
   Guard: 0.8,
   BlockHit: 0.32,
+  DeathFront: 1.75,
+  DeathBack: 1.85,
+  DeathSide: 1.7,
 };
+const baseline = JSON.parse(
+  await readFile(
+    fileURLToPath(new URL("./seeds/combat-v2-digests.json", import.meta.url)),
+    "utf8",
+  ),
+);
 function structure(doc) {
   const nodes = doc.getRoot().listNodes(),
     byName = new Map(nodes.map((n) => [n.getName(), n])),
@@ -210,13 +220,19 @@ for (const [file, model, seed] of [
 ]) {
   const doc = await io.read(resolve(inputDirectory, file)),
     root = doc.getRoot();
-  assert.equal(root.listAnimations().length, 13);
+  assert.equal(root.listAnimations().length, 16);
   assert.equal(root.listMeshes().length, 0);
   assert.equal(root.listSkins().length, 0);
   assert.equal(root.listTextures().length, 0);
   const animations = new Map(
     root.listAnimations().map((a) => [a.getName(), a]),
   );
+  for (const [name, digest] of Object.entries(baseline[file]))
+    assert.equal(
+      animationDigest(animations.get(name)),
+      digest,
+      `${file}/${name}: v2 baseline changed`,
+    );
   for (const [name, duration] of Object.entries(expected)) {
     const a = animations.get(name);
     assert.ok(a, `Missing ${name}`);
@@ -317,16 +333,107 @@ for (const [file, model, seed] of [
     }
   assert.ok(minFloor >= -0.005, `${file}: floor penetration ${minFloor}`);
   assert.ok(maxFloor < 0.04, `${file}: unexplained floating ${maxFloor}`);
+  const fullBody = [];
+  for (const name of [
+    "DodgeForward",
+    "DodgeBack",
+    "DodgeLeft",
+    "DodgeRight",
+    "DeathFront",
+    "DeathBack",
+    "DeathSide",
+  ]) {
+    const a = animations.get(name),
+      duration = expected[name];
+    const pelvis = info.byName.get("pelvis"),
+      head = info.byName.get("head");
+    let minimumTorsoUp = 1,
+      minimumWeaponY = Infinity,
+      minimumRelicY = Infinity;
+    const frameMetrics = [];
+    for (let i = 0; i <= Math.ceil(duration * 60); i++) {
+      const t = Math.min(duration, i / 60),
+        pose = sample(info, a, t);
+      const hip = position(info, pose, pelvis),
+        skull = position(info, pose, head);
+      const torsoUp = skull.clone().sub(hip).normalize().y;
+      minimumTorsoUp = Math.min(minimumTorsoUp, torsoUp);
+      const handWorld = world(info, pose, hand);
+      const grip = new Vector3(0, 0.06, 0).applyMatrix4(handWorld);
+      const tip = new Vector3(0, 0.06, -0.9).applyMatrix4(handWorld);
+      minimumWeaponY = Math.min(minimumWeaponY, grip.y, tip.y);
+      if (file === "prisoner-combat.glb" && name.startsWith("Dodge")) {
+        // Conservative bounds include the whole curved blade and bevels.
+        for (const x of [RELIC_BLADE.minX, RELIC_BLADE.maxX])
+          for (const y of [0, RELIC_BLADE.maxY])
+            for (const thickness of [
+              -RELIC_BLADE.halfThickness,
+              RELIC_BLADE.halfThickness,
+            ]) {
+              const corner = new Vector3(
+                x * RELIC_BLADE.widthScale,
+                0.06 + thickness,
+                -RELIC_BLADE.baseY - y * RELIC_BLADE.lengthScale,
+              ).applyMatrix4(handWorld);
+              minimumRelicY = Math.min(minimumRelicY, corner.y);
+            }
+      }
+      if (i % 10 === 0)
+        frameMetrics.push({
+          time: t,
+          torsoUp,
+          pelvis: hip.toArray(),
+          head: skull.toArray(),
+        });
+    }
+    if (name.startsWith("Dodge")) {
+      assert.ok(
+        minimumTorsoUp < -0.7,
+        `${file}/${name}: no readable full-body inversion (${minimumTorsoUp})`,
+      );
+      const guard = sample(info, animations.get("Guard"), 0);
+      for (const t of [0, duration])
+        assert.ok(
+          surfaceDelta(info, sample(info, a, t), guard, meshes) < 2e-5,
+          `${file}/${name}: Guard endpoint seam`,
+        );
+    } else {
+      const last = sample(info, a, duration),
+        before = sample(info, a, duration - 0.08);
+      assert.ok(
+        surfaceDelta(info, last, before, meshes) < 1e-5,
+        `${file}/${name}: corpse not settled at end`,
+      );
+    }
+    assert.ok(
+      minimumWeaponY >= -0.005,
+      `${file}/${name}: attached 0.9m blade intersects floor`,
+    );
+    if (Number.isFinite(minimumRelicY))
+      assert.ok(
+        minimumRelicY >= 0,
+        `${file}/${name}: relic blade intersects floor (${minimumRelicY})`,
+      );
+    fullBody.push({
+      name,
+      minimumTorsoUp,
+      minimumWeaponY,
+      minimumRelicY: Number.isFinite(minimumRelicY) ? minimumRelicY : null,
+      frameMetrics,
+    });
+  }
   reports.push({
     file,
     bytes: (await stat(resolve(inputDirectory, file))).size,
-    clips: 13,
+    clips: 16,
     channelsEach: 44,
     finiteNormalized: true,
     deathUnchanged: true,
+    attacksV2Unchanged: true,
     minFloor,
     maxFloor,
     seams,
+    fullBody,
   });
 }
 const work = resolve(project, "work/asset-authoring");
@@ -335,4 +442,13 @@ await writeFile(
   resolve(work, "validation-report.json"),
   JSON.stringify(reports, null, 2) + "\n",
 );
-console.log(JSON.stringify(reports, null, 2));
+console.log(
+  JSON.stringify(
+    reports.map(({ fullBody, ...summary }) => ({
+      ...summary,
+      fullBody: fullBody.map(({ frameMetrics, ...metrics }) => metrics),
+    })),
+    null,
+    2,
+  ),
+);

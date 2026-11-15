@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { loadAuthorRig } from "./rig-authoring.mjs";
 import { makeCombatPoses } from "./combat-poses.mjs";
+import { makeDodgeDeathPoses } from "./dodge-death-poses.mjs";
 import {
   animationOnly,
   copyAnimation,
@@ -23,7 +24,16 @@ const {
   position,
   worldQ,
 } = rig;
-const { descriptors, contract } = makeCombatPoses(rig);
+const combat = makeCombatPoses(rig);
+const { contract } = combat;
+const dodgeDeath = await makeDodgeDeathPoses(
+  rig,
+  combat.descriptors.find((d) => d.name === "Guard").poseAt,
+);
+const descriptors = [
+  ...combat.descriptors.filter((d) => !d.name.startsWith("Dodge")),
+  ...dodgeDeath.descriptors,
+];
 const deathSeed = await io.read(
   fileURLToPath(new URL("./seeds/death-knight.glb", import.meta.url)),
 );
@@ -34,9 +44,9 @@ const preservedDeath = deathSeed
 for (const old of [...root.listAnimations()]) old.dispose();
 copyAnimation(preservedDeath, doc);
 const report = {
-  version: 2,
+  version: 3,
   method:
-    "Continuous Hermite target curves, per-sample FK/IK and weighted skin floor alignment",
+    "Continuous FK/IK combat v2 plus CC0 Quaternius full-body roll/death adaptation v3 and weighted skin floor alignment",
   clips: [],
 };
 function poseAt(descriptor, t) {
@@ -58,8 +68,11 @@ for (const descriptor of descriptors) {
   ].sort((a, b) => a - b);
   const poses = times.map((t) => poseAt(descriptor, t));
   const animation = doc.createAnimation(name).setExtras({
-    provenance: "Original new0 FK/IK skeletal keyframes, not captured motion",
-    version: 2,
+    provenance:
+      descriptor.provenance ??
+      "Original new0 FK/IK skeletal keyframes, not captured motion",
+    version: descriptor.fullBody ? 3 : 2,
+    fullBody: descriptor.fullBody ?? false,
     ...(contract[name] ?? {}),
   });
   const buffer = root.listBuffers()[0];
@@ -192,11 +205,13 @@ const metadata = {
       .map(([name, c]) => [name, c.link]),
   ),
   retarget:
-    "Asset-time native Idle world delta with destination arm/leg IK and weighted skin floor alignment.",
+    "Asset-time native Idle world delta, destination arm/leg IK for grounded combat, direct FK for full-body rolls/falls, baked target Guard endpoints and weighted skin floor alignment.",
+  motionSources: dodgeDeath.provenance,
 };
 root.getAsset().extras = {
   sourceRig: "Patch anymove knight CC0",
-  motion: "Original new0 FK/IK combat poses v2, no external mocap",
+  motion:
+    "Original new0 combat v2 with CC0 Quaternius Roll/Death01 adaptation and directional falls v3",
   weapon: metadata.weapon,
   contract,
 };
@@ -223,13 +238,18 @@ await writeFile(
   resolve(out, "contract.json"),
   JSON.stringify(
     {
-      version: 2,
+      version: 3,
       attacks: contract,
-      dodges: 0.52,
+      dodges: 0.82,
+      dodgeTravel: { start: 0.14, end: 0.65, distance: 2.25 },
       hits: { HitFront: 0.4, HitLeft: 0.42, HitRight: 0.46 },
       Guard: 0.8,
       BlockHit: 0.32,
       Death: 1.6,
+      DeathFront: 1.75,
+      DeathBack: 1.85,
+      DeathSide: 1.7,
+      provenance: dodgeDeath.provenance,
     },
     null,
     2,

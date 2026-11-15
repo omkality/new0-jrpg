@@ -6,65 +6,57 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#343d3b" />
-    <title>new0 · Нулевой архив</title>
+    <meta name="theme-color" content="#253442" />
+    <title>new0 · демо</title>
     <script src="https://telegram.org/js/telegram-web-app.js?65"></script>
   </head>
   <body>
     <div id="app">
-      <canvas id="world" tabindex="0" aria-label="Трёхмерный зал архива"></canvas>
+      <canvas
+        id="world"
+        tabindex="0"
+        aria-label="Трёхмерная сцена new0"
+      ></canvas>
       <canvas id="atmosphere" aria-hidden="true"></canvas>
       <canvas id="hud" aria-hidden="true"></canvas>
-      <header>
-        <a
-          class="wordmark"
-          href="#"
-          target="_blank"
-          rel="noopener noreferrer"
-          >new0<span>®</span></a
-        ><span class="location" id="location-name">МАЛАХИТОВЫЙ НЕФ</span>
-        <div class="top-actions">
-          <button id="sound" aria-label="Включить звук" title="Звук">♪</button
-          ><button id="pause" aria-label="Пауза">Ⅱ</button>
-        </div>
-      </header>
+      <h1 class="sr-only">new0</h1>
       <section id="intro" class="overlay">
-        <div class="intro-card">
-          <span class="eyebrow">NEW0 PRESENTS · ИГРОВАЯ ДЕМКА</span>
-          <h1>Нулевой<br /><em>архив.</em></h1>
-          <p>
-            Свет ещё держится в камне.<br />Пройди зал. Разбуди стража. Найди
-            выход.
-          </p>
-          <button id="start" class="primary" disabled>Подготовка сцены…</button>
-          <label class="encounter-label">Место
-            <select id="location" aria-label="Локация">
-              <option value="chapel">Малахитовый неф</option>
-              <option value="roofs">Багровые крыши</option>
-              <option value="courtyard">Двор забвения</option>
-            </select>
-          </label>
-          <label class="encounter-label"
-            >Встреча
-            <select id="encounter" aria-label="Противник">
-              <option value="gaoler">Носильщик</option>
-              <option value="effigy">Пустая кукла</option>
-              <option value="watcher">Смотритель</option>
-            </select></label
-          >
-          <p class="intro-controls">
-            Стик · движение &nbsp; Пальцем · обзор<br />Удар · цепочка &nbsp; Шаг · уклонение
-          </p>
-          <small>На телефоне: стик, обзор пальцем, удар, шаг и блок.</small>
-          <button id="device-check" class="secondary" disabled>Автопроверка устройства</button>
-          <small class="check-note">Около минуты. Автопроход и замер кадров на этом устройстве. Технический отчёт будет отправлен разработчику.</small>
+        <div class="start-card">
+          <button id="autoplay" class="primary" disabled>Подготовка…</button>
+          <output id="check-result" class="hidden" aria-live="polite"></output>
         </div>
-        <span class="demo-note"
-          >Локальная демка · без зачётных результатов</span
-        >
+        <footer class="credits">
+          Персонажи:
+          <a
+            href="https://patch.gg/create/toolbox"
+            target="_blank"
+            rel="noopener"
+            >Patch</a
+          >, CC0, AI.<br />
+          Текстуры:
+          <a
+            href="https://goblinatron.itch.io/psx-dungeon"
+            target="_blank"
+            rel="noopener"
+            >PSX Dungeon · Goblinatron</a
+          >,
+          <a
+            href="https://creativecommons.org/licenses/by/4.0/"
+            target="_blank"
+            rel="noopener"
+            >CC BY 4.0</a
+          >, тонирование.<br />
+          Движения:
+          <a
+            href="https://quaternius.itch.io/universal-animation-library"
+            target="_blank"
+            rel="noopener"
+            >Quaternius</a
+          >, CC0, адаптация.
+        </footer>
       </section>
       <div id="touch-controls" class="hidden">
-        <div id="joystick" aria-label="Экранный стик для перемещения">
+        <div id="joystick" aria-label="Экранный стик">
           <div id="joystick-knob"></div>
         </div>
         <div class="touch-actions">
@@ -72,84 +64,15 @@
             <span>◇</span><small>БЛОК</small>
           </button>
           <button id="dodge" aria-label="Уклониться">
-            <span>↝</span><small>ШАГ</small></button
-          ><button id="attack" aria-label="Атаковать">
+            <span>↝</span><small>ПЕРЕКАТ</small>
+          </button>
+          <button id="attack" aria-label="Атаковать">
             <span>†</span><small>УДАР</small>
           </button>
         </div>
       </div>
-      <button id="interact" class="hidden">E · Исследовать</button>
-      <section id="pause-panel" class="overlay hidden">
-        <div class="panel">
-          <span class="eyebrow">ПАУЗА</span>
-          <h2>Архив подождёт</h2>
-          <p>
-            Двигайся свободно. Подойди к стражу и атакуй. Его замах даёт время
-            отойти или уклониться. Между ударами выносливость восстанавливается.
-          </p>
-          <p class="key-help">
-            WASD · движение<br />Клик или J · удар<br />Пробел / Shift · быстрый
-            шаг<br />ПКМ или F · блок<br />E · взаимодействие<br />Q · захват
-            цели<br />Потянуть мышью · обзор
-          </p>
-          <label class="brightness"
-            >Яркость
-            <input
-              id="brightness"
-              aria-label="Яркость"
-              type="range"
-              min="0.8"
-              max="1.8"
-              step="0.05"
-              value="1.0" /></label
-          ><button id="resume" class="primary">Продолжить</button
-          ><button id="restart">Начать заново</button>
-          <details>
-            <summary>Материалы и авторы</summary>
-            <p>
-              Персонажи и базовые движения
-              <a
-                href="https://patch.gg/create/toolbox"
-                target="_blank"
-                rel="noopener"
-                >Patch</a
-              >, CC0. Исходная модель и базовые движения созданы с помощью AI.
-              Для демки созданы одеяния, маски и отдельные боевые движения.
-            </p>
-            <p>
-              Текстуры
-              <a
-                href="https://goblinatron.itch.io/psx-dungeon"
-                target="_blank"
-                rel="noopener"
-                >PSX Dungeon by Goblinatron</a
-              >,
-              <a
-                href="https://creativecommons.org/licenses/by/4.0/"
-                target="_blank"
-                rel="noopener"
-                >CC BY 4.0</a
-              >. В игре применены тонирование, повторение и освещение.
-            </p>
-          </details>
-        </div>
-      </section>
-      <section id="ending" class="overlay hidden">
-        <div class="panel">
-          <span class="eyebrow" id="ending-label"></span>
-          <h2 id="ending-title"></h2>
-          <p id="ending-text"></p>
-          <button id="retry" class="primary">Пройти ещё раз</button
-          ><a
-            class="shop-link"
-            href="#"
-            target="_blank"
-            rel="noopener noreferrer"
-            >К магазину new0 ↗</a
-          >
-        </div>
-      </section>
-      <div id="toast" role="status" class="hidden"></div>
+      <button id="interact" class="hidden">Исследовать</button>
+      <div id="toast" role="status" class="sr-only hidden"></div>
       <div id="review" class="hidden">
         <select id="review-location" aria-label="Показать локацию">
           <option value="chapel">Малахитовый неф</option>
@@ -158,36 +81,20 @@
         </select>
         <select id="review-enemy" aria-label="Показать противника">
           <option value="gaoler">Носильщик</option>
-          <option value="effigy">Пустая кукла</option>
           <option value="watcher">Смотритель</option>
+          <option value="effigy">Пустая кукла</option>
         </select>
-        <button id="showcase">Автопоказ</button
-        ><button id="record">Записать 20 секунд</button
-        ><a id="download" class="hidden" download="new0-realtime-demo.webm"
-          >Скачать запись</a
-        ><output id="performance" aria-label="Производительность"></output>
+        <button id="showcase">Показать проход</button>
+        <button id="manual">Ручная проверка</button>
+        <button id="record">Записать проход</button>
+        <a id="download" class="hidden" download>Скачать запись</a>
+        <a id="check-download" class="hidden" download="new0-device-check.json"
+          >Технический отчёт</a
+        >
+        <output id="performance" aria-label="Производительность"></output>
       </div>
-      <aside id="check-progress" class="hidden" aria-live="polite">
-        <strong id="check-status"></strong>
-        <output id="check-performance"></output>
-        <span>Автопроход · оставь приложение открытым</span>
-        <button id="cancel-check">Остановить проверку</button>
-      </aside>
-      <section id="check-result" class="overlay hidden">
-        <div class="panel">
-          <span class="eyebrow">ЗАМЕР НА ЭТОМ УСТРОЙСТВЕ</span>
-          <h2 id="check-title">Автопроверка завершена</h2>
-          <p id="check-summary"></p>
-          <div id="check-stages"></div>
-          <p id="check-upload" role="status"></p>
-          <button id="retry-upload" class="hidden">Повторить отправку</button>
-          <a id="check-download" class="shop-link" download="new0-device-check.json">Скачать технический отчёт</a>
-          <button id="close-check" class="primary">Играть самостоятельно</button>
-        </div>
-      </section>
       <div id="fatal" class="overlay hidden">
-        <div class="panel">
-          <h2>Не удалось открыть архив</h2>
+        <div class="start-card">
           <p id="fatal-text"></p>
           <button id="reload" class="primary">Повторить загрузку</button>
         </div>

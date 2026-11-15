@@ -17,9 +17,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/assets/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npm test
+      - run: npm ci --prefix scripts/assets --no-audit --no-fund
+      - run: npm --prefix scripts/assets run check
       - run: python3 scripts/update_badges.py --check
       - run: docker compose --profile test run --build --rm tests
       - run: docker compose up -d --build --wait
