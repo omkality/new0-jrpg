@@ -1,0 +1,324 @@
+@media (max-width: 700px) {
+  .topbar {
+    left: 20px !important;
+    right: 20px !important;
+    top: calc(17px + var(--safe-top)) !important;
+  }
+  .location {
+    font-size: 7px !important;
+    letter-spacing: 1.3px !important;
+    gap: 7px !important;
+  }
+  .chapter-label,
+  .location i {
+    display: none !important;
+  }
+  .wordmark {
+    font-size: 28px !important;
+  }
+  .top-actions {
+    gap: 5px !important;
+  }
+  .icon-button {
+    width: 33px !important;
+    height: 33px !important;
+  }
+  .world-caption {
+    left: 20px !important;
+    right: 20px !important;
+    top: calc(76px + var(--safe-top)) !important;
+    font-size: 6px !important;
+    letter-spacing: 1.3px !important;
+  }
+  .quest {
+    top: calc(109px + var(--safe-top)) !important;
+    left: 20px !important;
+    max-width: 180px !important;
+  }
+  .quest p {
+    font-size: 11px !important;
+    max-width: 175px !important;
+    margin-top: 7px !important;
+  }
+  .quest .eyebrow {
+    font-size: 7px !important;
+  }
+  .intro {
+    background: linear-gradient(
+      90deg,
+      #0b120ee6,
+      #0b120ea6 75%,
+      #0b120e55
+    ) !important;
+  }
+  .intro-content {
+    left: 8% !important;
+    right: 8% !important;
+    top: 47% !important;
+    transform: translateY(-38%) !important;
+    width: auto !important;
+    max-width: 360px;
+  }
+  .intro h1 {
+    font-size: 75px !important;
+    letter-spacing: -3px !important;
+    margin-top: 23px !important;
+  }
+  .intro-description {
+    font-size: 12px !important;
+    margin-bottom: 26px !important;
+  }
+  .intro-content > .eyebrow {
+    font-size: 8px !important;
+  }
+  .intro-bottom {
+    left: 20px !important;
+    right: 20px !important;
+    bottom: calc(23px + var(--safe-bottom)) !important;
+    font-size: 6px !important;
+    letter-spacing: 1px !important;
+  }
+  .intro-bottom > span:first-child {
+    max-width: 200px;
+  }
+  .intro-meta {
+    font-size: 6px !important;
+    letter-spacing: 0.7px !important;
+  }
+  .explore-hud {
+    left: 20px !important;
+    right: 20px !important;
+    bottom: calc(22px + var(--safe-bottom)) !important;
+  }
+  .player-chip small {
+    font-size: 8px !important;
+    max-width: 165px !important;
+  }
+  .player-chip > div > span {
+    font-size: 8px !important;
+  }
+  .player-symbol {
+    width: 30px !important;
+    height: 36px !important;
+    font-size: 22px !important;
+  }
+  .found-counter {
+    gap: 9px !important;
+  }
+  .found-counter > span {
+    font-size: 6px !important;
+    letter-spacing: 1px !important;
+  }
+  .found-counter strong {
+    font-size: 22px !important;
+  }
+  .controls-hint {
+    display: none !important;
+  }
+  .interaction {
+    bottom: calc(229px + var(--safe-bottom)) !important;
+  }
+  .interaction > span {
+    font-size: 9px !important;
+  }
+  .interaction button {
+    font-size: 10px !important;
+    padding: 10px 14px !important;
+  }
+  .modal-backdrop {
+    padding: 17px !important;
+    padding-top: calc(20px + var(--safe-top)) !important;
+  }
+  .modal-card {
+    padding: 31px 24px !important;
+  }
+  .modal-card h2 {
+    font-size: 33px !important;
+  }
+  .modal-card p {
+    font-size: 12px !important;
+  }
+  .battle-top {
+    left: 20px !important;
+    right: 20px !important;
+    top: calc(115px + var(--safe-top)) !important;
+    gap: 12px !important;
+  }
+  .combatant {
+    width: 43% !important;
+  }
+  .combatant .eyebrow {
+    font-size: 7px !important;
+    letter-spacing: 1px !important;
+  }
+  .hp-row {
+    gap: 5px !important;
+  }
+  .hp-row > span {
+    min-width: 31px !important;
+    font-size: 8px !important;
+  }
+  .enemy p {
+    font-size: 9px !important;
+    line-height: 1.5 !important;
+  }
+  .turn-label > span {
+    font-size: 6px !important;
+  }
+  .turn-label strong {
+    font-size: 22px !important;
+  }
+  .charge-display > span {
+    display: none !important;
+  }
+  .battle-bottom {
+    bottom: calc(24px + var(--safe-bottom)) !important;
+    width: calc(100% - 30px) !important;
+  }
+  .battle-log {
+    display: block !important;
+    margin: 0 5px 16px !important;
+  }
+  .battle-log p {
+    font-size: 11px !important;
+    min-height: 32px !important;
+    margin-top: 8px !important;
+  }
+  .battle-actions {
+    gap: 6px !important;
+  }
+  .battle-actions button {
+    padding: 12px 8px !important;
+    display: block !important;
+    text-align: center !important;
+    min-height: 98px !important;
+  }
+  .battle-actions button .action-icon {
+    font-size: 25px !important;
+    display: block !important;
+    width: auto !important;
+    height: 30px;
+  }
+  .battle-actions b {
+    font-size: 17px !important;
+  }
+  .battle-actions small {
+    font-size: 7px !important;
+    line-height: 1.6 !important;
+    margin-top: 5px !important;
+  }
+  .battle-actions kbd {
+    display: none !important;
+  }
+  .toast {
+    top: calc(85px + var(--safe-top)) !important;
+    font-size: 11px !important;
+    padding: 12px 16px !important;
+    width: max-content;
+    max-width: 90vw;
+  }
+  .joystick {
+    left: 22px !important;
+  }
+  .touch-interact {
+    right: 25px !important;
+  }
+  .fatal {
+    padding: 20vh 25px !important;
+  }
+}
+@media (max-width: 700px) {
+  .intro h1 {
+    font-size: clamp(55px, 18vw, 75px) !important;
+  }
+  .wordmark {
+    white-space: nowrap !important;
+    flex-shrink: 0;
+  }
+  .location {
+    white-space: nowrap !important;
+  }
+  .top-actions {
+    flex-shrink: 0;
+  }
+}
+@media (max-width: 359px) {
+  .topbar .location {
+    display: none !important;
+  }
+  .found-counter > span {
+    display: none !important;
+  }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .intro-content {
+    top: 49% !important;
+    width: 330px !important;
+  }
+  .intro h1 {
+    font-size: 56px !important;
+    margin: 14px 0 !important;
+  }
+  .intro-description {
+    font-size: 10px !important;
+    margin-bottom: 16px !important;
+  }
+  .intro-controls {
+    display: none !important;
+  }
+  .intro-bottom {
+    bottom: 13px !important;
+  }
+  .intro-meta {
+    margin-top: 8px !important;
+  }
+  .primary-button {
+    min-height: 43px !important;
+    padding: 12px 17px !important;
+  }
+  .world-caption {
+    display: none !important;
+  }
+  .quest {
+    top: 95px !important;
+  }
+  .quest p {
+    font-size: 10px !important;
+  }
+  .battle-top {
+    top: 90px !important;
+    left: 5% !important;
+    right: 5% !important;
+  }
+  .battle-bottom {
+    bottom: 15px !important;
+  }
+  .battle-actions button {
+    min-height: 57px !important;
+    padding: 10px !important;
+  }
+  .battle-actions b {
+    font-size: 17px !important;
+  }
+  .battle-log {
+    margin-bottom: 10px !important;
+  }
+  .touch-controls {
+    bottom: 70px !important;
+    height: 90px !important;
+  }
+  .joystick {
+    width: 90px !important;
+    height: 90px !important;
+  }
+  .joystick #joystick-knob {
+    left: 23px;
+    top: 23px;
+  }
+  .interaction {
+    bottom: 88px !important;
+  }
+  .explore-hud {
+    bottom: 15px !important;
+  }
+}

@@ -1,0 +1,9 @@
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:8086:80"
+  api:
+    environment:
+      LEADERBOARD_VERSION: smoke-001
+      ALLOW_GUEST: "true"
+      COMPETITION_OPEN: "false"

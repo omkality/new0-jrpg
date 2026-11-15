@@ -1,0 +1,45 @@
+name: new0-game
+services:
+  web:
+    image: new0-game-web:0.1.0
+    build: .
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8085}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  api:
+    image: new0-game-api:0.1.0
+    build:
+      context: ./server
+      target: base
+    environment:
+      TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-9210184678}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      LEADERBOARD_VERSION: ${LEADERBOARD_VERSION:-prototype-001}
+      LEADERBOARD_TITLE: ${LEADERBOARD_TITLE:-Тестовый архив 001}
+      COMPETITION_OPEN: ${COMPETITION_OPEN:-false}
+      ATTEMPT_LIMIT: ${ATTEMPT_LIMIT:-0}
+      ALLOW_GUEST: ${ALLOW_GUEST:-true}
+      DATABASE_PATH: /data/game.sqlite3
+    volumes:
+      - game-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+  tests:
+    image: new0-game-tests:0.1.0
+    profiles: [test]
+    build:
+      context: ./server
+      target: test
+    command: ["python", "-m", "pytest", "-q", "-o", "cache_dir=/tmp/new0-pytest"]
+    environment:
+      DATABASE_PATH: /tmp/test-game.sqlite3
+      ALLOW_GUEST: "false"
+volumes:
+  game-data:
