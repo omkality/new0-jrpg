@@ -159,6 +159,18 @@ export function floorHeight(x: number, z: number) {
 // cannot acquire a second entrance because its visual and collision walls differ.
 export const WALLS: Wall[] = [
   ...[-1, 1].map(
+    (side): Wall => ({
+      id: `forest-ruin-${side}`,
+      area: "forest",
+      x: side * 6.7,
+      z: -5,
+      hx: 0.5,
+      hz: 2.2,
+      base: 0,
+      height: 1.3,
+    }),
+  ),
+  ...[-1, 1].map(
     (s): Wall => ({
       id: `gate-wing-${s}`,
       area: "forest",
@@ -310,7 +322,48 @@ export const DRESSING = [
   { kind: "tomb", area: "crypt", x: 6.7, z: -91.3, y: 2.4, yaw: 0 },
   { kind: "tomb", area: "crypt", x: 4.8, z: -92.5, y: 2.4, yaw: Math.PI / 2 },
 ] as const;
+export const COURT_COLUMNS = [-1, 1].flatMap((side) =>
+  [-24, -34, -40].map((z) => ({ x: side * 6.6, z })),
+);
+export const CRYPT_BAYS = [-1, 1].flatMap((side) =>
+  [-80, -86, -92, -98].map((z) => ({ x: side * 5.8, z })),
+);
 export const OBSTACLES: Obstacle[] = [
+  ...COURT_COLUMNS.map((p) => ({
+    ...p,
+    hx: 0.43,
+    hz: 0.43,
+    minY: 2.3,
+    maxY: 6.9,
+  })),
+  ...CRYPT_BAYS.map((p) => ({
+    ...p,
+    hx: 1.08,
+    hz: 0.58,
+    minY: 2.3,
+    maxY: 6.1,
+  })),
+  ...[-1, 1].flatMap((side) =>
+    [-1, 1].map((leg) => ({
+      x: side * 5.8 + leg * 1.09,
+      z: -3.84,
+      hx: 0.13,
+      hz: 0.2,
+      minY: -0.1,
+      maxY: 1.1,
+    })),
+  ),
+  ...[-1, 1].flatMap((side) =>
+    [0, 1, 2].map((i) => ({
+      x: side * (4.8 + i * 0.8),
+      z: -11,
+      hx: 0.35,
+      hz: 0.5,
+      minY: -0.1,
+      maxY: 0.46,
+    })),
+  ),
+  { x: 6.9, z: 3.85, hx: 1.2, hz: 1.05, minY: -0.1, maxY: 0.75 },
   ...DRESSING.map((d) => ({
     x: d.x,
     z: d.z,
@@ -323,7 +376,15 @@ export const OBSTACLES: Obstacle[] = [
     hz:
       d.kind === "bench" ? 1.1 : d.kind === "tomb" && d.yaw === 0 ? 0.93 : 0.43,
     minY: d.y - 0.1,
-    maxY: d.y + 1.9,
+    maxY:
+      d.y +
+      (d.kind === "tomb"
+        ? 0.8
+        : d.kind === "bench"
+          ? 1.05
+          : d.kind === "crate"
+            ? 0.95
+            : 2.2),
   })),
   ...WALLS.map((w) => ({ ...w, minY: w.base - 0.1, maxY: w.base + w.height })),
   ...CHESTS.map((c) => ({
@@ -344,8 +405,8 @@ export const OBSTACLES: Obstacle[] = [
     door: d.id,
   })),
   // Stair balustrades. The entrance and the lower return stay open.
-  { x: 3.35, z: -56, hx: 0.13, hz: 6.7 },
-  { x: 6.65, z: -58.5, hx: 0.13, hz: 10.5 },
+  { x: 3.35, z: -56, hx: 0.13, hz: 6.7, minY: 2.3, maxY: 6.45 },
+  { x: 6.65, z: -58.5, hx: 0.13, hz: 10.5, minY: 2.3, maxY: 6.45 },
   // Real portal wings and the lectern alcove.
   ...[-42.3, -69.4].flatMap((z) =>
     [-1, 1].map((s) => ({
@@ -361,16 +422,27 @@ export const OBSTACLES: Obstacle[] = [
   { x: -3.3, z: -47.3, hx: 0.15, hz: 0.8, minY: 2.3, maxY: 5.2 },
   { x: -5.4, z: -48.1, hx: 1.4, hz: 0.15, minY: 2.3, maxY: 5.2 },
   ...[-45, -51, -58, -65].flatMap((z) =>
-    [-6.5, 2.85].map((x) => ({ x, z, hx: 0.33, hz: 0.33 })),
+    [-6.5, 2.85].map((x) => ({
+      x,
+      z,
+      hx: 0.55,
+      hz: 0.55,
+      minY: 2.3,
+      maxY: 6.1,
+    })),
   ),
-  { x: -4.5, z: -46, hx: 0.55, hz: 0.48 },
-  { x: -3.8, z: 1.3, hx: 0.48, hz: 0.4 },
+  { x: -4.5, z: -46, hx: 0.675, hz: 0.55, minY: 2.3, maxY: 3.42 },
+  { x: -3.8, z: 1.3, hx: 0.75, hz: 0.55, minY: -0.1, maxY: 0.97 },
 ];
 export const TREES: Point[] = [];
 for (let i = 0; i < 66; i++) {
   const side = i % 2 ? -1 : 1;
   const x = side * (7.2 + ((i * 7) % 19) * 0.72);
   const z = 13 - ((i * 11) % 49) * 0.8;
+  // The forest ends at the gate. Near trees must not grow through the raised
+  // stone courtyard or put their crowns inside its follow-camera corridor.
+  if (z < -12.5 && Math.abs(x) < 14) continue;
   TREES.push({ x, z });
-  if (Math.abs(x) < 8) OBSTACLES.push({ x, z, hx: 0.45, hz: 0.45 });
+  if (Math.abs(x) < 8)
+    OBSTACLES.push({ x, z, hx: 0.45, hz: 0.45, minY: -0.3, maxY: 12 });
 }

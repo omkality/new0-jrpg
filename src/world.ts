@@ -257,26 +257,6 @@ export class World {
     );
     if (this.location === "crypt")
       this.desiredPosition.y = Math.min(this.desiredPosition.y, 6.35);
-    // Analytic column occlusion, independent of triangle count and map detail.
-    for (const o of this.game.obstacles) {
-      if (o.hx > 0.45 || o.hz > 0.45) continue;
-      const dx = this.desiredPosition.x - this.desiredAim.x,
-        dz = this.desiredPosition.z - this.desiredAim.z,
-        fx = this.desiredAim.x - o.x,
-        fz = this.desiredAim.z - o.z;
-      const a = dx * dx + dz * dz,
-        b = 2 * (fx * dx + fz * dz),
-        c = fx * fx + fz * fz - 0.65 * 0.65,
-        discriminant = b * b - 4 * a * c;
-      if (discriminant <= 0 || a < 0.01) continue;
-      const t = (-b - Math.sqrt(discriminant)) / (2 * a);
-      if (t > 0.15 && t < 1)
-        this.desiredPosition.lerpVectors(
-          this.desiredAim,
-          this.desiredPosition,
-          Math.max(0.28, t - 0.06),
-        );
-    }
     const alpha = 1 - Math.exp(-dt * 8);
     this.cameraFocus.set(p.x, p.y + 1.2, p.z);
     if (inspect) this.cameraFocus.copy(this.desiredAim);

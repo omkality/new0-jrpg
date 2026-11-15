@@ -13,7 +13,7 @@ export function cameraClearance(
   let fraction = 1;
   for (const o of obstacles) {
     if (o.door && openDoors.has(o.door)) continue;
-    // Finite vertical bounds identify walls/doors, not the old 2D rail proxies.
+    // Height separates low furniture from columns, walls and door leaves.
     if (o.minY === undefined || o.maxY === undefined) continue;
     let near = 0,
       far = 1;

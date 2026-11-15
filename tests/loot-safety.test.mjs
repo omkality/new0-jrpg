@@ -121,3 +121,20 @@ test("the black gate blocks both flanks and only its own key opens the passage",
   tick(g, 2, { ...rest, z: -1 });
   assert.ok(g.player.z < -14.5);
 });
+
+test("court columns block movement instead of letting the player walk through stone", () => {
+  const g = quiet("roofs");
+  Object.assign(g.player, { x: 6.6, y: 2.4, z: -22 });
+  tick(g, 3, { ...rest, z: -1 });
+  assert.ok(g.player.z > -23.4);
+});
+test("crypt cages block their stone bases while the inner aisle remains traversable", () => {
+  const blocked = quiet("crypt"),
+    aisle = quiet("crypt");
+  Object.assign(blocked.player, { x: -5, y: 2.4, z: -78.5 });
+  tick(blocked, 4, { ...rest, z: -1 });
+  assert.ok(blocked.player.z > -79.2);
+  Object.assign(aisle.player, { x: -4.3, y: 2.4, z: -78.5 });
+  tick(aisle, 4, { ...rest, z: -1 });
+  assert.ok(aisle.player.z < -87);
+});

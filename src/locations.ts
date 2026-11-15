@@ -1,7 +1,15 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { assetUrl } from "./assets";
-import { areaAt, TREES, WALLS, DRESSING, type AreaId } from "./world-layout";
+import {
+  areaAt,
+  TREES,
+  WALLS,
+  DRESSING,
+  COURT_COLUMNS,
+  CRYPT_BAYS,
+  type AreaId,
+} from "./world-layout";
 
 export const LOCATIONS = {
   forest: { name: "Лес у Чёрных ворот", fog: 0x939b9e, density: 0.027 },
@@ -482,7 +490,6 @@ export class ConnectedEnvironment {
     leaves.computeBoundingSphere();
     this.group("forest").add(trunks, leaves);
     for (const side of [-1, 1]) {
-      this.box(1, 1.3, 4.4, side * 6.7, 0.65, -5, this.wall, "forest");
       this.arch(side * 5.8, 0, -4, 1.2, 1.1, this.stone, "forest");
       for (let i = 0; i < 3; i++)
         this.box(
@@ -541,19 +548,9 @@ export class ConnectedEnvironment {
     for (const side of [-1, 1]) {
       this.box(0.45, 1.1, 22, side * 7.6, 2.95, -31, this.wall, "roofs");
       this.ironFence(side * 7.4, -31, 23, Math.PI / 2, "roofs", 3.5);
-      for (const z of [-24, -34, -40])
-        this.cylinder(
-          0.28,
-          0.43,
-          4.5,
-          14,
-          side * 6.6,
-          4.65,
-          z,
-          this.stone,
-          "roofs",
-        );
     }
+    for (const { x, z } of COURT_COLUMNS)
+      this.cylinder(0.28, 0.43, 4.5, 14, x, 4.65, z, this.stone, "roofs");
     this.arch(-4.5, 2.4, -26.2, 1.4, 2.1, this.stone, "roofs");
     this.box(2.8, 0.55, 1, -4.6, 2.68, -27.5, this.wall, "roofs");
     this.torch(-6.6, 4.3, -23.4, "roofs");
@@ -692,22 +689,22 @@ export class ConnectedEnvironment {
     this.ground(15.5, 27, 0, b, -89.5, s);
     for (const side of [-1, 1]) {
       this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
-      for (const z of [-80, -86, -92, -98]) {
-        this.cylinder(
-          0.28,
-          0.38,
-          3.6,
-          12,
-          side * 5.9,
-          b + 1.8,
-          z,
-          this.stone,
-          s,
-        );
-        this.arch(side * 5.8, b + 0.2, z, 1.05, 1.5, this.stone, s);
-        this.box(1.6, 0.26, 1.1, side * 5.8, b + 0.28, z, this.stone, s);
-        this.ironFence(side * 5.8, z + 0.3, 1.6, 0, s, b + 0.4);
-      }
+    }
+    for (const { x, z } of CRYPT_BAYS) {
+      this.cylinder(
+        0.28,
+        0.38,
+        3.6,
+        12,
+        x + Math.sign(x) * 0.1,
+        b + 1.8,
+        z,
+        this.stone,
+        s,
+      );
+      this.arch(x, b + 0.2, z, 1.05, 1.5, this.stone, s);
+      this.box(1.6, 0.26, 1.1, x, b + 0.28, z, this.stone, s);
+      this.ironFence(x, z + 0.3, 1.6, 0, s, b + 0.4);
     }
     // Four slabs leave a real break in the ceiling above the encounter.
     this.box(5.3, 0.35, 27, -5.15, b + 4.4, -89.5, this.dark, s);

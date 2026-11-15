@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cameraClearance } from "../src/camera-clearance.ts";
+import { OBSTACLES } from "../src/world-layout.ts";
 const wall = { x: 2, z: 0, hx: 0.2, hz: 4, minY: 0, maxY: 4 };
 test("the follow camera stays on the player side of a wide room wall", () => {
   const f = cameraClearance(
@@ -16,6 +17,20 @@ test("the follow camera stays on the player side of a wide room wall", () => {
       { x: 0, y: 5, z: 0 },
       { x: 4, y: 5, z: 0 },
       [wall],
+      new Set(),
+    ),
+    1,
+  );
+});
+
+test("the camera can see over the courtyard's low crate instead of treating it as a column", () => {
+  const crate = OBSTACLES.find((o) => o.x === 4.7 && o.z === -28.2);
+  assert.ok(crate);
+  assert.equal(
+    cameraClearance(
+      { x: 4.7, y: 3.7, z: -30.2 },
+      { x: 4.7, y: 4.2, z: -26.2 },
+      [crate],
       new Set(),
     ),
     1,
