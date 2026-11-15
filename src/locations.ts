@@ -1,819 +1,203 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { assetUrl } from "./assets";
-import { CHEST } from "./game";
+import { areaAt, TREES, type AreaId } from "./world-layout";
 
 export const LOCATIONS = {
-  chapel: {
-    name: "Малахитовый неф",
-    fog: 0x293e46,
-    density: 0.045,
-    sky: 0x17282e,
-    ambient: 0xa3b6ca,
-    ground: 0x171e29,
-    fill: 0xb4c6db,
-    sun: 0xc9dce7,
-    sunPower: 1.25,
-    torch: 3.2,
-  },
-  roofs: {
-    name: "Багровые крыши",
-    fog: 0x4d4459,
-    density: 0.026,
-    sky: 0x69556c,
-    ambient: 0xb9b0cc,
-    ground: 0x222331,
-    fill: 0xbcc9e1,
-    sun: 0xe0cedc,
-    sunPower: 1.1,
-    torch: 2.5,
-  },
-  courtyard: {
-    name: "Двор забвения",
-    fog: 0x526364,
-    density: 0.035,
-    sky: 0x7a898b,
-    ambient: 0xb3c8c6,
-    ground: 0x19272b,
-    fill: 0xb2c7d3,
-    sun: 0xd7e2e5,
-    sunPower: 1.15,
-    torch: 2.4,
-  },
+  forest: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
+  roofs: { name: "Воротный двор", fog: 0x535b64, density: 0.021 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0x26333b, density: 0.034 },
+  crypt: { name: "Зал погребённых", fog: 0x1e2a32, density: 0.043 },
+  courtyard: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
 export const LOCATION_IDS = Object.keys(LOCATIONS) as LocationId[];
-export const isLocation = (id: string | null): id is LocationId =>
-  !!id && Object.hasOwn(LOCATIONS, id);
+export const isLocation = (s: string | null): s is LocationId =>
+  !!s && Object.hasOwn(LOCATIONS, s);
+type Sector = AreaId | "world";
+const CENTERS: Record<AreaId, number> = {
+  forest: -1,
+  roofs: -29,
+  chapel: -55,
+  crypt: -88,
+};
+type WarmAnchor = {
+  x: number;
+  y: number;
+  z: number;
+  power: number;
+  range: number;
+};
+type BeamAnchor = {
+  x: number;
+  y: number;
+  z: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  power: number;
+  width: number;
+  area: AreaId;
+};
+const rand = (i: number) => {
+  const n = Math.sin(i * 127.13 + 6.71) * 43758.5453;
+  return n - Math.floor(n);
+};
 
-// A visual stage only. All three use the same combat rules and walkable bounds.
-export class LocationStage {
-  group = new THREE.Group();
-  gate = new THREE.Group();
-  obstacles: { x: number; z: number; hx: number; hz: number }[] = [];
-  background: THREE.Color | THREE.Texture;
-  private batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  private flickerLights: THREE.PointLight[] = [];
-  private flames: THREE.Mesh[] = [];
-  private beamMaterials: THREE.MeshBasicMaterial[] = [];
-  private chestLid = new THREE.Group();
-  private marks = new Map<string, THREE.Mesh>();
+// A continuous map. Geometry, materials and light pools are allocated once.
+export class ConnectedEnvironment {
+  root = new THREE.Group();
+  private sectors = new Map<Sector, THREE.Group>();
+  private batches = new Map<
+    Sector,
+    Map<THREE.Material, THREE.BufferGeometry[]>
+  >();
   private wall: THREE.MeshStandardMaterial;
   private stone: THREE.MeshStandardMaterial;
-  private column: THREE.MeshStandardMaterial;
   private floor: THREE.MeshStandardMaterial;
   private metal: THREE.MeshStandardMaterial;
   private dark: THREE.MeshStandardMaterial;
-  private bark?: THREE.MeshStandardMaterial;
-  private leaves?: THREE.MeshStandardMaterial;
-  constructor(
-    public id: LocationId,
-    loader: THREE.TextureLoader,
-    anisotropy: number,
-  ) {
-    const spec = LOCATIONS[id];
-    this.background =
-      id === "chapel" ? new THREE.Color(spec.sky) : this.skyTexture(id);
-    const material = (name: string, rx: number, ry: number, tint: number) => {
-      const map = loader.load(assetUrl(`/assets/dungeon/${name}.png`));
-      map.colorSpace = THREE.SRGBColorSpace;
-      map.wrapS = map.wrapT = THREE.RepeatWrapping;
-      map.repeat.set(rx, ry);
-      map.anisotropy = Math.min(4, anisotropy);
-      return new THREE.MeshStandardMaterial({
-        map,
+  private bark: THREE.MeshStandardMaterial;
+  private warm: WarmAnchor[] = [];
+  private cool: BeamAnchor[] = [];
+  private warmPool: THREE.PointLight[] = [];
+  private coolPool: THREE.SpotLight[] = [];
+  private chosen = new Int16Array(4);
+  private chosenCool = new Int16Array(2);
+  private beams: {
+    material: THREE.MeshBasicMaterial;
+    area: AreaId;
+    phase: number;
+  }[] = [];
+  private flames: { object: THREE.Object3D; z: number; scale: number }[] = [];
+  private patterns = new Map<string, THREE.CanvasTexture>();
+  constructor(loader: THREE.TextureLoader) {
+    for (const sector of [
+      "world",
+      "forest",
+      "roofs",
+      "chapel",
+      "crypt",
+    ] as Sector[]) {
+      const group = new THREE.Group();
+      group.name = sector;
+      this.sectors.set(sector, group);
+      this.batches.set(sector, new Map());
+      this.root.add(group);
+    }
+    const tiled = (file: string, tint: number) =>
+      new THREE.MeshStandardMaterial({
+        map: loader.load(assetUrl(`/assets/dungeon/${file}.png`), (t) => {
+          t.colorSpace = THREE.SRGBColorSpace;
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          t.anisotropy = 2;
+        }),
         color: tint,
         roughness: 1,
-        metalness: 0,
         vertexColors: true,
       });
-    };
-    const chapel = id === "chapel",
-      garden = id === "courtyard";
-    this.wall = material(
-      "TEX_Wall_03",
-      4,
-      2,
-      chapel ? 0xa8b9c1 : garden ? 0x98aba3 : 0xb0a9be,
-    );
-    this.stone = material(
-      "TEX_Arch_02",
-      1,
-      1,
-      chapel ? 0xc3cbd2 : garden ? 0xbfc9bf : 0xc5bacb,
-    );
-    this.column = material(
-      "TEX_Pillar_01",
-      1,
-      2,
-      chapel ? 0xb4c1c9 : garden ? 0xa6b8af : 0xb8a9bf,
-    );
-    this.floor = material(
-      "TEX_Ground_04",
-      12,
-      20,
-      chapel ? 0xa2b3b9 : garden ? 0x9cad9f : 0xa7a0b5,
-    );
-    this.floor.bumpMap = this.floor.map;
-    this.floor.bumpScale = 0.028;
+    this.wall = tiled("TEX_Wall_03", 0xabb3b7);
+    this.stone = tiled("TEX_Arch_02", 0xc5c9cc);
+    this.floor = tiled("TEX_Ground_04", 0xa6b1b5);
     this.metal = new THREE.MeshStandardMaterial({
-      color: 0x353b3b,
-      roughness: 0.92,
-      metalness: 0.22,
+      color: 0x353e48,
+      roughness: 0.87,
+      metalness: 0.25,
       vertexColors: true,
     });
     this.dark = new THREE.MeshStandardMaterial({
-      color: chapel ? 0x313b36 : 0x3e3540,
+      color: 0x343840,
       roughness: 1,
       vertexColors: true,
     });
-    this.group.add(new THREE.HemisphereLight(spec.ambient, spec.ground, 0.63));
-    const sun = new THREE.DirectionalLight(spec.sun, spec.sunPower);
-    sun.position.set(-5, 10, -4);
-    this.group.add(sun);
-    const bounce = new THREE.DirectionalLight(spec.fill, 0.32);
-    bounce.position.set(5, 4, 8);
-    this.group.add(bounce);
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(12.8, 28, 30, 60),
-      this.floor,
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.z = -3;
-    this.part(floor);
-    if (chapel) this.chapel();
-    else if (garden) this.courtyard();
-    else this.roofs();
-    this.relics();
-    this.chest();
-    this.exit();
-    this.rubble();
+    this.bark = new THREE.MeshStandardMaterial({
+      map: this.pattern("bark"),
+      color: 0x89958d,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.46));
+    const moon = new THREE.DirectionalLight(0xe8eef3, 1.05);
+    moon.position.set(-9, 18, 8);
+    this.root.add(moon);
+    const bounce = new THREE.DirectionalLight(0x8d9faa, 0.15);
+    bounce.position.set(8, 4, -40);
+    this.root.add(bounce);
+    for (let i = 0; i < 4; i++) {
+      const light = new THREE.PointLight(0xffe8d1, 0, 7, 2);
+      this.warmPool.push(light);
+      this.root.add(light);
+    }
+    for (let i = 0; i < 2; i++) {
+      const light = new THREE.SpotLight(0xf4f7ff, 0, 20, 0.48, 0.7, 2);
+      this.coolPool.push(light);
+      this.root.add(light, light.target);
+    }
+    this.terrain();
+    this.fortress();
+    this.forest();
+    this.court();
+    this.cathedral();
+    this.crypt();
     this.flush();
   }
-  update(
-    time: number,
-    dt: number,
-    opened: boolean,
-    chestOpened: boolean,
-    collected: Set<string>,
-  ) {
-    this.chestLid.rotation.x = THREE.MathUtils.damp(
-      this.chestLid.rotation.x,
-      chestOpened ? -1.3 : 0,
-      7,
-      dt,
-    );
-    for (const [id, mark] of this.marks) {
-      const material = mark.material as THREE.MeshBasicMaterial;
-      material.opacity = THREE.MathUtils.damp(
-        material.opacity,
-        collected.has(id) ? 0 : 0.7 + Math.sin(time * 1.6) * 0.12,
-        8,
-        dt,
-      );
-    }
-    for (let i = 0; i < this.beamMaterials.length; i++)
-      this.beamMaterials[i].opacity = 0.06 + Math.sin(time * 0.55 + i) * 0.008;
-    for (let i = 0; i < this.flickerLights.length; i++)
-      this.flickerLights[i].intensity =
-        LOCATIONS[this.id].torch +
-        Math.sin(time * 12 + i * 3) * 0.35 +
-        Math.sin(time * 19 + i) * 0.18;
-    for (let i = 0; i < this.flames.length; i++) {
-      this.flames[i].scale.set(
-        1 + Math.sin(time * 14 + i) * 0.07,
-        1 + Math.sin(time * 11 + i * 4) * 0.12,
-        1,
-      );
-      this.flames[i].rotation.z = Math.sin(time * 7 + i) * 0.07;
-    }
-    this.gate.position.y = THREE.MathUtils.damp(
-      this.gate.position.y,
-      opened ? 4.4 : 0,
-      2,
-      dt,
-    );
+  private group(sector: Sector) {
+    return this.sectors.get(sector)!;
   }
-  private chapel() {
-    const { wall, stone, column, dark } = this;
-    for (const x of [-6.25, 6.25]) this.box(0.5, 10, 20, x, 5, 0, wall);
-    this.box(12.8, 0.4, 20, 0, 9.6, 0, dark);
-    for (const z of [-7, 0, 6.7]) {
-      for (const x of [-4.2, 4.2]) {
-        this.cylinder(0.28, 0.34, 5.2, 20, x, 2.6, z, column);
-        this.cylinder(0.5, 0.56, 0.2, 20, x, 0.1, z, stone);
-        this.cylinder(0.5, 0.4, 0.22, 20, x, 5.2, z, stone);
-        this.obstacles.push({ x, z, hx: 0.38, hz: 0.38 });
+  private shade(x: number, y: number, z: number, ny: number, nx: number) {
+    const area = areaAt(z),
+      inside =
+        (area === "chapel" && z < -43 && z > -69) ||
+        (area === "crypt" && z < -78);
+    let value = inside ? 0.28 : 0.68;
+    value += Math.max(0, ny) * 0.13 + nx * 0.05;
+    if (inside) {
+      for (const w of [-47, -54, -62, -89]) {
+        const band = z - (w + 1.8 + x * 0.43);
+        value +=
+          0.68 *
+          Math.exp((-band * band) / 0.75) *
+          Math.exp(-((x + 2) ** 2) / 35);
       }
-      this.arch(4.22, 5.3, 0.26, z, stone);
-      this.arch(4.36, 5.3, 0.08, z + 0.18, stone);
+      value += 0.12 * Math.exp(-((x + 2) ** 2 + (z + 54) ** 2) / 7);
     }
-    const glass = new THREE.MeshBasicMaterial({
-      map: this.pattern("glass"),
-      color: 0x9eb8c9,
-      toneMapped: false,
-    });
-    for (const sign of [-1, 1])
-      for (const z of [-3.5, 3.4]) {
-        for (const off of [-0.77, 0, 0.77]) {
-          const shape = new THREE.Shape();
-          shape.moveTo(-0.3, 0);
-          shape.lineTo(-0.3, 3.6);
-          shape.quadraticCurveTo(-0.3, 4.1, 0, 4.6);
-          shape.quadraticCurveTo(0.3, 4.1, 0.3, 3.6);
-          shape.lineTo(0.3, 0);
-          shape.closePath();
-          const w = new THREE.Mesh(new THREE.ShapeGeometry(shape), glass);
-          w.position.set(sign * 5.96, 2.1, z + off);
-          w.rotation.y = sign < 0 ? Math.PI / 2 : -Math.PI / 2;
-          this.part(w);
-          this.box(0.22, 4.2, 0.12, sign * 5.87, 4, z + off - 0.38, stone);
-          this.box(0.22, 4.2, 0.12, sign * 5.87, 4, z + off + 0.38, stone);
-        }
-        this.box(0.3, 0.22, 2.9, sign * 5.88, 2.0, z, stone);
-        this.beam(sign, z);
-      }
-    const cloth = new THREE.MeshStandardMaterial({
-      map: this.pattern("cloth"),
-      color: 0x63383e,
-      roughness: 1,
-      side: THREE.DoubleSide,
-      vertexColors: true,
-    });
-    const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 13), cloth);
-    rug.rotation.x = -Math.PI / 2;
-    rug.position.set(0, 0.009, -0.6);
-    this.part(rug);
-    for (const sign of [-1, 1])
-      for (const z of [-6, 5.8]) {
-        const banner = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.86, 2.1, 2, 6),
-          cloth,
-        );
-        banner.position.set(sign * 4.2, 4, z + 0.1);
-        this.part(banner);
-      }
-    for (const sign of [-1, 1])
-      for (const z of [-5.9, 2]) this.torch(sign * 5.6, z, this.metal);
-    this.box(12.8, 9.6, 0.4, 0, 4.8, 9, wall);
-    this.box(3.6, 1.0, 1.7, 0, 0.5, -11, stone);
+    if (y < 3 && ny > 0.7)
+      value -= 0.16 * Math.pow(Math.min(1, Math.abs(x) / 8), 3);
+    return Math.max(0.13, Math.min(1.4, value));
   }
-  private roofs() {
-    const { stone, metal, wall, dark } = this;
-    for (const sign of [-1, 1]) {
-      this.box(0.42, 0.65, 22, sign * 5.9, 0.325, -1.2, stone);
-      this.box(0.62, 0.12, 22, sign * 5.9, 0.72, -1.2, stone);
-      for (let z = -8; z < 9; z += 0.7) {
-        this.cylinder(0.022, 0.029, 1.08, 6, sign * 5.91, 1.2, z, metal);
-        const spike = new THREE.Mesh(
-          new THREE.ConeGeometry(0.055, 0.16, 5),
-          metal,
-        );
-        spike.position.set(sign * 5.91, 1.82, z);
-        this.part(spike);
-      }
-      this.box(0.04, 0.04, 19, sign * 5.91, 1.48, 0, metal);
-      this.box(0.04, 0.04, 19, sign * 5.91, 1.08, 0, metal);
-      for (const z of [-6.8, 6.4]) this.turret(sign * 7.1, z, 1.45, 4.6, stone);
-      for (const z of [-5.9, 2])
-        this.box(0.48, 2.7, 0.5, sign * 6.08, 1.35, z, wall);
-      this.torch(sign * 5.6, 2, metal);
-    }
-    // Receding castle masses remain outside the playable terrace.
-    for (let i = 0; i < 11; i++) {
-      const x = (i % 2 ? -1 : 1) * (13 + (i % 4) * 6),
-        z = -15 - ((i * 7) % 29),
-        h = 5 + ((i * 11) % 13);
-      this.box(5.3, h, 5.3, x, h / 2 - 3, z, wall);
-      this.facade(x, z + 2.69, 4.7, h - 3, wall);
-      this.turret(x + 2, z - 1, 1.25, h + 1, dark);
-      for (let c = 0; c < 4; c++)
-        this.box(0.55, 0.85, 0.7, x - 2 + c * 1.33, h - 2.7, z + 2.5, stone);
-    }
-    this.facade(0, -25, 24, 15, wall);
-    this.turret(-11, -23, 2.1, 17, stone);
-    this.turret(11, -23, 2.1, 20, stone);
-    for (const sign of [-1, 1]) {
-      const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(4.2, 0.22, 20),
-        this.floor,
-      );
-      roof.rotation.z = sign * 0.42;
-      roof.position.set(sign * 8.4, -0.4, 0);
-      this.part(roof);
-    }
-  }
-  private courtyard() {
-    const { stone, wall, column } = this;
-    for (const sign of [-1, 1]) {
-      this.box(0.55, 1.5, 20, sign * 6.2, 0.75, 0, wall);
-      for (const z of [-6.7, 0.1, 6.4]) {
-        this.cylinder(
-          0.31,
-          0.39,
-          z === 0.1 ? 3.6 : 5.2,
-          18,
-          sign * 4.5,
-          z === 0.1 ? 1.8 : 2.6,
-          z,
-          column,
-        );
-        this.cylinder(0.54, 0.61, 0.22, 18, sign * 4.5, 0.11, z, stone);
-        this.obstacles.push({ x: sign * 4.5, z, hx: 0.4, hz: 0.4 });
-      }
-      for (const z of [-5.8, 3.8]) this.tree(sign * (7.7 + (z > 0 ? 1 : 0)), z);
-    }
-    this.arch(4.52, 5.3, 0.32, -6.7, stone);
-    // Broken, lower arches and empty upper window bays.
-    this.arch(4.52, 5.3, 0.23, 6.4, stone);
-    for (const sign of [-1, 1])
-      for (const z of [-7.2, 5.8]) {
-        this.box(0.6, 8, 2.7, sign * 7.3, 4, z, wall);
-        this.box(0.7, 0.28, 10, sign * 7.3, 6.4, 0, stone);
-      }
-    this.vegetation();
-    this.facade(0, -16, 21, 11, wall);
-    this.facade(-12, -5, 7, 10, wall);
-    this.facade(12, -7, 7, 13, wall);
-    for (const x of [-10, -6, 6, 10]) this.tree(x, -12 - (Math.abs(x) % 3));
-    for (const sign of [-1, 1]) {
-      this.box(0.55, 2.8, 0.6, sign * 6.1, 1.4, 2, wall);
-      this.torch(sign * 5.6, 2, this.metal);
-    }
-    this.beam(-1, -4);
-  }
-  private turret(
-    x: number,
-    z: number,
-    r: number,
-    h: number,
-    m: THREE.Material,
-  ) {
-    this.cylinder(r, r * 1.09, h, 20, x, h / 2 - 1.1, z, m);
-    this.cylinder(r * 1.16, r * 1.06, 0.2, 20, x, h - 1.1, z, this.stone);
-    const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(r * 1.22, r * 2.6, 20),
-      this.dark,
-    );
-    roof.position.set(x, h - 1.0 + r * 1.3, z);
-    this.part(roof);
-  }
-  private tree(x: number, z: number) {
-    const bark = (this.bark ??= new THREE.MeshStandardMaterial({
-      map: this.pattern("bark"),
-      color: 0x5a5947,
-      roughness: 1,
-      vertexColors: true,
-    }));
-    this.cylinder(0.18, 0.48, 8, 12, x, 4, z, bark);
-    for (let i = 0; i < 5; i++) {
-      const branch = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.13, 3, 8),
-        bark,
-      );
-      branch.position.set(
-        x + Math.sin(i * 4) * 0.6,
-        5 + i * 0.45,
-        z + Math.cos(i * 4) * 0.6,
-      );
-      branch.rotation.set(Math.cos(i * 4) * 0.8, 0, Math.sin(i * 4) * 0.8);
-      this.part(branch);
-    }
-    const leaves = (this.leaves ??= new THREE.MeshStandardMaterial({
-      map: this.pattern("leaves"),
-      color: 0x718354,
-      roughness: 1,
-      alphaTest: 0.45,
-      side: THREE.DoubleSide,
-      vertexColors: true,
-    }));
-    for (let i = 0; i < 26; i++) {
-      const leaf = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 2.8), leaves);
-      leaf.position.set(
-        x + Math.sin(i * 2.4) * (1 + (i % 3) * 0.7),
-        6.6 + (i % 4) * 0.5,
-        z + Math.cos(i * 2.4) * (1 + (i % 3) * 0.7),
-      );
-      leaf.rotation.set((i % 3) * 0.7, i * 0.9, (i % 2) * 0.25);
-      this.part(leaf);
-    }
-  }
-  private vegetation() {
-    const grass = new THREE.MeshStandardMaterial({
-      map: this.pattern("grass"),
-      color: 0x748254,
-      roughness: 1,
-      alphaTest: 0.42,
-      side: THREE.DoubleSide,
-      vertexColors: true,
-    });
-    for (let i = 0; i < 72; i++) {
-      const sign = i % 2 ? 1 : -1,
-        x = sign * (3.7 + (i % 5) * 0.43),
-        z = -7.5 + ((i * 73) % 160) / 10;
-      for (let j = 0; j < 2; j++) {
-        const m = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.7, 0.35 + (i % 3) * 0.1),
-          grass,
-        );
-        m.position.set(x, 0.19, z);
-        m.rotation.y = i * 1.3 + (j * Math.PI) / 2;
-        this.part(m);
-      }
-    }
-    const moss = new THREE.MeshStandardMaterial({
-      map: this.pattern("leaves"),
-      color: 0x7b8659,
-      roughness: 1,
-      alphaTest: 0.25,
-      side: THREE.DoubleSide,
-      vertexColors: true,
-    });
-    for (const sign of [-1, 1])
-      for (const z of [-5, -0.5, 4.5]) {
-        const patch = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 4.8), moss);
-        patch.rotation.x = -Math.PI / 2;
-        patch.rotation.z = sign * z * 0.2;
-        patch.position.set(sign * 4.1, 0.013, z);
-        this.part(patch);
-      }
-  }
-  private facade(
-    x: number,
-    z: number,
-    width: number,
-    height: number,
-    m: THREE.Material,
-  ) {
-    this.box(width, height, 0.6, x, height / 2, z - 0.35, m);
-    for (let y = 2.2; y < height - 1.7; y += 3.6) {
-      this.box(width + 0.3, 0.18, 0.9, x, y - 0.6, z, this.stone);
-      for (let dx = -width / 2 + 1; dx < width / 2 - 0.7; dx += 2.3)
-        this.lancet(x + dx, y, z + 0.02, 0.8, 2.2);
-    }
-    for (let dx = -width / 2 + 0.3; dx < width / 2; dx += 1.4)
-      this.box(0.65, 0.8, 0.9, x + dx, height + 0.4, z, this.stone);
-    for (let dx = -width / 2; dx <= width / 2; dx += 4.6)
-      this.box(0.35, height + 0.2, 1.05, x + dx, height / 2, z, this.stone);
-  }
-  private lancet(x: number, y: number, z: number, w: number, h: number) {
-    const pointed = (s: THREE.Shape | THREE.Path, ww: number, hh: number) => {
-      s.moveTo(-ww / 2, 0);
-      s.lineTo(-ww / 2, hh * 0.68);
-      s.quadraticCurveTo(-ww / 2, hh * 0.84, 0, hh);
-      s.quadraticCurveTo(ww / 2, hh * 0.84, ww / 2, hh * 0.68);
-      s.lineTo(ww / 2, 0);
-      s.closePath();
-    };
-    const pane = new THREE.Shape();
-    pointed(pane, w, h);
-    const inset = new THREE.Mesh(new THREE.ShapeGeometry(pane), this.dark);
-    inset.position.set(x, y, z + 0.02);
-    this.part(inset);
-    const frame = new THREE.Shape();
-    pointed(frame, w + 0.2, h + 0.16);
-    const hole = new THREE.Path();
-    pointed(hole, w, h);
-    frame.holes.push(hole);
-    const border = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(frame, {
-        depth: 0.1,
-        bevelEnabled: false,
-        curveSegments: 8,
-      }),
-      this.stone,
-    );
-    border.position.set(x, y, z + 0.03);
-    this.part(border);
-    this.box(0.045, h * 0.75, 0.09, x, y + h * 0.38, z + 0.16, this.stone);
-  }
-  private exit() {
-    const { wall, stone, metal } = this;
-    const height =
-      this.id === "roofs" ? 2.7 : this.id === "courtyard" ? 3.8 : 6.8;
-    for (const sign of [-1, 1]) {
-      this.box(3.8, height, 0.6, sign * 4.4, height / 2, -8.5, wall);
-      this.box(4.0, 0.18, 0.82, sign * 4.4, height, -8.5, stone);
-      if (this.id !== "chapel")
-        for (let i = 0; i < 3; i++)
-          this.box(
-            0.65,
-            0.55 + (this.id === "courtyard" ? i * 0.2 : 0),
-            0.78,
-            sign * (3.0 + i * 1.1),
-            height + 0.36,
-            -8.5,
-            stone,
-          );
-      if (this.id === "chapel") this.lancet(sign * 4.3, 3.2, -8.15, 1.2, 2.7);
-    }
-    this.arch(2.35, 2.6, 0.32, -8.3, stone);
-    for (const sign of [-1, 1])
-      this.box(0.3, 3, 0.5, sign * 2.15, 1.5, -8.3, stone);
-    for (let x = -1.9; x < 2; x += 0.25) {
-      const bar = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.025, 0.032, 4.8, 6),
-        metal,
-      );
-      bar.position.set(x, 2.4, 0);
-      this.gate.add(bar);
-    }
-    for (const y of [0.7, 2.2, 3.8]) {
-      const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(4.1, 0.07, 0.08),
-        metal,
-      );
-      rail.position.y = y;
-      this.gate.add(rail);
-    }
-    this.gate.position.z = -8.2;
-    this.group.add(this.gate);
-  }
-  private relics() {
-    this.box(1.5, 0.9, 0.85, -4.1, 0.45, 0.4, this.stone);
-    this.box(1.7, 0.14, 1, -4.1, 0.96, 0.4, this.stone);
-    this.box(0.9, 0.6, 0.9, 4.3, 0.3, -4.8, this.stone);
-    this.cylinder(0.23, 0.34, 0.55, 18, 4.3, 0.85, -4.8, this.metal);
-    this.obstacles.push(
-      { x: -4.1, z: 0.4, hx: 0.85, hz: 0.58 },
-      { x: 4.3, z: -4.8, hx: 0.5, hz: 0.5 },
-    );
-    const glyphCanvas = document.createElement("canvas");
-    glyphCanvas.width = glyphCanvas.height = 128;
-    const ctx = glyphCanvas.getContext("2d")!;
-    ctx.strokeStyle = "#cedcf0";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(64, 64, 38, 0.2, Math.PI * 1.8);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(64, 13);
-    ctx.lineTo(43, 83);
-    ctx.lineTo(87, 54);
-    ctx.lineTo(67, 114);
-    ctx.moveTo(24, 64);
-    ctx.lineTo(107, 64);
-    ctx.stroke();
-    const glyph = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.68, 0.68),
-      new THREE.MeshBasicMaterial({
-        map: new THREE.CanvasTexture(glyphCanvas),
-        color: 0xb7d2ed,
-        transparent: true,
-        depthWrite: false,
-        opacity: 0.8,
-      }),
-    );
-    glyph.rotation.x = -Math.PI / 2;
-    glyph.position.set(-4.1, 1.045, 0.4);
-    this.group.add(glyph);
-    this.marks.set("inscription", glyph);
-    const echo = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.16),
-      new THREE.MeshBasicMaterial({
-        color: 0xbaaddb,
-        transparent: true,
-        opacity: 0.8,
-      }),
-    );
-    echo.position.set(4.3, 1.22, -4.8);
-    this.group.add(echo);
-    this.marks.set("echo", echo);
-  }
-  private chest() {
-    const root = new THREE.Group();
-    root.position.set(CHEST.x, 0, CHEST.z);
-    const wood = new THREE.MeshStandardMaterial({
-      map: this.pattern("bark"),
-      color: 0x6b6376,
-      roughness: 0.96,
-    });
-    const iron = new THREE.MeshStandardMaterial({
-      color: 0x77818c,
-      roughness: 0.8,
-      metalness: 0.22,
-    });
-    const boxes = (
-      parent: THREE.Group,
-      material: THREE.Material,
-      sizes: number[][],
-    ) => {
-      const geometries = sizes.map(([w, h, d, x, y, z]) =>
-        new THREE.BoxGeometry(w, h, d).translate(x, y, z),
-      );
-      parent.add(new THREE.Mesh(mergeGeometries(geometries)!, material));
-      for (const geo of geometries) geo.dispose();
-    };
-    boxes(root, wood, [
-      [1.35, 0.58, 0.12, 0, 0.36, 0.4],
-      [1.35, 0.58, 0.12, 0, 0.36, -0.4],
-      [0.12, 0.58, 0.8, -0.64, 0.36, 0],
-      [0.12, 0.58, 0.8, 0.64, 0.36, 0],
-      [1.35, 0.12, 0.85, 0, 0.12, 0],
-    ]);
-    boxes(root, iron, [
-      [1.4, 0.06, 0.96, 0, 0.15, 0],
-      [1.4, 0.06, 0.96, 0, 0.63, 0],
-      [0.08, 0.5, 0.98, -0.45, 0.38, 0],
-      [0.08, 0.5, 0.98, 0.45, 0.38, 0],
-      [0.15, 0.2, 0.08, 0, 0.49, 0.49],
-    ]);
-    const lining = new THREE.Mesh(
-      new THREE.BoxGeometry(1.14, 0.3, 0.66),
-      new THREE.MeshStandardMaterial({ color: 0x15202c, roughness: 1 }),
-    );
-    lining.position.y = 0.31;
-    root.add(lining);
-    this.chestLid.position.set(0, 0.65, -0.43);
-    boxes(this.chestLid, wood, [[1.4, 0.18, 0.96, 0, 0.09, 0.43]]);
-    boxes(this.chestLid, iron, [
-      [0.08, 0.22, 0.98, -0.45, 0.09, 0.43],
-      [0.08, 0.22, 0.98, 0.45, 0.09, 0.43],
-      [1.44, 0.05, 0.98, 0, 0.02, 0.43],
-      [0.17, 0.23, 0.055, 0, 0.03, 0.94],
-    ]);
-    root.add(this.chestLid);
-    this.group.add(root);
-    this.obstacles.push({ x: CHEST.x, z: CHEST.z, hx: 0.7, hz: 0.49 });
-  }
-  reset() {
-    this.chestLid.rotation.x = 0;
-    for (const mark of this.marks.values())
-      (mark.material as THREE.MeshBasicMaterial).opacity = 0.8;
-  }
-  private rubble() {
-    for (let i = 0; i < 26; i++) {
-      const rock = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.11 + (i % 3) * 0.07),
-        this.stone,
-      );
-      rock.position.set(
-        (i % 2 ? 1 : -1) * (4.9 + Math.sin(i * 9) * 0.45),
-        0.09,
-        -7 + ((i * 13) % 150) / 10,
-      );
-      rock.scale.y = 0.6;
-      rock.rotation.set(0.1, i, 0.2);
-      this.part(rock);
-    }
-  }
-  private skyTexture(id: LocationId) {
-    const c = document.createElement("canvas");
-    c.width = 512;
-    c.height = 256;
-    const ctx = c.getContext("2d")!,
-      img = ctx.createImageData(512, 256);
-    const top = new THREE.Color(id === "roofs" ? 0x323345 : 0x3b505b),
-      horizon = new THREE.Color(id === "roofs" ? 0x9c718c : 0x9aadb3);
-    for (let y = 0; y < 256; y++)
-      for (let x = 0; x < 512; x++) {
-        const t = Math.pow(Math.max(0, 1 - Math.abs(y - 128) / 128), 1.9),
-          color = top.clone().lerp(horizon, t);
-        const wave =
-          Math.sin(x * 0.031 + Math.sin(y * 0.06) * 2.6) +
-          Math.sin(x * 0.065 - y * 0.085) * 0.7 +
-          Math.sin(x * 0.12 + y * 0.045) * 0.3;
-        color.multiplyScalar(0.65 + Math.max(-0.4, Math.min(0.3, wave * 0.28)));
-        // Canvas pixels are sRGB, THREE.Color components above are linear.
-        color.convertLinearToSRGB();
-        img.data.set(
-          [color.r * 255, color.g * 255, color.b * 255, 255],
-          (y * 512 + x) * 4,
-        );
-      }
-    ctx.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.mapping = THREE.EquirectangularReflectionMapping;
-    return t;
-  }
-  private pattern(kind: "glass" | "cloth" | "bark" | "leaves" | "grass") {
-    const c = document.createElement("canvas");
-    c.width = c.height = 128;
-    const ctx = c.getContext("2d")!;
-    const rand = (n: number) => {
-      const v = Math.sin(n * 127.1 + 19.4) * 43758.5453;
-      return v - Math.floor(v);
-    };
-    if (kind === "leaves" || kind === "grass") {
-      ctx.clearRect(0, 0, 128, 128);
-      for (let i = 0; i < (kind === "leaves" ? 85 : 28); i++) {
-        ctx.fillStyle =
-          i % 4 === 0 ? "#a0a27a" : i % 3 === 0 ? "#687b4d" : "#829565";
-        if (kind === "leaves") {
-          ctx.beginPath();
-          ctx.ellipse(
-            rand(i) * 128,
-            rand(i + 8) * 128,
-            4 + rand(i + 1) * 6,
-            2 + rand(i + 2) * 4,
-            rand(i + 3) * 6,
-            0,
-            Math.PI * 2,
-          );
-          ctx.fill();
-        } else {
-          const x = rand(i) * 128;
-          ctx.beginPath();
-          ctx.moveTo(x, 128);
-          ctx.quadraticCurveTo(
-            x + rand(i + 2) * 24 - 12,
-            55,
-            x + rand(i + 1) * 35 - 17,
-            8 + rand(i + 3) * 55,
-          );
-          ctx.lineTo(x + 4, 128);
-          ctx.fill();
-        }
-      }
-    } else {
-      ctx.fillStyle =
-        kind === "cloth" ? "#56584a" : kind === "glass" ? "#abb2a0" : "#85836c";
-      ctx.fillRect(0, 0, 128, 128);
-      for (let i = 0; i < 1600; i++) {
-        ctx.fillStyle = `rgba(18,22,19,${rand(i + 3) * 0.22})`;
-        ctx.fillRect(
-          rand(i) * 128,
-          rand(i + 1) * 128,
-          kind === "bark" ? 2 : 1,
-          kind === "bark" ? 8 + rand(i) * 22 : 1,
-        );
-      }
-      ctx.strokeStyle = kind === "cloth" ? "#a49971" : "#47594f";
-      ctx.lineWidth = kind === "glass" ? 2 : 1;
-      if (kind !== "bark")
-        for (let x = -128; x < 256; x += kind === "glass" ? 24 : 32) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x + 128, 128);
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x - 128, 128);
-          ctx.stroke();
-        }
-      if (kind === "cloth") {
-        ctx.lineWidth = 4;
-        ctx.strokeRect(7, 3, 114, 122);
-        ctx.lineWidth = 1;
-        ctx.strokeRect(13, 3, 102, 122);
-      }
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
-  }
-  private part(mesh: THREE.Mesh) {
+  private part(mesh: THREE.Mesh, sector: Sector = "world", uvScale = 0.55) {
     mesh.updateMatrix();
-    let g = mesh.geometry.clone();
-    if (g.index) g = g.toNonIndexed();
-    g.applyMatrix4(mesh.matrix);
-    const pos = g.getAttribute("position"),
-      norm = g.getAttribute("normal"),
-      colors = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i),
-        x = pos.getX(i),
-        z = pos.getZ(i);
-      let shade = Math.max(
-        0.42,
-        0.83 +
-          norm.getY(i) * 0.09 +
-          norm.getX(i) * 0.05 -
-          Math.exp(-Math.max(0, y) * 1.8) * 0.15,
-      );
-      if (y < 0.03 && norm.getY(i) > 0.9) {
-        shade = 0.7 - 0.33 * Math.pow(Math.min(1, Math.abs(x) / 6.2), 3);
-        for (const cx of [-4.2, 4.2])
-          for (const cz of [-7, 0, 6.7])
-            shade -= 0.2 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) * 1.5);
-        if (this.id === "chapel") {
-          for (const windowZ of [-3.5, 3.4]) {
-            const band = z - (windowZ + 2.1 + x * 0.42);
-            shade +=
-              0.42 *
-              Math.exp(-(band * band) / 0.65) *
-              Math.exp(-((x + 1) ** 2) / 28);
-          }
-        } else if (this.id === "courtyard") {
-          shade += 0.28 * Math.exp(-((x + 1.4) ** 2 + (z + 3) ** 2) / 5);
-        }
+    let geometry = mesh.geometry;
+    if (geometry.index) {
+      const old = geometry;
+      geometry = geometry.toNonIndexed();
+      old.dispose();
+    }
+    geometry.applyMatrix4(mesh.matrix);
+    const positions = geometry.getAttribute("position"),
+      normals = geometry.getAttribute("normal"),
+      uv = geometry.getAttribute("uv");
+    const colors = new Float32Array(positions.count * 3);
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i),
+        y = positions.getY(i),
+        z = positions.getZ(i),
+        ny = normals.getY(i),
+        nx = normals.getX(i);
+      const shade = this.shade(x, y, z, ny, nx);
+      colors.set([shade * 0.97, shade, shade * 1.025], i * 3);
+      if (uv && uvScale > 0) {
+        if (Math.abs(ny) > 0.6) uv.setXY(i, x * uvScale, z * uvScale);
+        else if (Math.abs(nx) > 0.6) uv.setXY(i, z * uvScale, y * uvScale);
+        else uv.setXY(i, x * uvScale, y * uvScale);
       }
-      colors[i * 3] = shade;
-      colors[i * 3 + 1] = shade;
-      colors[i * 3 + 2] = shade;
     }
-    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    const m = mesh.material as THREE.Material;
-    const list = this.batches.get(m) ?? [];
-    list.push(g);
-    this.batches.set(m, list);
-  }
-  private flush() {
-    for (const [mat, geos] of this.batches) {
-      const g = mergeGeometries(geos);
-      if (g) this.group.add(new THREE.Mesh(g, mat));
-      for (const old of geos) old.dispose();
-    }
-    this.batches.clear();
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    const material = mesh.material as THREE.Material,
+      batch = this.batches.get(sector)!;
+    const list = batch.get(material) ?? [];
+    list.push(geometry);
+    batch.set(material, list);
   }
   private box(
     w: number,
@@ -822,11 +206,12 @@ export class LocationStage {
     x: number,
     y: number,
     z: number,
-    m: THREE.Material,
+    material: THREE.Material = this.wall,
+    sector: Sector = "world",
   ) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z);
-    this.part(mesh);
+    this.part(mesh, sector);
   }
   private cylinder(
     rt: number,
@@ -836,21 +221,28 @@ export class LocationStage {
     x: number,
     y: number,
     z: number,
-    m: THREE.Material,
+    material: THREE.Material = this.stone,
+    sector: Sector = "world",
   ) {
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, n), m);
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(rt, rb, h, n),
+      material,
+    );
     mesh.position.set(x, y, z);
-    this.part(mesh);
+    this.part(mesh, sector);
   }
   private arch(
+    x: number,
+    y: number,
+    z: number,
     r: number,
     stem: number,
-    width: number,
-    z: number,
-    m: THREE.Material,
+    material: THREE.Material = this.stone,
+    sector: Sector = "world",
+    rotation = 0,
   ) {
     const s = new THREE.Shape(),
-      inner = r - width;
+      inner = r - 0.22;
     s.moveTo(-r, 0);
     s.lineTo(-r, stem);
     s.absarc(0, stem, r, Math.PI, 0, true);
@@ -862,207 +254,831 @@ export class LocationStage {
     s.closePath();
     const mesh = new THREE.Mesh(
       new THREE.ExtrudeGeometry(s, {
-        depth: 0.35,
+        depth: 0.32,
         bevelEnabled: true,
-        bevelSize: 0.035,
-        bevelThickness: 0.035,
-        bevelSegments: 2,
-        curveSegments: 28,
+        bevelSize: 0.025,
+        bevelThickness: 0.025,
+        bevelSegments: 1,
+        curveSegments: 18,
       }),
-      m,
+      material,
     );
-    mesh.position.z = z;
-    this.part(mesh);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotation;
+    this.part(mesh, sector);
   }
-  private radial(color: string, alpha: number) {
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const x = c.getContext("2d")!,
-      g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, color);
-    g.addColorStop(1, "transparent");
-    x.globalAlpha = alpha;
-    x.fillStyle = g;
-    x.fillRect(0, 0, 64, 64);
-    return c;
-  }
-  private beam(sign: number, z: number) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(
-        [
-          sign * 5.8,
-          5.6,
-          z - 1,
-          sign * 5.8,
-          3.2,
-          z + 1,
-          sign * 0.4,
-          0.05,
-          z + 3.8,
-          sign * 5.8,
-          5.6,
-          z - 1,
-          sign * 0.4,
-          0.05,
-          z + 3.8,
-          sign * 2,
-          0.05,
-          z + 1.5,
-        ],
-        3,
+  private ground(
+    width: number,
+    depth: number,
+    x: number,
+    y: number,
+    z: number,
+    sector: Sector,
+    material = this.floor,
+  ) {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(
+        width,
+        depth,
+        Math.ceil(width * 2),
+        Math.ceil(depth * 2),
       ),
+      material,
     );
-    g.computeVertexNormals();
-    g.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0], 2),
-    );
-    const canvas = document.createElement("canvas");
-    canvas.width = 64;
-    canvas.height = 128;
-    const ctx = canvas.getContext("2d")!,
-      pixels = ctx.createImageData(64, 128);
-    for (let y = 0; y < 128; y++)
-      for (let x = 0; x < 64; x++) {
-        const u = (x + 0.5) / 64,
-          v = 1 - y / 128,
-          a =
-            Math.pow(Math.sin(u * Math.PI), 2) *
-            Math.sin(v * Math.PI * 0.9) *
-            0.85;
-        pixels.data.set([255, 255, 255, Math.round(a * 255)], (y * 64 + x) * 4);
-      }
-    ctx.putImageData(pixels, 0, 0);
-    const material = new THREE.MeshBasicMaterial({
-      map: new THREE.CanvasTexture(canvas),
-      color: this.id === "chapel" ? 0xb4cee5 : 0xd2d3e6,
-      transparent: true,
-      opacity: 0.06,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    this.beamMaterials.push(material);
-    this.group.add(new THREE.Mesh(g, material));
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(x, y, z);
+    this.part(m, sector);
   }
-  private torch(x: number, z: number, m: THREE.Material) {
-    const sign = Math.sign(x),
-      wallX = sign * 5.98,
-      tipX = sign * 5.42;
-    const iron = new THREE.MeshStandardMaterial({
-      color: 0x282d2e,
-      roughness: 0.94,
-      metalness: 0.3,
-      vertexColors: true,
-    });
-    const wood = new THREE.MeshStandardMaterial({
-      color: 0x48382c,
+  private flush() {
+    for (const [sector, batches] of this.batches)
+      for (const [material, geometries] of batches) {
+        const geometry = mergeGeometries(geometries);
+        if (geometry)
+          this.group(sector).add(new THREE.Mesh(geometry, material));
+        for (const old of geometries) old.dispose();
+      }
+    this.batches.clear();
+  }
+  private terrain() {
+    const geometry = new THREE.PlaneGeometry(170, 230, 46, 64);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(0, -0.12, -48);
+    const p = geometry.getAttribute("position");
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i),
+        z = p.getZ(i),
+        outside = Math.max(0, Math.min(1, (Math.abs(x) - 8) / 13));
+      const hills =
+        (Math.sin(x * 0.14 + z * 0.065) * 2.2 +
+          Math.cos(z * 0.12 - x * 0.03) * 2.8 -
+          1.4) *
+        outside;
+      p.setY(i, -0.12 + hills + (z < -18 ? Math.min(2, (-18 - z) * 0.08) : 0));
+    }
+    geometry.computeVertexNormals();
+    const terrain = new THREE.MeshStandardMaterial({
+      map: this.pattern("earth"),
+      color: 0x828f82,
       roughness: 1,
       vertexColors: true,
     });
-    const rod = (
-      a: THREE.Vector3,
-      b: THREE.Vector3,
-      r: number,
-      mat: THREE.Material,
-    ) => {
-      const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(r, r, a.distanceTo(b), 10),
-        mat,
+    this.part(new THREE.Mesh(geometry, terrain), "world", 0.35);
+    for (let i = 0; i < 32; i++) {
+      const side = i % 2 ? 1 : -1,
+        x = side * (17 + rand(i) * 33),
+        z = 17 - rand(i + 70) * 140;
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(2 + rand(i + 30) * 4),
+        this.wall,
       );
-      mesh.position.copy(a).add(b).multiplyScalar(0.5);
-      mesh.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        b.clone().sub(a).normalize(),
-      );
-      this.part(mesh);
-    };
-    const plate = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.17, 0.17, 0.035, 16),
-      iron,
-    );
-    plate.position.set(wallX, 1.85, z);
-    plate.rotation.z = Math.PI / 2;
-    plate.scale.z = 1.45;
-    this.part(plate);
-    rod(
-      new THREE.Vector3(wallX, 1.87, z),
-      new THREE.Vector3(sign * 5.57, 1.8, z),
-      0.035,
-      iron,
-    );
-    rod(
-      new THREE.Vector3(wallX, 1.58, z),
-      new THREE.Vector3(sign * 5.57, 1.8, z),
-      0.023,
-      iron,
-    );
-    rod(
-      new THREE.Vector3(sign * 5.64, 1.55, z),
-      new THREE.Vector3(tipX, 2.23, z),
-      0.049,
-      wood,
-    );
-    this.cylinder(0.13, 0.085, 0.18, 14, tipX, 2.23, z, iron);
-    for (const dy of [-0.07, 0.07]) {
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.124, 0.018, 5, 16),
-        iron,
-      );
-      band.position.set(tipX, 2.23 + dy, z);
-      band.rotation.x = Math.PI / 2;
-      this.part(band);
+      rock.position.set(x, -1 + rand(i + 12) * 2, z);
+      rock.scale.set(1, 1 + rand(i) * 1.5, 0.8);
+      rock.rotation.set(rand(i), i * 0.7, 0.1);
+      this.part(rock, "world");
     }
-    for (const side of [-1, 1])
-      rod(
-        new THREE.Vector3(tipX + side * 0.09, 2.17, z),
-        new THREE.Vector3(tipX + side * 0.14, 2.43, z),
-        0.015,
-        iron,
+  }
+  private fortress() {
+    for (const side of [-1, 1]) {
+      this.box(3, 7.6, 88, side * 11, 1.5, -61, this.wall);
+      this.box(0.65, 10.5, 85, side * 12.5, 7.5, -61, this.wall);
+      for (let z = -24; z > -102; z -= 5.2) {
+        this.box(1, 1.0, 1, side * 12.5, 13, z, this.stone);
+        this.box(1.4, 5, 1, side * 9.5, 5, z, this.stone);
+      }
+      for (const z of [-22, -58, -102]) {
+        const x = side * (z === -58 ? 14 : 11.5);
+        this.cylinder(3.1, 3.8, 18, 20, x, 7.8, z, this.wall);
+        this.cylinder(3.5, 3.4, 0.45, 20, x, 16.5, z, this.stone);
+        const roof = new THREE.Mesh(
+          new THREE.ConeGeometry(4.1, 7, 20),
+          this.dark,
+        );
+        roof.position.set(x, 20.2, z);
+        this.part(roof);
+        for (const wy of [5, 10.5, 14])
+          this.window(
+            x - side * 1.1,
+            wy,
+            z + 3.2,
+            0.65,
+            1.8,
+            "world",
+            0,
+            false,
+          );
+      }
+    }
+    for (const side of [-1, 1]) {
+      this.box(9, 10, 0.8, side * 7.8, 5, -17.8, this.wall);
+      for (let x = side < 0 ? -12 : -2; x < (side < 0 ? -3 : 13); x += 2)
+        this.box(0.7, 1.1, 1, x, 10.5, -17.8, this.stone);
+    }
+    this.arch(0, 0, -17.5, 3.2, 4.2, this.stone);
+    this.box(6.4, 2.6, 3.3, 0, 9.2, -17.6, this.wall);
+    this.box(28, 1.1, 2.4, 0, 11.1, -37, this.stone);
+    for (let x = -12; x <= 12; x += 4)
+      this.arch(x, 3, -37, 1.7, 3.1, this.wall);
+    // Beyond the last arch: another inhabited-looking volume, never a floating exit.
+    this.box(24, 8, 15, 0, 4, -115, this.wall);
+    this.box(25, 0.5, 16, 0, 8.3, -115, this.stone);
+    for (let x = -10; x <= 10; x += 4)
+      this.window(x, 3.5, -107.3, 1.3, 2.6, "world", 0, false);
+  }
+  private forest() {
+    this.ground(16, 29, 0, 0.01, -1, "forest");
+    const leafMat = new THREE.MeshStandardMaterial({
+      map: this.pattern("leaves"),
+      color: 0x7c9485,
+      roughness: 1,
+      alphaTest: 0.44,
+      side: THREE.DoubleSide,
+    });
+    const trunkGeo = new THREE.CylinderGeometry(0.23, 0.49, 9, 9);
+    trunkGeo.translate(0, 4.5, 0);
+    const trunks = new THREE.InstancedMesh(trunkGeo, this.bark, TREES.length),
+      leafGeo = new THREE.PlaneGeometry(4.8, 3.7),
+      leaves = new THREE.InstancedMesh(leafGeo, leafMat, TREES.length * 9);
+    const matrix = new THREE.Matrix4(),
+      rotation = new THREE.Quaternion(),
+      scale = new THREE.Vector3(),
+      position = new THREE.Vector3();
+    for (let i = 0; i < TREES.length; i++) {
+      const t = TREES[i],
+        height = 0.8 + rand(i + 100) * 0.6;
+      position.set(t.x, -0.2, t.z);
+      rotation.setFromEuler(new THREE.Euler(0.02, rand(i) * 6, 0.03));
+      scale.set(1, height, 1);
+      matrix.compose(position, rotation, scale);
+      trunks.setMatrixAt(i, matrix);
+      for (let j = 0; j < 9; j++) {
+        const a = rand(i * 12 + j) * Math.PI * 2,
+          r = 0.9 + rand(i * 3 + j) * 1.5;
+        position.set(
+          t.x + Math.sin(a) * r,
+          5.5 * height + (j % 3) * 1.3,
+          t.z + Math.cos(a) * r,
+        );
+        rotation.setFromEuler(
+          new THREE.Euler(-0.3 + rand(j + 2) * 1.2, a, rand(j) * 0.6 - 0.3),
+        );
+        scale.setScalar(0.8 + rand(i + j) * 0.6);
+        matrix.compose(position, rotation, scale);
+        leaves.setMatrixAt(i * 9 + j, matrix);
+      }
+    }
+    trunks.computeBoundingSphere();
+    leaves.computeBoundingSphere();
+    this.group("forest").add(trunks, leaves);
+    for (const side of [-1, 1]) {
+      this.box(1, 1.3, 4.4, side * 6.7, 0.65, -5, this.wall, "forest");
+      this.arch(side * 5.8, 0, -4, 1.2, 1.1, this.stone, "forest");
+      for (let i = 0; i < 3; i++)
+        this.box(
+          0.7,
+          0.45,
+          1,
+          side * (4.8 + i * 0.8),
+          0.23,
+          -11,
+          this.stone,
+          "forest",
+        );
+    }
+    // Broken root/stone shelves hide the chest and the key in different compositions.
+    this.box(1.2, 0.8, 0.9, -3.8, 0.4, 1.3, this.stone, "forest");
+    this.box(1.5, 0.12, 1.1, -3.8, 0.85, 1.3, this.stone, "forest");
+    for (let i = 0; i < 4; i++) {
+      const log = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.3, 3.3, 8),
+        this.bark,
       );
-    const flame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.075, 0.38, 12),
+      log.position.set(7.2, 0.32, 4.4 - i * 0.35);
+      log.rotation.z = 1.2;
+      log.rotation.y = 0.4;
+      this.part(log, "forest");
+    }
+    this.ironFence(-5, -14, 6.2, 0, "forest");
+    this.ironFence(5, -14, 6.2, 0, "forest");
+    this.torch(-3.3, 1.7, -13.6, "forest");
+    this.torch(3.3, 1.7, -13.6, "forest");
+    this.beam({
+      x: -4,
+      y: 14,
+      z: -1,
+      tx: -2.3,
+      ty: 0.04,
+      tz: -0.5,
+      power: 52,
+      width: 2.1,
+      area: "forest",
+    });
+  }
+  private court() {
+    this.ground(15.5, 20, 0, 2.4, -32, "roofs");
+    for (let i = 1; i <= 18; i++) {
+      const h = (i / 18) * 2.4;
+      this.box(
+        5,
+        h,
+        0.34,
+        0,
+        h / 2,
+        -16 - ((i - 0.5) * 6) / 18,
+        this.stone,
+        "roofs",
+      );
+    }
+    for (const side of [-1, 1]) {
+      this.box(0.45, 1.1, 22, side * 7.6, 2.95, -31, this.wall, "roofs");
+      this.ironFence(side * 7.4, -31, 23, Math.PI / 2, "roofs", 3.5);
+      for (const z of [-24, -34, -40])
+        this.cylinder(
+          0.28,
+          0.43,
+          4.5,
+          14,
+          side * 6.6,
+          4.65,
+          z,
+          this.stone,
+          "roofs",
+        );
+    }
+    this.arch(-4.5, 2.4, -26.2, 1.4, 2.1, this.stone, "roofs");
+    this.box(2.8, 0.55, 1, -4.6, 2.68, -27.5, this.wall, "roofs");
+    this.torch(-6.6, 4.3, -23.4, "roofs");
+    this.torch(6.6, 4.3, -35, "roofs");
+    this.beam({
+      x: -4,
+      y: 15,
+      z: -27,
+      tx: -2,
+      ty: 2.43,
+      tz: -30,
+      power: 36,
+      width: 2.8,
+      area: "roofs",
+    });
+  }
+  private cathedral() {
+    const sector: Sector = "chapel",
+      base = 2.4;
+    this.ground(15.6, 29, 0, base, -55.5, sector);
+    // Side walls are built around actual bright apertures rather than a sky image.
+    for (const side of [-1, 1]) {
+      this.box(0.45, 2.2, 28, side * 7.7, base + 1.1, -55.6, this.wall, sector);
+      this.box(
+        0.45,
+        2.1,
+        28,
+        side * 7.7,
+        base + 7.35,
+        -55.6,
+        this.wall,
+        sector,
+      );
+      for (const z of [-42.5, -50.5, -58.5, -66.5])
+        this.box(0.5, 4.3, 2, side * 7.7, base + 4.35, z, this.wall, sector);
+      for (const z of [-46.5, -54.5, -62.5]) {
+        this.window(
+          side * 7.43,
+          base + 2.2,
+          z,
+          1.8,
+          4.4,
+          sector,
+          side < 0 ? Math.PI / 2 : -Math.PI / 2,
+          true,
+        );
+        if (side < 0)
+          this.beam({
+            x: -7.3,
+            y: base + 6.1,
+            z,
+            tx: -1.4,
+            ty: base + 0.04,
+            tz: z + 2.5,
+            power: 54,
+            width: 1.1,
+            area: "chapel",
+          });
+      }
+    }
+    for (const z of [-43, -51, -58, -67]) {
+      this.arch(-1.5, base, z, 4.9, 3.6, this.stone, sector);
+      for (const x of [-6.5, 2.85]) {
+        this.cylinder(
+          0.26,
+          0.41,
+          6.9,
+          16,
+          x,
+          base + 3.45,
+          z,
+          this.stone,
+          sector,
+        );
+        this.cylinder(
+          0.49,
+          0.55,
+          0.2,
+          16,
+          x,
+          base + 0.1,
+          z,
+          this.stone,
+          sector,
+        );
+      }
+    }
+    this.box(15.6, 0.35, 29, 0, base + 8.4, -55.5, this.dark, sector);
+    for (const z of [-42.3, -69.4]) {
+      for (const side of [-1, 1])
+        this.box(5.7, 8.4, 0.5, side * 5, base + 4.2, z, this.wall, sector);
+      this.arch(0, base, z, 2.3, 2.6, this.stone, sector);
+    }
+    const rug = new THREE.MeshStandardMaterial({
+      map: this.pattern("cloth"),
+      color: 0x59323e,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.ground(2.9, 20, -0.4, base + 0.012, -55, sector, rug);
+    // A real alcove and lectern, not a gem floating over the arena floor.
+    this.box(0.3, 2.8, 1.8, -3.3, base + 1.4, -43.9, this.wall, sector);
+    this.box(0.3, 2.8, 1.6, -3.3, base + 1.4, -47.3, this.wall, sector);
+    this.box(2.8, 2.8, 0.3, -5.4, base + 1.4, -48.1, this.wall, sector);
+    this.box(1.1, 0.9, 0.9, -4.5, base + 0.45, -46, this.stone, sector);
+    this.box(1.35, 0.12, 1.1, -4.5, base + 0.96, -46, this.stone, sector);
+    this.torch(-7.3, base + 2, -46, "chapel");
+    this.torch(-7.3, base + 2, -61, "chapel");
+    this.chandelier(-0.3, base + 5.1, -51.5, "chapel");
+    // Up and down staircases connect an explorable upper room and gallery.
+    for (let i = 1; i <= 20; i++) {
+      const h = (i / 20) * 2.8;
+      this.box(
+        3.1,
+        h,
+        0.5,
+        5,
+        base + h / 2,
+        -49 - (i - 0.5) * 0.5,
+        this.stone,
+        sector,
+      );
+    }
+    this.box(3.35, 0.3, 9, 5, 5.05, -63.5, this.stone, sector);
+    for (let i = 0; i < 16; i++) {
+      const h = 2.8 * (1 - i / 16);
+      this.box(
+        3.1,
+        h,
+        0.375,
+        5,
+        base + h / 2,
+        -68 - ((i + 0.5) * 6) / 16,
+        this.stone,
+        sector,
+      );
+    }
+    this.ironFence(3.35, -63.5, 8.7, Math.PI / 2, sector, 5.2);
+    this.ironFence(6.65, -63.5, 9, Math.PI / 2, sector, 5.2);
+    for (const z of [-60.4, -68]) {
+      this.box(0.8, 3.6, 0.35, 3.7, 7, z, this.wall, sector);
+      this.box(0.6, 3.6, 0.35, 6.3, 7, z, this.wall, sector);
+      this.arch(5, 5.2, z, 1.14, 1.9, this.stone, sector);
+    }
+    this.box(0.35, 3.6, 7.6, 6.65, 7, -64.2, this.wall, sector);
+    this.box(3.6, 0.3, 8, 5, 9, -64, this.dark, sector);
+    this.window(6.43, 6.1, -65, 1.3, 2.1, sector, -Math.PI / 2, true);
+    this.chandelier(5, 7.5, -61.9, "chapel");
+    this.torch(6.5, 6.5, -61.5, "chapel");
+  }
+  private crypt() {
+    const s: Sector = "crypt",
+      b = 2.4;
+    this.ground(15.5, 27, 0, b, -89.5, s);
+    for (const side of [-1, 1]) {
+      this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
+      for (const z of [-80, -86, -92, -98]) {
+        this.cylinder(
+          0.28,
+          0.38,
+          3.6,
+          12,
+          side * 5.9,
+          b + 1.8,
+          z,
+          this.stone,
+          s,
+        );
+        this.arch(side * 5.8, b + 0.2, z, 1.05, 1.5, this.stone, s);
+        this.box(1.6, 0.26, 1.1, side * 5.8, b + 0.28, z, this.stone, s);
+        this.ironFence(side * 5.8, z + 0.3, 1.6, 0, s, b + 0.4);
+      }
+    }
+    // Four slabs leave a real break in the ceiling above the encounter.
+    this.box(5.3, 0.35, 27, -5.15, b + 4.4, -89.5, this.dark, s);
+    this.box(8.6, 0.35, 27, 3.5, b + 4.4, -89.5, this.dark, s);
+    this.box(1.7, 0.35, 7.4, -1.65, b + 4.4, -79.7, this.dark, s);
+    this.box(1.7, 0.35, 16.4, -1.65, b + 4.4, -94.8, this.dark, s);
+    const opening = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.65, 3),
       new THREE.MeshBasicMaterial({
-        color: 0xf2a056,
-        transparent: true,
-        opacity: 0.9,
+        color: 0xf5f8ff,
+        side: THREE.DoubleSide,
         toneMapped: false,
-        depthWrite: false,
       }),
     );
-    flame.position.set(tipX, 2.47, z);
-    this.group.add(flame);
-    this.flames.push(flame);
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffdba1, toneMapped: false }),
-    );
-    core.position.set(tipX, 2.35, z);
-    core.scale.y = 2;
-    this.group.add(core);
-    const glow = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(this.radial("#ffd59f", 0.7)),
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    glow.position.copy(flame.position);
-    glow.scale.setScalar(1.1);
-    this.group.add(glow);
-    {
-      const light = new THREE.PointLight(
-        0xf6b57b,
-        LOCATIONS[this.id].torch,
-        5.6,
-        2,
+    opening.rotation.x = Math.PI / 2;
+    opening.position.set(-1.65, b + 4.7, -85);
+    this.part(opening, s, 0);
+    for (const z of [-83.6, -84.5, -85.4, -86.3])
+      this.box(2, 0.09, 0.065, -1.65, b + 4.65, z, this.metal, s);
+    for (const z of [-77.6, -103]) {
+      for (const side of [-1, 1])
+        this.box(5.6, 4.4, 0.5, side * 5.1, b + 2.2, z, this.wall, s);
+      this.arch(0, b, z, 2.5, 1.7, this.stone, s);
+    }
+    for (const z of [-80.4, -88, -96]) {
+      this.torch(-7.3, b + 1.9, z, s);
+      this.torch(7.3, b + 1.9, z + 1, s);
+    }
+    this.chandelier(0, b + 2.7, -87, s);
+    this.window(0, b + 1, -103.2, 3, 3, s, 0, true);
+    this.beam({
+      x: -1.65,
+      y: b + 4.6,
+      z: -84.8,
+      tx: -0.4,
+      ty: b + 0.02,
+      tz: -86.4,
+      power: 64,
+      width: 1.2,
+      area: "crypt",
+    });
+    this.box(1.1, 0.5, 1.2, 3.8, b + 0.25, -81, this.stone, s);
+  }
+  private ironFence(
+    x: number,
+    z: number,
+    length: number,
+    rotation: number,
+    sector: Sector,
+    base = 0,
+  ) {
+    const group = new THREE.Group();
+    for (let i = 0; i < Math.ceil(length / 0.35); i++) {
+      const bar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.018, 0.026, 1.25, 6),
+        this.metal,
       );
-      light.position.set(tipX * 0.96, 2.46, z);
-      this.group.add(light);
-      this.flickerLights.push(light);
+      bar.position.set(-length / 2 + i * 0.35, 0.64, 0);
+      group.add(bar);
+      const tip = new THREE.Mesh(
+        new THREE.ConeGeometry(0.06, 0.19, 5),
+        this.metal,
+      );
+      tip.position.set(bar.position.x, 1.35, 0);
+      group.add(tip);
+    }
+    for (const y of [0.23, 0.95]) {
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(length, 0.045, 0.05),
+        this.metal,
+      );
+      rail.position.y = y;
+      group.add(rail);
+    }
+    group.position.set(x, base, z);
+    group.rotation.y = rotation;
+    group.updateMatrixWorld(true);
+    for (const o of group.children) {
+      const mesh = o as THREE.Mesh;
+      mesh.applyMatrix4(group.matrix);
+      this.part(mesh, sector);
+    }
+  }
+  private window(
+    x: number,
+    y: number,
+    z: number,
+    width: number,
+    height: number,
+    sector: Sector,
+    rotation: number,
+    bright: boolean,
+  ) {
+    const shape = new THREE.Shape();
+    shape.moveTo(-width / 2, 0);
+    shape.lineTo(-width / 2, height * 0.72);
+    shape.quadraticCurveTo(-width / 2, height * 0.86, 0, height);
+    shape.quadraticCurveTo(width / 2, height * 0.86, width / 2, height * 0.72);
+    shape.lineTo(width / 2, 0);
+    shape.closePath();
+    const material = new THREE.MeshBasicMaterial({
+      map: this.pattern("glass"),
+      color: bright ? 0xf7fafc : 0x151c25,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), material);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotation;
+    this.part(mesh, sector, 0);
+    this.arch(
+      x,
+      y,
+      z,
+      width * 0.58,
+      height * 0.69,
+      this.stone,
+      sector,
+      rotation,
+    );
+  }
+  private torch(x: number, y: number, z: number, sector: Sector) {
+    const sign = Math.sign(x) || 1;
+    this.box(0.12, 0.48, 0.35, x, y - 0.15, z, this.metal, sector);
+    this.box(
+      0.48,
+      0.07,
+      0.09,
+      x - sign * 0.22,
+      y - 0.05,
+      z,
+      this.metal,
+      sector,
+    );
+    const handle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.043, 0.055, 0.65, 8),
+      this.bark,
+    );
+    handle.position.set(x - sign * 0.4, y + 0.15, z);
+    handle.rotation.z = sign * 0.2;
+    this.part(handle, sector);
+    this.cylinder(
+      0.13,
+      0.065,
+      0.18,
+      10,
+      x - sign * 0.46,
+      y + 0.48,
+      z,
+      this.metal,
+      sector,
+    );
+    this.fire(x - sign * 0.46, y + 0.68, z, sector);
+    this.warm.push({
+      x: x - sign * 0.64,
+      y: y + 0.68,
+      z,
+      power: 32,
+      range: 6.5,
+    });
+  }
+  private chandelier(x: number, y: number, z: number, sector: Sector) {
+    this.cylinder(0.023, 0.023, 1.8, 6, x, y + 1.1, z, this.metal, sector);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.63, 0.045, 6, 18),
+      this.metal,
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(x, y, z);
+    this.part(ring, sector);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2,
+        px = x + Math.sin(a) * 0.63,
+        pz = z + Math.cos(a) * 0.63;
+      this.cylinder(0.045, 0.05, 0.28, 8, px, y + 0.1, pz, this.stone, sector);
+      this.fire(px, y + 0.32, pz, sector, 0.65);
+    }
+    this.warm.push({ x, y: y + 0.3, z, power: 46, range: 8 });
+  }
+  private fire(x: number, y: number, z: number, sector: Sector, scale = 1) {
+    const group = new THREE.Group(),
+      outer = new THREE.Mesh(
+        new THREE.ConeGeometry(0.065, 0.32, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffd79f, toneMapped: false }),
+      ),
+      core = new THREE.Mesh(
+        new THREE.ConeGeometry(0.035, 0.2, 7),
+        new THREE.MeshBasicMaterial({ color: 0xfffaf0, toneMapped: false }),
+      );
+    outer.position.y = 0.08;
+    core.position.y = 0.015;
+    group.add(outer, core);
+    group.position.set(x, y, z);
+    group.scale.setScalar(scale);
+    this.group(sector).add(group);
+    this.flames.push({ object: group, z, scale });
+  }
+  private beam(anchor: BeamAnchor) {
+    this.cool.push(anchor);
+    const origin = new THREE.Vector3(anchor.x, anchor.y, anchor.z),
+      end = new THREE.Vector3(anchor.tx, anchor.ty, anchor.tz),
+      direction = end.clone().sub(origin).normalize();
+    const across = new THREE.Vector3(0, 1, 0).cross(direction).normalize();
+    if (across.lengthSq() < 0.1) across.set(1, 0, 0);
+    const material = new THREE.MeshBasicMaterial({
+      map: this.pattern("beam"),
+      color: 0xf4f7ff,
+      transparent: true,
+      opacity: 0.1,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    for (let i = 0; i < 2; i++) {
+      const side = across.clone().applyAxisAngle(direction, (i * Math.PI) / 2),
+        a = origin.clone().addScaledVector(side, -0.16),
+        b = origin.clone().addScaledVector(side, 0.16),
+        c = end.clone().addScaledVector(side, anchor.width),
+        d = end.clone().addScaledVector(side, -anchor.width);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+          [
+            ...a.toArray(),
+            ...b.toArray(),
+            ...c.toArray(),
+            ...a.toArray(),
+            ...c.toArray(),
+            ...d.toArray(),
+          ],
+          3,
+        ),
+      );
+      geometry.setAttribute(
+        "uv",
+        new THREE.Float32BufferAttribute(
+          [0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0],
+          2,
+        ),
+      );
+      geometry.computeVertexNormals();
+      this.group(anchor.area).add(new THREE.Mesh(geometry, material));
+    }
+    this.beams.push({ material, area: anchor.area, phase: anchor.z * 0.5 });
+  }
+  private pattern(kind: string) {
+    const cached = this.patterns.get(kind);
+    if (cached) return cached;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    if (kind === "leaves") {
+      for (let i = 0; i < 550; i++) {
+        const x = rand(i) * 256,
+          y = rand(i + 400) * 256,
+          dx = (x - 128) / 125,
+          dy = (y - 128) / 100;
+        if (dx * dx + dy * dy > 1.1 + rand(i) * 0.2) continue;
+        ctx.fillStyle = i % 3 === 0 ? "#536c5f" : i % 2 ? "#697f68" : "#3c5549";
+        ctx.beginPath();
+        ctx.ellipse(
+          x,
+          y,
+          4 + rand(i + 1) * 8,
+          2 + rand(i + 2) * 4,
+          rand(i + 3) * 6,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    } else if (kind === "beam") {
+      const image = ctx.createImageData(256, 256);
+      for (let y = 0; y < 256; y++)
+        for (let x = 0; x < 256; x++) {
+          const u = x / 255,
+            v = y / 255,
+            a =
+              Math.pow(Math.sin(u * Math.PI), 2) *
+              Math.pow(Math.sin(v * Math.PI), 0.65) *
+              (0.65 + rand(x + y * 256) * 0.35);
+          image.data.set(
+            [255, 255, 255, Math.round(a * 255)],
+            (y * 256 + x) * 4,
+          );
+        }
+      ctx.putImageData(image, 0, 0);
+    } else {
+      ctx.fillStyle =
+        kind === "glass"
+          ? "#ecf0f2"
+          : kind === "bark"
+            ? "#62665c"
+            : kind === "cloth"
+              ? "#9a858b"
+              : "#727b6a";
+      ctx.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 1600; i++) {
+        const v = Math.floor(rand(i) * 100);
+        ctx.fillStyle = `rgba(${v},${v + 5},${v + 9},${kind === "glass" ? 0.12 : 0.25})`;
+        ctx.fillRect(
+          rand(i + 4) * 256,
+          rand(i + 7) * 256,
+          kind === "bark" ? 1 + rand(i) * 3 : 2,
+          kind === "bark" ? 10 + rand(i) * 55 : 2,
+        );
+      }
+      if (kind === "glass") {
+        ctx.strokeStyle = "#26313d";
+        ctx.lineWidth = 6;
+        for (let i = -8; i < 12; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * 40, 0);
+          ctx.lineTo(i * 40 + 256, 256);
+          ctx.moveTo(i * 40, 0);
+          ctx.lineTo(i * 40 - 256, 256);
+          ctx.stroke();
+        }
+      }
+      if (kind === "cloth") {
+        ctx.strokeStyle = "#322c31";
+        ctx.lineWidth = 2;
+        for (let i = 5; i < 256; i += 16) {
+          ctx.strokeRect(i, 5, 6, 246);
+        }
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    this.patterns.set(kind, texture);
+    return texture;
+  }
+  update(
+    time: number,
+    player: { x: number; y: number; z: number },
+    area: AreaId,
+  ) {
+    for (const [id, group] of this.sectors)
+      group.visible =
+        id === "world" || Math.abs(CENTERS[id as AreaId] - player.z) < 42;
+    this.chosen.fill(-1);
+    for (let slot = 0; slot < this.warmPool.length; slot++) {
+      let best = -1,
+        distance = Infinity;
+      for (let i = 0; i < this.warm.length; i++) {
+        if (this.chosen.includes(i)) continue;
+        const a = this.warm[i],
+          d =
+            (a.x - player.x) ** 2 +
+            (a.z - player.z) ** 2 +
+            (a.y - player.y - 1) ** 2;
+        if (d < distance) {
+          best = i;
+          distance = d;
+        }
+      }
+      this.chosen[slot] = best;
+      const light = this.warmPool[slot],
+        a = this.warm[best];
+      light.position.set(a.x, a.y, a.z);
+      light.distance = a.range;
+      light.intensity =
+        distance < 150
+          ? a.power *
+            (0.96 +
+              Math.sin(time * 11 + best) * 0.025 +
+              Math.sin(time * 17 + best) * 0.015)
+          : 0;
+    }
+    this.chosenCool.fill(-1);
+    for (let slot = 0; slot < this.coolPool.length; slot++) {
+      let best = -1,
+        distance = Infinity;
+      for (let i = 0; i < this.cool.length; i++) {
+        const a = this.cool[i];
+        if (a.area !== area || this.chosenCool.includes(i)) continue;
+        const d = (a.tx - player.x) ** 2 + (a.tz - player.z) ** 2;
+        if (d < distance) {
+          best = i;
+          distance = d;
+        }
+      }
+      this.chosenCool[slot] = best;
+      const light = this.coolPool[slot],
+        a = this.cool[best];
+      light.intensity = a
+        ? a.power * (0.96 + Math.sin(time * 0.73 + a.z) * 0.04)
+        : 0;
+      if (a) {
+        light.position.set(a.x, a.y, a.z);
+        light.target.position.set(a.tx, a.ty, a.tz);
+      }
+    }
+    for (const b of this.beams)
+      b.material.opacity =
+        (b.area === area ? 0.12 : 0.045) *
+        (1 + Math.sin(time * 0.65 + b.phase) * 0.08);
+    for (const f of this.flames) {
+      f.object.visible = Math.abs(f.z - player.z) < 19;
+      f.object.scale.y = f.scale * (0.94 + Math.sin(time * 12 + f.z) * 0.06);
     }
   }
 }

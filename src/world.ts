@@ -1,45 +1,50 @@
 import * as THREE from "three";
-import {
-  LocationStage,
-  LOCATIONS,
-  LOCATION_IDS,
-  type LocationId,
-} from "./locations";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { ConnectedEnvironment, LOCATIONS, type LocationId } from "./locations";
 import { Actor } from "./actor";
-import { CombatGame, type GameEvent } from "./game";
+import { Campaign } from "./campaign";
+import { AREA_ORDER, AREAS, type AreaId } from "./world-layout";
+import type { GameEvent } from "./game";
+import { LevelProps } from "./level-props";
+import {
+  loadProps,
+  modelCacheSize,
+  disposeModels,
+  releaseTexture,
+} from "./asset-store";
 
 export class World {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(60, 1, 0.08, 110);
+  camera = new THREE.PerspectiveCamera(57, 1, 0.08, 165);
   player = new Actor();
-  enemy = new Actor(true);
+  private actors = new Map<AreaId, Actor>();
+  private props: LevelProps;
+  private environment: ConnectedEnvironment;
+  private readyTextures: Promise<void>;
   yaw = 0;
   pitch = 0.08;
   resolution = 1;
   device = "";
-  location: LocationId = "chapel";
-  private stages = new Map<LocationId, LocationStage>();
-  private get stage() {
-    return this.stages.get(this.location)!;
-  }
-  private playerFill = new THREE.PointLight(0xc1cedc, 4.2, 5.2, 2);
-
-  private aim = new THREE.Vector3(0, 1.2, 4.4);
-  private position = new THREE.Vector3(0.35, 2.3, 8.8);
+  location: AreaId = "forest";
+  private elapsed = 0;
+  private aim = new THREE.Vector3(0, 1.2, 3);
+  private position = new THREE.Vector3(0.7, 2.5, 9);
   private desiredAim = new THREE.Vector3();
   private desiredPosition = new THREE.Vector3();
-
-  private elapsed = 0;
-  private readyTextures: Promise<void>;
+  private fogColor = new THREE.Color();
+  private playerFill = new THREE.PointLight(0xcdd8e4, 2.2, 4.2, 2);
+  private shadows: THREE.Mesh[] = [];
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
-  private blobs: THREE.Mesh[] = [];
+  private resizeHandler = () => this.resize();
+  private contextHandler = (e: Event) => {
+    e.preventDefault();
+    window.dispatchEvent(new Event("game-context-lost"));
+  };
   constructor(
     private canvas: HTMLCanvasElement,
-    public game: CombatGame,
+    public game: Campaign,
   ) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -48,53 +53,53 @@ export class World {
       alpha: false,
     });
     this.renderer.setPixelRatio(1);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1;
+    this.renderer.shadowMap.enabled = false;
     const gl = this.renderer.getContext(),
       debug = gl.getExtension("WEBGL_debug_renderer_info");
     this.device = debug
       ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))
       : "WebGL2";
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
-    // No real-time shadow maps. Static vertex shading + soft contact patches.
-    this.renderer.shadowMap.enabled = false;
-    this.scene.add(this.playerFill);
+    this.scene.background = new THREE.Color(0x7e8b94);
+    this.scene.fog = new THREE.FogExp2(0x526166, 0.018);
     const manager = new THREE.LoadingManager();
     this.readyTextures = new Promise((resolve, reject) => {
       manager.onLoad = () => resolve();
-      manager.onError = (url) =>
-        reject(new Error(`Не удалось загрузить материал: ${url}`));
+      manager.onError = (url) => reject(new Error(`Material failed: ${url}`));
     });
-    const loader = new THREE.TextureLoader(manager);
-    for (const id of LOCATION_IDS) {
-      const stage = new LocationStage(
-        id,
-        loader,
-        this.renderer.capabilities.getMaxAnisotropy(),
-      );
-      this.stages.set(id, stage);
-      this.scene.add(stage.group);
-    }
-    this.selectLocation("chapel");
-    const shadow = new THREE.CanvasTexture(this.radial("#000000", 0.7));
-    for (let i = 0; i < 2; i++) {
-      const blob = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.5, 1.3),
+    this.environment = new ConnectedEnvironment(
+      new THREE.TextureLoader(manager),
+    );
+    this.scene.add(this.environment.root, this.playerFill, this.player.root);
+    for (const id of AREA_ORDER)
+      if (id !== "crypt") {
+        const kind = AREAS[id].enemy.kind as "effigy" | "watcher" | "gaoler";
+        const actor = new Actor(true, kind);
+        this.actors.set(id, actor);
+        this.scene.add(actor.root);
+      }
+    this.props = new LevelProps(game);
+    this.scene.add(this.props.root);
+    const shadowTexture = new THREE.CanvasTexture(this.radial("#000000", 0.75));
+    for (let i = 0; i < 5; i++) {
+      const shadow = new THREE.Mesh(
+        new THREE.PlaneGeometry(i === 4 ? 2 : 1.35, i === 4 ? 1.7 : 1.2),
         new THREE.MeshBasicMaterial({
-          map: shadow,
+          map: shadowTexture,
           transparent: true,
+          opacity: 0.55,
           depthWrite: false,
-          opacity: 0.62,
         }),
       );
-      blob.rotation.x = -Math.PI / 2;
-      blob.position.y = 0.012;
-      this.blobs.push(blob);
-      this.scene.add(blob);
+      shadow.rotation.x = -Math.PI / 2;
+      this.shadows.push(shadow);
+      this.scene.add(shadow);
     }
     this.impact = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(this.radial("#fff2c9", 1)),
+        map: new THREE.CanvasTexture(this.radial("#f5f5ef", 1)),
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -102,63 +107,52 @@ export class World {
     );
     this.impact.visible = false;
     this.scene.add(this.impact);
-    this.scene.add(this.player.root, this.enemy.root);
     this.resize();
-    window.addEventListener("resize", () => this.resize());
-    canvas.addEventListener("webglcontextlost", (e) => {
-      e.preventDefault();
-      window.dispatchEvent(new Event("game-context-lost"));
-    });
+    window.addEventListener("resize", this.resizeHandler);
+    canvas.addEventListener("webglcontextlost", this.contextHandler);
   }
   async load() {
+    await loadProps();
     await Promise.all([
       this.readyTextures,
       this.player.load(),
-      this.enemy.load(),
+      ...[...this.actors.values()].map((a) => a.load()),
     ]);
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    const room = new RoomEnvironment();
-    this.scene.environment = pmrem.fromScene(room, 0.04).texture;
-    this.scene.environmentIntensity = 0.18;
-    room.dispose();
-    pmrem.dispose();
-    this.player.update(0.01, this.game.player);
-    this.enemy.update(0.01, this.game.enemy);
-    const selected = this.location;
-    for (const id of LOCATION_IDS) {
-      this.selectLocation(id);
-      await this.renderer.compileAsync(this.scene, this.camera);
-    }
-    this.selectLocation(selected);
+    this.props.build();
+    this.resetView();
+    this.render(0.01);
+    // Warm every area's material/light variants before the input tour begins.
+    await this.renderer.compileAsync(this.scene, this.camera);
+  }
+  resetView() {
+    const p = this.game.player;
+    this.yaw = 0;
+    this.pitch = 0.08;
+    this.position.set(p.x + 0.7, p.y + 2.6, p.z + 4.5);
+    this.aim.set(p.x, p.y + 1.2, p.z - 0.6);
+    this.props.reset();
+    this.player.reset();
+    for (const actor of this.actors.values()) actor.reset();
   }
   selectLocation(id: LocationId) {
-    this.location = id;
-    for (const [key, stage] of this.stages) stage.group.visible = key === id;
-    const spec = LOCATIONS[id];
-    this.scene.background = this.stage.background;
-    this.scene.fog = new THREE.FogExp2(spec.fog, spec.density);
-    this.playerFill.color.set(spec.fill);
-    this.game.obstacles = this.stage.obstacles;
-    this.stage.gate.position.y = 0;
-    this.stage.reset();
-    this.aim.set(0, 1.2, 4.4);
-    this.position.set(0.35, 2.3, 8.8);
+    this.location = id === "courtyard" ? "forest" : id;
+    this.resetView();
   }
   private radial(color: string, alpha: number) {
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const x = c.getContext("2d")!,
-      g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext("2d")!,
+      g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
     g.addColorStop(0, color);
     g.addColorStop(1, "transparent");
-    x.globalAlpha = alpha;
-    x.fillStyle = g;
-    x.fillRect(0, 0, 64, 64);
-    return c;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    return canvas;
   }
   orbit(dx: number, dy: number) {
     this.yaw -= dx * 0.004;
-    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.002, -0.2, 0.6);
+    this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.002, -0.2, 0.65);
   }
   moveAxis(axis: { x: number; y: number }) {
     return {
@@ -171,82 +165,173 @@ export class World {
       h = this.canvas.clientHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const maxHeight = w < 700 ? 760 : 1080;
-    const ratio = Math.min(1, maxHeight / h) * this.resolution;
-    this.renderer.setSize(Math.round(w * ratio), Math.round(h * ratio), false);
+    const scale = Math.min(1, (w < 700 ? 800 : 1080) / h) * this.resolution;
+    this.renderer.setSize(Math.round(w * scale), Math.round(h * scale), false);
   }
   event(e: GameEvent) {
-    if (e.type === "hit" || e.type === "block" || e.type === "hurt") {
-      this.cameraKick =
-        e.type === "block"
-          ? 0.018
-          : this.game.player.combo === 3
-            ? 0.055
-            : 0.03;
-      this.impact.position.set(
-        e.x,
-        e.type === "hit" && this.game.enemy.kind === "gaoler" ? 1.7 : 1.15,
-        e.z,
-      );
-      this.impact.visible = true;
-      this.impactLife = 0.18;
-    }
+    if (e.type !== "hit" && e.type !== "hurt" && e.type !== "block") return;
+    this.cameraKick =
+      e.type === "block" ? 0.015 : this.game.player.combo === 3 ? 0.045 : 0.025;
+    this.impact.position.set(
+      e.x,
+      (e.type === "hit" ? this.game.enemy.y : this.game.player.y) +
+        (this.game.enemy.kind === "gaoler" && e.type === "hit" ? 1.7 : 0.9),
+      e.z,
+    );
+    this.impact.visible = true;
+    this.impactLife = 0.13;
   }
   render(dt: number) {
     this.elapsed += dt;
-    this.stage.update(
-      this.elapsed,
-      dt,
-      this.game.enemy.hp <= 0,
-      this.game.chestOpened,
-      this.game.secrets,
-    );
-    const p = this.game.player,
-      e = this.game.enemy;
-    this.playerFill.position.set(p.x - 0.3, 2.5, p.z + 0.5);
+    const p = this.game.player;
+    this.location = this.game.location;
+    this.environment.update(this.elapsed, p, this.location);
+    this.playerFill.position.set(p.x - 0.5, p.y + 2.1, p.z + 0.6);
+    const fog = this.scene.fog as THREE.FogExp2,
+      spec = LOCATIONS[this.location],
+      blend = 1 - Math.exp(-dt * 2.3);
+    fog.color.lerp(this.fogColor.set(spec.fog), blend);
+    fog.density = THREE.MathUtils.lerp(fog.density, spec.density, blend);
     this.player.update(dt, p);
-    this.enemy.update(dt, e);
-    this.blobs[0].position.set(p.x, 0.012, p.z);
-    this.blobs[1].position.set(e.x, 0.013, e.z);
-    this.blobs[1].scale.setScalar(e.hp <= 0 ? 1.4 : 1);
-    if (this.impactLife > 0) {
-      this.impactLife -= dt;
-      this.impact.scale.setScalar(0.4 + (0.18 - this.impactLife) * 3);
-      (this.impact.material as THREE.SpriteMaterial).opacity = Math.max(
-        0,
-        this.impactLife / 0.18,
-      );
-    } else this.impact.visible = false;
-    const d = this.camera.aspect < 0.85 ? 4.7 : 3.9;
+    this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
+    let shadowIndex = 1;
+    for (const id of AREA_ORDER) {
+      const e = this.game.enemies.get(id)!,
+        shadow = this.shadows[shadowIndex++];
+      const visible = Math.abs(e.z - p.z) < 36;
+      shadow.visible = visible;
+      shadow.position.set(e.x, e.y + 0.015, e.z);
+      const actor = this.actors.get(id);
+      if (actor) {
+        actor.root.visible = visible;
+        if (visible) actor.update(dt, e);
+      }
+    }
+    this.props.update(dt, this.elapsed);
+    const d = this.camera.aspect < 0.85 ? 4.5 : 3.9;
     this.desiredAim.set(
-      p.x - Math.sin(this.yaw) * 0.65,
-      1.25,
-      p.z - Math.cos(this.yaw) * 0.65,
+      p.x - Math.sin(this.yaw) * 0.7,
+      p.y + 1.2,
+      p.z - Math.cos(this.yaw) * 0.7,
     );
     this.desiredPosition.set(
       p.x + Math.sin(this.yaw) * d + Math.cos(this.yaw) * 0.7,
-      2.35 + this.pitch * 2,
+      p.y + 2.45 + this.pitch * 2.6,
       p.z + Math.cos(this.yaw) * d - Math.sin(this.yaw) * 0.7,
     );
+    const inspect = this.props.inspect();
+    if (inspect) {
+      this.desiredAim.set(inspect.x, inspect.y + 0.3, inspect.z);
+      this.desiredPosition.set(
+        inspect.x + 0.65,
+        inspect.y + 2.9,
+        inspect.z + 1.3,
+      );
+    }
+    if (inspect) {
+      this.playerFill.position.set(
+        inspect.x + 0.45,
+        inspect.y + 1.4,
+        inspect.z + 0.7,
+      );
+      this.playerFill.intensity = 7;
+    } else this.playerFill.intensity = 2.2;
+    if (p.y > 4.9 && this.location === "chapel") {
+      this.desiredPosition.x = THREE.MathUtils.clamp(
+        this.desiredPosition.x,
+        3.7,
+        6.2,
+      );
+      this.desiredPosition.y = Math.min(this.desiredPosition.y, 8.6);
+    }
+    // Keep the camera in the playable corridor and under low crypt ceilings.
     this.desiredPosition.x = THREE.MathUtils.clamp(
       this.desiredPosition.x,
-      -5.7,
-      5.7,
+      -7.1,
+      7.1,
     );
-    this.desiredPosition.z = THREE.MathUtils.clamp(
-      this.desiredPosition.z,
-      -8,
-      8.4,
-    );
-    const alpha = 1 - Math.exp(-dt * 12);
+    if (this.location === "crypt")
+      this.desiredPosition.y = Math.min(this.desiredPosition.y, 6.35);
+    // Analytic column occlusion, independent of triangle count and map detail.
+    for (const o of this.game.obstacles) {
+      if (o.hx > 0.45 || o.hz > 0.45) continue;
+      const dx = this.desiredPosition.x - this.desiredAim.x,
+        dz = this.desiredPosition.z - this.desiredAim.z,
+        fx = this.desiredAim.x - o.x,
+        fz = this.desiredAim.z - o.z;
+      const a = dx * dx + dz * dz,
+        b = 2 * (fx * dx + fz * dz),
+        c = fx * fx + fz * fz - 0.65 * 0.65,
+        discriminant = b * b - 4 * a * c;
+      if (discriminant <= 0 || a < 0.01) continue;
+      const t = (-b - Math.sqrt(discriminant)) / (2 * a);
+      if (t > 0.15 && t < 1)
+        this.desiredPosition.lerpVectors(
+          this.desiredAim,
+          this.desiredPosition,
+          Math.max(0.28, t - 0.06),
+        );
+    }
+    const alpha = 1 - Math.exp(-dt * 8);
     this.aim.lerp(this.desiredAim, alpha);
     this.position.lerp(this.desiredPosition, alpha);
     this.camera.position.copy(this.position);
-    this.cameraKick *= Math.exp(-dt * 32);
-    this.camera.position.x += Math.sin(this.elapsed * 73) * this.cameraKick;
+    this.cameraKick *= Math.exp(-dt * 30);
+    this.camera.position.x += Math.sin(this.elapsed * 67) * this.cameraKick;
     this.camera.position.y +=
-      Math.cos(this.elapsed * 57) * this.cameraKick * 0.55;
+      Math.cos(this.elapsed * 53) * this.cameraKick * 0.45;
     this.camera.lookAt(this.aim);
+    if (this.impactLife > 0) {
+      this.impactLife -= dt;
+      this.impact.scale.setScalar(0.35 + (0.13 - this.impactLife) * 2);
+      (this.impact.material as THREE.SpriteMaterial).opacity = Math.max(
+        0,
+        this.impactLife / 0.13,
+      );
+    } else this.impact.visible = false;
     this.renderer.render(this.scene, this.camera);
+  }
+  resources() {
+    const memory = (
+      performance as Performance & { memory?: { usedJSHeapSize: number } }
+    ).memory;
+    return {
+      geometries: this.renderer.info.memory.geometries,
+      textures: this.renderer.info.memory.textures,
+      programs: this.renderer.info.programs?.length ?? 0,
+      models: modelCacheSize(),
+      js_heap_mb: memory
+        ? Math.round((memory.usedJSHeapSize / 1048576) * 100) / 100
+        : null,
+    };
+  }
+  async dispose() {
+    window.removeEventListener("resize", this.resizeHandler);
+    this.canvas.removeEventListener("webglcontextlost", this.contextHandler);
+    this.player.dispose();
+    for (const actor of this.actors.values()) actor.dispose();
+    this.props.dispose();
+    const geometries = new Set<THREE.BufferGeometry>(),
+      materials = new Set<THREE.Material>(),
+      textures = new Set<THREE.Texture>();
+    this.scene.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        geometries.add(o.geometry);
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          materials.add(m);
+          for (const value of Object.values(m))
+            if (value instanceof THREE.Texture) textures.add(value);
+        }
+      } else if (o instanceof THREE.Sprite) {
+        materials.add(o.material);
+        if (o.material.map) textures.add(o.material.map);
+      }
+    });
+    for (const t of textures) releaseTexture(t);
+    for (const m of materials) m.dispose();
+    for (const g of geometries) g.dispose();
+    await disposeModels();
+    this.renderer.dispose();
+    this.scene.clear();
   }
 }

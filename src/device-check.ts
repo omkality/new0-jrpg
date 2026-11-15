@@ -1,7 +1,15 @@
-import type { LocationId } from "./locations";
+import { AREA_ORDER, type AreaId } from "./world-layout.ts";
+
+export interface ResourceMetrics {
+  geometries: number;
+  textures: number;
+  programs: number;
+  models: number;
+  js_heap_mb: number | null;
+}
 
 export interface StageMetrics {
-  location: LocationId;
+  location: AreaId;
   seconds: number;
   frames: number;
   fps: number;
@@ -10,9 +18,10 @@ export interface StageMetrics {
   over_50_ms: number;
   completed: boolean;
   render_scale: number;
+  resources: ResourceMetrics;
 }
 export interface DeviceReport {
-  protocol: "device-check-1";
+  protocol: "device-check-2";
   platform: string;
   telegram_version: string;
   viewport_width: number;
@@ -50,44 +59,49 @@ export class FrameSamples {
   }
 }
 
+// Observes one continuous run without resetting or teleporting the player.
 export class DeviceCheck {
-  readonly locations: LocationId[] = ["chapel", "roofs", "courtyard"];
   stages: StageMetrics[] = [];
   elapsed = 0;
   index = 0;
   done = false;
+  private location: AreaId = "forest";
   private samples = new FrameSamples();
-  private begin: (location: LocationId) => void;
-  constructor(begin: (location: LocationId) => void) {
-    this.begin = begin;
-    begin(this.locations[0]);
-  }
-  update(rawMs: number, completed: boolean, scale: number) {
+  update(
+    rawMs: number,
+    location: AreaId,
+    completed: ReadonlySet<AreaId>,
+    finished: boolean,
+    scale: number,
+    resources: ResourceMetrics,
+  ) {
     if (this.done) return;
+    if (location !== this.location) {
+      this.store(completed.has(this.location), scale, resources);
+      this.location = location;
+      this.index = AREA_ORDER.indexOf(location);
+      this.samples = new FrameSamples();
+    }
     this.elapsed += rawMs / 1000;
-    // Exclude first second of each location, including its initial camera placement.
-    if (this.elapsed > 1) this.samples.add(rawMs);
-    if ((completed && this.elapsed >= 15) || this.elapsed >= 32) {
-      this.store(completed, scale);
-      if (++this.index === this.locations.length) this.done = true;
-      else {
-        this.elapsed = 0;
-        this.samples = new FrameSamples();
-        this.begin(this.locations[this.index]);
-      }
+    this.samples.add(rawMs);
+    if (finished || this.elapsed >= 175) {
+      this.store(finished && completed.has(location), scale, resources);
+      this.done = true;
     }
   }
-  interrupt(completed: boolean, scale: number) {
+  interrupt(completed: boolean, scale: number, resources: ResourceMetrics) {
     if (this.done) return;
-    this.store(completed, scale);
+    this.store(completed, scale, resources);
     this.done = true;
   }
-  private store(completed: boolean, scale: number) {
+  private store(completed: boolean, scale: number, resources: ResourceMetrics) {
+    if (this.stages.length >= 4) return;
     this.stages.push({
-      location: this.locations[this.index],
+      location: this.location,
       ...this.samples.result(),
       completed,
       render_scale: scale,
+      resources,
     });
   }
 }

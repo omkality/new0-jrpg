@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "status": "prepared",
+  "coordinates": {
+    "up": "+Y",
+    "front": "+Z",
+    "units": "metres"
+  },
+  "chest": {
+    "file": "/assets/props-v7/chest.glb",
+    "root": "ChestRoot",
+    "body": "ChestBody",
+    "lid": "ChestLid",
+    "lidPivot": [
+      0,
+      0.4205016791820526,
+      -0.2571077048778534
+    ],
+    "lidAxis": "X",
+    "closedAngle": 0,
+    "openAngle": -1.75,
+    "lootGroup": "Loot",
+    "lootAnchor": "LootAnchor",
+    "lootAnchorPosition": [
+      0.24,
+      0.09,
+      -0.02
+    ],
+    "interiorFloorY": 0.01843,
+    "interiorBounds": {
+      "min": [
+        -0.4,
+        0.025,
+        -0.2
+      ],
+      "max": [
+        0.4,
+        0.405,
+        0.2
+      ]
+    },
+    "weaponDisplay": {
+      "rotationEulerXYZ": [
+        1.5707963267948966,
+        0,
+        1.5707963267948966
+      ],
+      "scales": {
+        "sword": 0.55,
+        "axe": 0.6,
+        "spear": 0.36
+      },
+      "offsets": {
+        "sword": [
+          0,
+          0,
+          0
+        ],
+        "axe": [
+          0,
+          0,
+          0
+        ],
+        "spear": [
+          -0.045,
+          0,
+          0
+        ]
+      }
+    },
+    "clips": [
+      {
+        "name": "Open",
+        "duration": 1.1
+      },
+      {
+        "name": "Close",
+        "duration": 1.1
+      }
+    ],
+    "closedBounds": {
+      "min": [
+        -0.47951826453208923,
+        -0.0009516347199678421,
+        -0.26049298932775855
+      ],
+      "max": [
+        0.47951826453208923,
+        0.6171050518751144,
+        0.26180538535118103
+      ],
+      "size": [
+        0.9590365290641785,
+        0.6180566865950823,
+        0.5222983746789396
+      ]
+    }
+  },
+  "mimic": {
+    "file": "/assets/props-v7/mimic.glb",
+    "root": "ChestRoot",
+    "lid": "ChestLid",
+    "upperTeeth": "UpperTeeth",
+    "lowerTeeth": "LowerTeeth",
+    "tongue": "TongueRoot",
+    "clips": [
+      "Reveal",
+      "Bite",
+      "Open",
+      "Close"
+    ],
+    "closedBounds": {
+      "min": [
+        -0.47951826453208923,
+        -0.0009516347199678421,
+        -0.26049298932775855
+      ],
+      "max": [
+        0.47951826453208923,
+        0.6171050518751144,
+        0.26180538535118103
+      ],
+      "size": [
+        0.9590365290641785,
+        0.6180566865950823,
+        0.5222983746789396
+      ]
+    }
+  },
+  "weapons": {
+    "sword": {
+      "file": "/assets/props-v7/weapon-sword.glb",
+      "root": "WeaponRoot",
+      "grip": "Grip",
+      "bladeAxis": "+Y",
+      "dimensions": [
+        0.3694699704647064,
+        1.3490000367164612,
+        0.05615584924817085
+      ]
+    },
+    "axe": {
+      "file": "/assets/props-v7/weapon-axe.glb",
+      "root": "WeaponRoot",
+      "grip": "Grip",
+      "bladeAxis": "+Y",
+      "dimensions": [
+        0.3736823536455631,
+        1.078708678483963,
+        0.07800000160932541
+      ]
+    },
+    "spear": {
+      "file": "/assets/props-v7/weapon-spear.glb",
+      "root": "WeaponRoot",
+      "grip": "Grip",
+      "bladeAxis": "+Y",
+      "dimensions": [
+        0.27273958921432495,
+        2.0350000262260437,
+        0.06599999964237213
+      ]
+    }
+  },
+  "key": {
+    "file": "/assets/props-v7/key.glb",
+    "root": "KeyRoot"
+  },
+  "coins": {
+    "file": "/assets/props-v7/coins.glb",
+    "root": "CoinPile"
+  },
+  "door": {
+    "file": "/assets/props-v7/door.glb",
+    "root": "DoorRoot",
+    "pivot": "DoorPivot",
+    "axis": "Y",
+    "closedAngle": 0,
+    "openAngle": -1.55,
+    "clips": [
+      "Open",
+      "Close"
+    ],
+    "pivotPosition": [
+      -0.56,
+      0,
+      0
+    ],
+    "outerDimensions": [
+      1.4259999990463257,
+      2.316024645231664,
+      0.2444233401864767
+    ],
+    "leafWidth": 1.1
+  },
+  "report": [
+    {
+      "name": "chest",
+      "file": "/assets/props-v7/chest.glb",
+      "bytes": 1184116,
+      "triangles": 24016,
+      "materials": 3,
+      "primitives": 7,
+      "clips": [
+        {
+          "name": "Open",
+          "duration": 1.100000023841858
+        },
+        {
+          "name": "Close",
+          "duration": 1.100000023841858
+        }
+      ]
+    },
+    {
+      "name": "mimic",
+      "file": "/assets/props-v7/mimic.glb",
+      "bytes": 1329912,
+      "triangles": 27884,
+      "materials": 5,
+      "primitives": 15,
+      "clips": [
+        {
+          "name": "Open",
+          "duration": 1.100000023841858
+        },
+        {
+          "name": "Close",
+          "duration": 1.100000023841858
+        },
+        {
+          "name": "Reveal",
+          "duration": 1
+        },
+        {
+          "name": "Bite",
+          "duration": 0.7200000286102295
+        }
+      ]
+    },
+    {
+      "name": "weapon-sword",
+      "file": "/assets/props-v7/weapon-sword.glb",
+      "bytes": 148540,
+      "triangles": 2314,
+      "materials": 3,
+      "primitives": 3,
+      "clips": []
+    },
+    {
+      "name": "weapon-axe",
+      "file": "/assets/props-v7/weapon-axe.glb",
+      "bytes": 224920,
+      "triangles": 2736,
+      "materials": 4,
+      "primitives": 4,
+      "clips": []
+    },
+    {
+      "name": "weapon-spear",
+      "file": "/assets/props-v7/weapon-spear.glb",
+      "bytes": 203944,
+      "triangles": 2714,
+      "materials": 4,
+      "primitives": 4,
+      "clips": []
+    },
+    {
+      "name": "key",
+      "file": "/assets/props-v7/key.glb",
+      "bytes": 65580,
+      "triangles": 468,
+      "materials": 2,
+      "primitives": 2,
+      "clips": []
+    },
+    {
+      "name": "coins",
+      "file": "/assets/props-v7/coins.glb",
+      "bytes": 353148,
+      "triangles": 8544,
+      "materials": 1,
+      "primitives": 1,
+      "clips": []
+    },
+    {
+      "name": "door",
+      "file": "/assets/props-v7/door.glb",
+      "bytes": 246472,
+      "triangles": 2772,
+      "materials": 4,
+      "primitives": 10,
+      "clips": [
+        {
+          "name": "Open",
+          "duration": 1.2000000476837158
+        },
+        {
+          "name": "Close",
+          "duration": 1.2000000476837158
+        }
+      ]
+    }
+  ],
+  "weaponAttachment": {
+    "position": [
+      0,
+      0,
+      0
+    ],
+    "gripNode": "Grip",
+    "bladeAxis": "+Y",
+    "handChildRotationEulerXYZ": [
+      -1.5707963267948966,
+      0,
+      0
+    ]
+  },
+  "validation": {
+    "hollowCavityRays": 10,
+    "weaponDisplaysFit": true,
+    "doorClearsOpening": true,
+    "allAccessorCountsValid": true,
+    "allEmbeddedImagesMax512": true,
+    "mimicTongueClearsFrontWallAt120Hz": true
+  }
+}

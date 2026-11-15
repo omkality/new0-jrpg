@@ -233,3 +233,19 @@ def test_expired_sessions_are_rejected(client):
     h=login(client)
     with client.app.state.db.connect(write=True) as c: c.execute('UPDATE sessions SET expires_at=0')
     assert client.get('/api/me',headers=h).status_code==401
+
+
+def test_continuous_device_report_accepts_bounded_nullable_resources(client):
+    h = login(client)
+    body = device_payload()
+    body["protocol"] = "device-check-2"
+    resources = {"geometries": 140, "textures": 60, "programs": 18, "models": 13, "js_heap_mb": None}
+    body["stages"] = [{**body["stages"][0], "location": area, "resources": resources}
+                      for area in ["forest", "roofs", "chapel", "crypt"]]
+    bad = {**body, "stages": body["stages"] + body["stages"][:1]}
+    assert client.post("/api/diagnostics", headers=h, json=bad).status_code == 422
+    bad = {**body, "stages": [{**body["stages"][0], "resources": {**resources, "textures": 10001}}]}
+    assert client.post("/api/diagnostics", headers=h, json=bad).status_code == 422
+    response = client.post("/api/diagnostics", headers=h, json=body)
+    assert response.status_code == 200
+    assert client.get("/api/diagnostics/" + response.json()["id"], headers=h).json() == body

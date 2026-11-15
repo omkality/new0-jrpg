@@ -36,8 +36,16 @@ class SecretAnswer(Command):
     answer: str = Field(min_length=1, max_length=32)
 
 
+class ResourceMetrics(Body):
+    geometries: int = Field(ge=0, le=10000)
+    textures: int = Field(ge=0, le=10000)
+    programs: int = Field(ge=0, le=1000)
+    models: int = Field(ge=0, le=1000)
+    js_heap_mb: float | None = Field(default=None, ge=0, le=32768, allow_inf_nan=False)
+
+
 class StageMetrics(Body):
-    location: Literal["chapel", "roofs", "courtyard"]
+    location: Literal["chapel", "roofs", "courtyard", "forest", "crypt"]
     seconds: float = Field(ge=0, le=180, allow_inf_nan=False)
     frames: int = Field(ge=0, le=100000)
     fps: float = Field(ge=0, le=1000, allow_inf_nan=False)
@@ -46,10 +54,11 @@ class StageMetrics(Body):
     over_50_ms: int = Field(ge=0, le=100000)
     completed: bool
     render_scale: float = Field(ge=0.1, le=1, allow_inf_nan=False)
+    resources: ResourceMetrics | None = None
 
 
 class DeviceReport(Body):
-    protocol: Literal["device-check-1"]
+    protocol: Literal["device-check-1", "device-check-2"]
     platform: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     telegram_version: str = Field(max_length=24, pattern=r"^[a-zA-Z0-9_.-]*$")
     viewport_width: int = Field(ge=100, le=10000)
@@ -59,7 +68,7 @@ class DeviceReport(Body):
     errors: int = Field(ge=0, le=100000)
     context_losses: int = Field(ge=0, le=100000)
     interrupted: bool
-    stages: list[StageMetrics] = Field(min_length=1, max_length=3)
+    stages: list[StageMetrics] = Field(min_length=1, max_length=4)
 
 
 def create_app(settings=None):
@@ -182,7 +191,7 @@ def create_app(settings=None):
             recent = c.execute("SELECT created_at FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 1", (user["id"],)).fetchone()
             if recent and now - recent["created_at"] < 10:
                 raise HTTPException(429, "Подожди немного перед повторной проверкой")
-            c.execute("INSERT INTO device_reports VALUES(?,?,?,?)", (report_id, user["id"], now, encode(body.model_dump())))
+            c.execute("INSERT INTO device_reports VALUES(?,?,?,?)", (report_id, user["id"], now, encode(body.model_dump(exclude_unset=True))))
             c.execute("DELETE FROM device_reports WHERE user_id=? AND id NOT IN (SELECT id FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 5)", (user["id"], user["id"]))
         return {"id": report_id}
 

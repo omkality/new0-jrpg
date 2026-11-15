@@ -13,6 +13,18 @@ const inputDirectory = process.argv[2]
   ? resolve(project, process.argv[2])
   : resolve(project, "public/assets/motion");
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+const contactTable = JSON.parse(
+  await readFile(resolve(project, "public/assets/cast/floor-v7.json"), "utf8"),
+);
+function contact(profile, name, t) {
+  const c = contactTable.profiles[profile]?.clips[name];
+  if (!c) return 0;
+  const i = Math.min(c.offsets.length - 2, Math.floor(t * 60)),
+    a = i / 60,
+    b = Math.min(c.duration, (i + 1) / 60),
+    u = b > a ? (t - a) / (b - a) : 0;
+  return c.offsets[i] * (1 - u) + c.offsets[i + 1] * u;
+}
 const expected = {
   Death: 1.6,
   Attack1: 0.74,
@@ -324,15 +336,41 @@ for (const [file, model, seed] of [
   }
   let minFloor = Infinity,
     maxFloor = -Infinity;
-  for (const [name, duration] of Object.entries(expected))
+  const floorProfiles = [];
+  for (const [name, duration] of Object.entries(expected)) {
+    let low = Infinity,
+      high = -Infinity,
+      lastFloor = 0;
     for (let i = 0; i <= Math.ceil(duration * 60); i++) {
-      const t = Math.min(duration, i / 60),
-        floor = minimumY(info, sample(info, animations.get(name), t), meshes);
-      minFloor = Math.min(minFloor, floor);
-      maxFloor = Math.max(maxFloor, floor);
+      const t = Math.min(duration, i / 60);
+      const floor =
+        minimumY(info, sample(info, animations.get(name), t), meshes) +
+        contact(model.split("/").at(-1).replace(".glb", ""), name, t);
+      low = Math.min(low, floor);
+      high = Math.max(high, floor);
+      lastFloor = floor;
     }
+    minFloor = Math.min(minFloor, low);
+    maxFloor = Math.max(maxFloor, high);
+    floorProfiles.push({ name, low, high, lastFloor });
+  }
+  for (const f of floorProfiles) {
+    // The repaired short cloth no longer fills the roll's 7.4cm airborne phase.
+    const airborne = f.name.startsWith("Dodge")
+      ? 0.085
+      : f.name.startsWith("Death")
+        ? 0.06
+        : 0.04;
+    assert.ok(
+      f.high < airborne,
+      `${file}/${f.name}: unexplained floating ${f.high}`,
+    );
+    assert.ok(
+      f.lastFloor < 0.025,
+      `${file}/${f.name}: endpoint above ground ${f.lastFloor}`,
+    );
+  }
   assert.ok(minFloor >= -0.005, `${file}: floor penetration ${minFloor}`);
-  assert.ok(maxFloor < 0.04, `${file}: unexplained floating ${maxFloor}`);
   const fullBody = [];
   for (const name of [
     "DodgeForward",

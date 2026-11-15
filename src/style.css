@@ -309,3 +309,15 @@ a {
     bottom: 8px;
   }
 }
+
+#drop {
+  position: absolute;
+  left: 20px;
+  bottom: calc(240px + var(--safe-bottom));
+  z-index: 6;
+  color: #e1e6eb;
+  background: #263445d9;
+  border: 1px solid #adbcc888;
+  padding: 9px;
+  font-size: 10px;
+}

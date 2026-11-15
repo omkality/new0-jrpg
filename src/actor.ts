@@ -1,11 +1,13 @@
 import * as THREE from "three";
-import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
+
 import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
 import { assetUrl } from "./assets";
-import { makeWeapon } from "./weapons";
+import { heldWeapon } from "./level-props";
+import { loadModel as load } from "./asset-store";
+import type { WeaponId } from "./world-layout";
 
-type Kind = "pilgrim" | EnemyKind;
+type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
   rig: THREE.Object3D;
   mixer: THREE.AnimationMixer;
@@ -16,16 +18,37 @@ interface RigState {
   current: string;
   action?: THREE.AnimationAction;
   dropped: boolean;
+  floorOffset: number;
+  profile: string;
 }
-const cache = new Map<string, Promise<GLTF>>();
-const load = (url: string) => {
-  let p = cache.get(url);
-  if (!p) {
-    p = new GLTFLoader().loadAsync(assetUrl(url));
-    cache.set(url, p);
-  }
-  return p;
+interface FloorClip {
+  duration: number;
+  offsets: number[];
+}
+let floorTable: {
+  profiles: Record<string, { clips: Record<string, FloorClip> }>;
 };
+let floorPromise: Promise<void> | undefined;
+function loadFloor() {
+  return (floorPromise ??= fetch(assetUrl("/assets/cast/floor-v7.json"))
+    .then((r) => {
+      if (!r.ok) throw new Error("Character contact data failed");
+      return r.json();
+    })
+    .then((data) => {
+      floorTable = data;
+    }));
+}
+function contactOffset(profile: string, clip: string, time: number) {
+  const table = floorTable?.profiles[profile]?.clips[clip];
+  if (!table) return 0;
+  const t = Math.min(table.duration, Math.max(0, time)),
+    i = Math.min(table.offsets.length - 2, Math.floor(t * 60));
+  const a = i / 60,
+    b = Math.min(table.duration, (i + 1) / 60),
+    u = b > a ? (t - a) / (b - a) : 0;
+  return table.offsets[i] * (1 - u) + table.offsets[i + 1] * u;
+}
 const MODELS = {
   pilgrim: "prisoner",
   effigy: "prisoner",
@@ -37,11 +60,17 @@ export class Actor {
   private states = new Map<Kind, RigState>();
   private active?: RigState;
   private kind?: Kind;
-  constructor(private enemy = false) {}
+  constructor(
+    private enemy = false,
+    private only?: Kind,
+  ) {}
   async load() {
-    const kinds: Kind[] = this.enemy
-      ? ["gaoler", "effigy", "watcher"]
-      : ["pilgrim"];
+    await loadFloor();
+    const kinds: Kind[] = this.only
+      ? [this.only]
+      : this.enemy
+        ? ["gaoler", "effigy", "watcher"]
+        : ["pilgrim"];
     await Promise.all(
       kinds.map(async (kind) => {
         const model = MODELS[kind],
@@ -79,14 +108,19 @@ export class Actor {
         for (const clip of [...gltf.animations, ...combat.animations])
           actions.set(clip.name, mixer.clipAction(clip));
         const hand = rig.getObjectByName("hand_R"),
-          weapon = makeWeapon(kind);
-        const weapons = new Map([["sword", weapon]]);
+          weapon = heldWeapon(
+            kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : "sword",
+          );
+        const weapons = new Map<string, THREE.Group>([["sword", weapon]]);
         if (kind === "pilgrim") {
-          const relic = makeWeapon(kind, true);
-          relic.visible = false;
-          weapons.set("relic", relic);
+          for (const id of ["axe", "spear", "unarmed"] as WeaponId[]) {
+            const item = heldWeapon(id);
+            item.visible = false;
+            weapons.set(id, item);
+          }
+          weapons.set("relic", weapon);
         }
-        for (const item of weapons.values()) hand?.add(item);
+        for (const item of new Set(weapons.values())) hand?.add(item);
         this.states.set(kind, {
           rig,
           mixer,
@@ -96,6 +130,8 @@ export class Actor {
           weapons,
           current: "",
           dropped: false,
+          floorOffset: 0,
+          profile: model,
         });
       }),
     );
@@ -128,16 +164,8 @@ export class Actor {
     s.action = action;
     s.current = name;
   }
-  sampleWeapon(base: THREE.Vector3, tip: THREE.Vector3) {
-    if (!this.active) return false;
-    this.active.weapon.updateWorldMatrix(true, false);
-    base.set(0, 0.12, 0).applyMatrix4(this.active.weapon.matrixWorld);
-    tip
-      .set(0, this.kind === "gaoler" ? 0.76 : 1, 0)
-      .applyMatrix4(this.active.weapon.matrixWorld);
-    return true;
-  }
   update(dt: number, f: Fighter) {
+    if (f.kind === "mimic") return;
     const kind = f.kind as Kind,
       s = this.states.get(kind);
     if (!s) return;
@@ -165,7 +193,7 @@ export class Actor {
       s.weapon.visible = true;
       s.dropped = false;
     }
-    this.root.position.set(f.x, 0, f.z);
+    this.root.position.set(f.x, f.y, f.z);
     this.root.rotation.set(0, f.yaw, 0);
     const mode = f.mode;
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
@@ -228,6 +256,19 @@ export class Actor {
             : 1,
       );
     s.mixer.update(dt);
+    const loop = ["Idle", "Walk", "Run", "Guard"].includes(name);
+    const offset =
+      contactOffset(
+        s.profile,
+        name,
+        loop ? action.time % action.getClip().duration : action.time,
+      ) * s.rig.scale.y;
+    s.floorOffset =
+      offset > s.floorOffset
+        ? offset
+        : THREE.MathUtils.damp(s.floorOffset, offset, 28, dt);
+    this.root.position.y = f.y + s.floorOffset;
+
     if (mode === "dead" && f.time > 0.65) {
       if (!s.dropped) {
         this.root.updateMatrixWorld(true);
@@ -236,7 +277,7 @@ export class Actor {
       }
       s.weapon.position.y = THREE.MathUtils.damp(
         s.weapon.position.y,
-        0.045,
+        0.045 - s.floorOffset,
         12,
         dt,
       );
@@ -264,5 +305,32 @@ export class Actor {
       s.weapon.rotation.set(-Math.PI / 2, 0, 0);
       s.dropped = false;
     }
+  }
+  reset() {
+    for (const s of this.states.values()) {
+      s.mixer.stopAllAction();
+      s.current = "";
+      s.action = undefined;
+      s.floorOffset = 0;
+      if (s.dropped) {
+        s.hand?.add(s.weapon);
+        s.weapon.position.set(0, 0.06, 0);
+        s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+        s.dropped = false;
+      }
+    }
+  }
+  dispose() {
+    for (const s of this.states.values()) {
+      s.mixer.stopAllAction();
+      s.mixer.uncacheRoot(s.rig);
+      s.rig.traverse((o) => {
+        if (o instanceof THREE.SkinnedMesh) o.skeleton.dispose();
+        if (o instanceof THREE.Mesh)
+          for (const m of Array.isArray(o.material) ? o.material : [o.material])
+            m.dispose();
+      });
+    }
+    this.states.clear();
   }
 }

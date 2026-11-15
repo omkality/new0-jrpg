@@ -1,12 +1,18 @@
 import "./style.css";
-import { CombatGame, ENEMIES, type EnemyKind } from "./game";
+import { ENEMIES, type EnemyKind } from "./game";
+import { Campaign, SCENARIOS, type ScenarioId } from "./campaign";
+import { WEAPONS } from "./weapon-spec";
 import { Input } from "./input";
 import { World } from "./world";
 import { Sound } from "./audio";
 import { API } from "./api";
-import { Showcase, DEMO_ENEMIES } from "./showcase";
-import { LOCATIONS, isLocation, type LocationId } from "./locations";
-import { DeviceCheck, type DeviceReport } from "./device-check";
+import { CampaignShowcase } from "./journey";
+import { LOCATIONS } from "./locations";
+import {
+  DeviceCheck,
+  type DeviceReport,
+  type ResourceMetrics,
+} from "./device-check";
 import type { FrameCapture } from "./recording";
 
 declare global {
@@ -29,7 +35,7 @@ declare global {
 const $ = <T extends HTMLElement = HTMLElement>(s: string) =>
   document.querySelector<T>(s)!;
 const visible = (s: string, v: boolean) => $(s).classList.toggle("hidden", !v);
-const game = new CombatGame(),
+const game = new Campaign(),
   input = new Input(),
   sound = new Sound(),
   api = new API();
@@ -54,10 +60,11 @@ noiseTileCtx.putImageData(noisePixels, 0, 0);
 const noisePattern = noiseCtx.createPattern(noiseTile, "repeat")!;
 const params = new URLSearchParams(location.search),
   review = params.get("review") === "1";
-const requestedLocation = params.get("location");
-let selected: LocationId = isLocation(requestedLocation)
-  ? requestedLocation
-  : "chapel";
+const requestedScenario = params.get("scenario");
+let selected: ScenarioId =
+  requestedScenario && Object.hasOwn(SCENARIOS, requestedScenario)
+    ? (requestedScenario as ScenarioId)
+    : "journey";
 let loaded = false,
   paused = false,
   autoplay = false;
@@ -65,7 +72,7 @@ let last = performance.now(),
   accumulator = 0,
   uiTick = 0,
   lastNoise = 0;
-let demonstration: Showcase | null = null,
+let demonstration: CampaignShowcase | null = null,
   deviceCheck: DeviceCheck | null = null;
 let lastDeviceReport: DeviceReport | null = null;
 let errors = 0,
@@ -85,28 +92,27 @@ let recordCanvas: HTMLCanvasElement | null = null,
   recordCtx: CanvasRenderingContext2D | null = null;
 let lastCapture = 0,
   finishedTail = 0;
-const CAPTURE_LIMIT_SECONDS = 32;
+const captureLimit = () => (selected === "journey" ? 150 : 65);
+let raf = 0;
+let soak: { runs: number; snapshots: ResourceMetrics[] } | null = null;
 
-function chooseLocation(id: LocationId) {
+function chooseScenario(id: ScenarioId) {
   selected = id;
-  $<HTMLSelectElement>("#review-location").value = id;
-  $<HTMLSelectElement>("#review-enemy").value = DEMO_ENEMIES[id];
+  $<HTMLSelectElement>("#review-scenario").value = id;
 }
-chooseLocation(selected);
+chooseScenario(selected);
 function toast(t: string) {
   toastValue = t;
   toastUntil = performance.now() + 2200;
   $("#toast").textContent = t;
   visible("#toast", true);
 }
-function startStage(id: LocationId, kind: EnemyKind, auto = true) {
-  world.selectLocation(id);
-  game.start(kind);
+function startScenario(id: ScenarioId, auto = true) {
+  game.startScenario(id);
+  world.resetView();
   paused = false;
   autoplay = auto;
-  demonstration = auto ? new Showcase(game, id) : null;
-  world.yaw = 0;
-  world.pitch = 0.08;
+  demonstration = auto ? new CampaignShowcase(game, id) : null;
   input.reset();
   input.enabled = !auto;
   $("#touch-controls").inert = auto;
@@ -121,11 +127,8 @@ function startStage(id: LocationId, kind: EnemyKind, auto = true) {
   last = performance.now();
 }
 function beginShowcase() {
-  if (!loaded || deviceCheck) return;
-  startStage(
-    selected,
-    $<HTMLSelectElement>("#review-enemy").value as EnemyKind,
-  );
+  if (!loaded || deviceCheck || soak) return;
+  startScenario(selected);
 }
 function pause() {
   if (!loaded || game.phase === "intro" || paused) return;
@@ -152,16 +155,19 @@ input.bindGuard($("#guard"));
 $("#attack").onclick = () => game.attack();
 $("#dodge").onclick = () => game.dodge(world.moveAxis(input.axis()));
 $("#interact").onclick = () => game.interact();
-$("#review-location").onchange = () =>
-  chooseLocation($<HTMLSelectElement>("#review-location").value as LocationId);
+$("#review-scenario").onchange = () =>
+  chooseScenario($<HTMLSelectElement>("#review-scenario").value as ScenarioId);
 $("#showcase").onclick = beginShowcase;
 $("#manual").onclick = () => {
-  if (deviceCheck || recording) return;
-  startStage(
-    selected,
-    $<HTMLSelectElement>("#review-enemy").value as EnemyKind,
-    false,
-  );
+  if (deviceCheck || recording || soak) return;
+  startScenario(selected, false);
+};
+$("#drop").onclick = () => game.dropWeapon();
+$("#soak").onclick = () => {
+  if (!loaded || recording || deviceCheck || soak) return;
+  soak = { runs: 0, snapshots: [] };
+  visible("#soak-download", false);
+  startScenario("forest");
 };
 $("#reload").onclick = () => location.reload();
 function fatal(text: string) {
@@ -238,7 +244,8 @@ function drawHUD() {
     e = game.enemy;
   h.clearRect(0, 0, w, hh);
   text("new0", mobile ? 20 : 30, mobile ? 43 : 45, 30);
-  if (game.phase === "intro" || !$("#intro").classList.contains("hidden")) return;
+  if (game.phase === "intro" || !$("#intro").classList.contains("hidden"))
+    return;
   text(
     LOCATIONS[world.location].name.toUpperCase(),
     w - 20,
@@ -261,18 +268,33 @@ function drawHUD() {
   }
   if (p.mode === "attack") text("I".repeat(p.combo), x, y + 34, 10, "#d1dae6");
   else if (p.mode === "guard") text("БЛОК", x, y + 34, 8);
+  const weapon = WEAPONS[p.weapon];
+  text(weapon.name.toUpperCase(), x, y + 50, 8, "#c9d7e7");
   text(
-    `${game.secrets.size} / 2  ✧${game.chestOpened ? "  ·  СЕРП" : ""}`,
+    `Монеты ${game.coins} · ключи ${game.keys.size}`,
     w - 20,
     hh - 20,
-    10,
+    9,
     "#c9d7e7",
     "right",
   );
+  if (game.phase === "lost")
+    text(
+      "ПУТЬ ОБОРВАЛСЯ",
+      w / 2,
+      hh * 0.4,
+      mobile ? 18 : 26,
+      "#d2b9bc",
+      "center",
+    );
   if (toastValue)
     text(toastValue, w / 2, hh - 60, mobile ? 11 : 13, "#dae6f5", "center");
   if (autoplay && demonstration) {
-    const progress = deviceCheck ? `${deviceCheck.index + 1}/3 · ` : "";
+    const progress = deviceCheck
+      ? `${deviceCheck.index + 1}/4 · `
+      : soak
+        ? `Повтор ${soak.runs + 1}/5 · `
+        : "";
     text(progress + demonstration.label, 20, hh - 20, mobile ? 9 : 11);
     if (deviceCheck)
       text(
@@ -309,26 +331,31 @@ function measureControlFit() {
   controlsFit = controlsFit && inside && !overlap;
 }
 function beginDeviceCheck() {
-  if (!loaded || recording || deviceCheck) return;
+  if (!loaded || recording || deviceCheck || soak) return;
   errorBaseline = errors;
   contextBaseline = contextLosses;
   controlsFit = true;
   visible("#check-result", false);
-  deviceCheck = new DeviceCheck((id) => startStage(id, DEMO_ENEMIES[id]));
+  startScenario("journey");
+  deviceCheck = new DeviceCheck();
 }
 $("#autoplay").onclick = beginDeviceCheck;
 async function finishDeviceCheck(interrupted: boolean) {
   const current = deviceCheck;
   if (!current) return;
   if (interrupted)
-    current.interrupt(game.phase === "finished", world.resolution);
+    current.interrupt(
+      game.completedAreas.has(game.location),
+      world.resolution,
+      world.resources(),
+    );
   deviceCheck = null;
   paused = true;
   input.reset();
   input.enabled = false;
   const tg = window.Telegram?.WebApp;
   lastDeviceReport = {
-    protocol: "device-check-1",
+    protocol: "device-check-2",
     platform:
       (tg?.initData ? tg.platform || "unknown" : "browser")
         .replace(/[^a-zA-Z0-9_-]/g, "")
@@ -346,12 +373,12 @@ async function finishDeviceCheck(interrupted: boolean) {
     stages: current.stages,
   };
   const all =
-    current.stages.length === 3 && current.stages.every((s) => s.completed);
+    current.stages.length === 4 && current.stages.every((s) => s.completed);
   const summary = [
     interrupted
       ? "Проход прерван"
       : all
-        ? "Три локации пройдены"
+        ? "Четыре локации пройдены"
         : "Проход завершён не полностью",
     ...current.stages.map(
       (s) =>
@@ -391,7 +418,7 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-${world.location}-journey.mp4`;
+    a.download = `new0-v7-${selected}-60fps.mp4`;
     visible("#download", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
@@ -399,7 +426,7 @@ async function stopRecording() {
   $("#record").textContent = "Записать проход";
 }
 async function beginRecording() {
-  if (recording || deviceCheck || !loaded) return;
+  if (recording || deviceCheck || soak || !loaded) return;
   if (!("VideoEncoder" in window)) {
     toast("Для записи нужен браузер с WebCodecs");
     return;
@@ -414,7 +441,7 @@ async function beginRecording() {
     recordCtx = recordCanvas.getContext("2d", { alpha: false });
     capture = new FrameCapture(recordCanvas);
     await capture.start();
-    beginShowcase();
+    startScenario(selected);
     recording = true;
     lastCapture = performance.now();
     document.body.classList.add("recording");
@@ -429,7 +456,7 @@ async function beginRecording() {
 }
 $("#record").onclick = () => void beginRecording();
 function frame(now: number) {
-  requestAnimationFrame(frame);
+  raf = requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
   const dt = recording
     ? capture && !capture.busy && now - lastCapture >= 1000 / 60
@@ -467,23 +494,53 @@ function frame(now: number) {
                   ? "step"
                   : "click",
       );
-      if (e.type === "secret") toast(`Пасхалка ${game.secrets.size} / 2`);
-      if (e.type === "weapon") toast("Найден лунный серп");
+      if (e.label) toast(e.label);
     }
     game.events.length = 0;
     frames.push(raw * 1000);
     if (frames.length > 300) frames.shift();
     frameNumber++;
-    if (game.phase === "finished") finishedTail += dt;
+    if (demonstration?.done) finishedTail += dt;
   }
   world.render(paused ? 0 : dt);
   if (deviceCheck && !paused) {
     deviceCheck.update(
       raw * 1000,
+      game.location,
+      game.completedAreas,
       game.phase === "finished" && finishedTail > 0.35,
       world.resolution,
+      world.resources(),
     );
-    if (deviceCheck.done) void finishDeviceCheck(false);
+    if (deviceCheck.done) void finishDeviceCheck(game.phase !== "finished");
+  }
+  if (soak && !paused && demonstration?.done && finishedTail > 1) {
+    soak.snapshots.push(world.resources());
+    soak.runs++;
+    if (soak.runs < 5) startScenario("forest");
+    else {
+      const report = {
+        protocol: "resource-soak-1",
+        runs: soak.runs,
+        snapshots: soak.snapshots,
+        errors,
+        context_losses: contextLosses,
+      };
+      const a = $<HTMLAnchorElement>("#soak-download");
+      if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
+      a.href = URL.createObjectURL(
+        new Blob([JSON.stringify(report, null, 2)], {
+          type: "application/json",
+        }),
+      );
+      soak = null;
+      paused = true;
+      visible("#soak-download", true);
+      visible("#intro", true);
+      $("#check-result").textContent =
+        "Пять повторов завершены. Отчёт ресурсов готов.";
+      visible("#check-result", true);
+    }
   }
   drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
   drawHUD();
@@ -521,7 +578,7 @@ function frame(now: number) {
       .then(() => {
         if (
           current === capture &&
-          (current.frames >= CAPTURE_LIMIT_SECONDS * 60 || finishedTail > 1.2)
+          (current.frames >= captureLimit() * 60 || finishedTail > 1.2)
         )
           void stopRecording();
       })
@@ -534,7 +591,7 @@ function frame(now: number) {
     uiTick = now;
     $("#world").setAttribute(
       "aria-label",
-      `${LOCATIONS[world.location].name}. ${ENEMIES[game.enemy.kind as EnemyKind].name}. Пасхалки ${game.secrets.size} из 2. ${game.chestOpened ? "Лунный серп" : "Меч"}. ${game.phase === "finished" ? "Путь пройден" : game.phase === "won" ? "Противник побеждён" : "Демо"}`,
+      `${LOCATIONS[world.location].name}. ${ENEMIES[game.enemy.kind as EnemyKind].name}. ${WEAPONS[game.player.weapon].name}. Здоровье ${Math.round(game.player.hp)}. Монеты ${game.coins}. Ключи ${game.keys.size}. Сундуки ${game.lootedChests.size}. ${game.phase === "finished" ? "Путь пройден" : game.phase === "lost" ? "Путник погиб" : "Демо"}`,
     );
     visible(
       "#touch-controls",
@@ -543,6 +600,14 @@ function frame(now: number) {
         !["intro", "lost", "finished"].includes(game.phase),
     );
     if (deviceCheck && game.phase !== "finished") measureControlFit();
+    visible(
+      "#drop",
+      input.touch &&
+        !autoplay &&
+        !paused &&
+        !["intro", "lost", "finished"].includes(game.phase) &&
+        game.player.weapon !== "unarmed",
+    );
     visible("#interact", !!game.nearby && !autoplay && !paused);
     $("#interact").textContent = game.nearby;
     $("#guard").setAttribute(
@@ -558,7 +623,12 @@ function frame(now: number) {
       const sorted = [...frames].sort((a, b) => a - b),
         avg = frames.reduce((a, b) => a + b, 0) / frames.length;
       performanceText = `${(1000 / avg).toFixed(1)} FPS · p95 ${sorted[Math.ceil(sorted.length * 0.95) - 1].toFixed(1)} мс · ${world.renderer.info.render.calls} calls · ${Math.round(world.renderer.info.render.triangles / 1000)}k tris`;
-      if (review) $("#performance").textContent = performanceText;
+      if (review) {
+        const r = world.resources();
+        $("#performance").textContent =
+          performanceText +
+          ` · G${r.geometries} T${r.textures} P${r.programs} M${r.models}`;
+      }
       if (
         !recording &&
         frameNumber > 180 &&
@@ -594,7 +664,7 @@ async function boot() {
     connecting = false;
     $("#autoplay").textContent = "Загрузка сцены…";
     await world.load();
-    world.selectLocation(selected);
+    world.resetView();
     loaded = true;
     $("#performance").title = world.device;
     $<HTMLButtonElement>("#autoplay").disabled = false;
@@ -608,5 +678,17 @@ async function boot() {
     );
   }
 }
-requestAnimationFrame(frame);
+raf = requestAnimationFrame(frame);
+window.addEventListener("pagehide", () => {
+  cancelAnimationFrame(raf);
+  void stopRecording().finally(() => world.dispose());
+  for (const id of ["#download", "#check-download", "#soak-download"]) {
+    const a = $<HTMLAnchorElement>(id);
+    if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
+  }
+});
 void boot();
+
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) location.reload();
+});

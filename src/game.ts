@@ -1,4 +1,6 @@
 // Local movement/combat vertical slice. Never submitted to the prize leaderboard.
+import { WEAPONS } from "./weapon-spec.ts";
+import type { Obstacle, WeaponId } from "./world-layout.ts";
 export type Motion =
   | "idle"
   | "move"
@@ -11,6 +13,7 @@ export type Motion =
   | "recover";
 export interface Fighter {
   x: number;
+  y: number;
   z: number;
   yaw: number;
   hp: number;
@@ -24,11 +27,11 @@ export interface Fighter {
   recoil: number;
   dodgeSide: "Left" | "Right" | "Back" | "Forward";
   death: "Front" | "Back" | "Side";
-  weapon: "sword" | "relic";
+  weapon: WeaponId;
   kind: "pilgrim" | EnemyKind;
   maxHp: number;
 }
-export type EnemyKind = "gaoler" | "effigy" | "watcher";
+export type EnemyKind = "gaoler" | "effigy" | "watcher" | "mimic";
 export const DODGE = {
   duration: 0.82,
   travelStart: 0.14,
@@ -81,6 +84,15 @@ export const ENEMIES = {
     recover: 1.15,
     damage: 11,
   },
+  mimic: {
+    name: "МИМИК",
+    hp: 116,
+    speed: 1.35,
+    reach: 2.6,
+    windup: 1.1,
+    recover: 1.45,
+    damage: 30,
+  },
 } as const;
 export const ATTACKS = [
   {
@@ -126,7 +138,10 @@ export interface GameEvent {
     | "death"
     | "win"
     | "secret"
-    | "weapon";
+    | "weapon"
+    | "door"
+    | "drop";
+  label?: string;
   x: number;
   z: number;
 }
@@ -134,6 +149,7 @@ const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const length = (x: number, z: number) => Math.hypot(x, z);
 const fighter = (x: number, z: number): Fighter => ({
   x,
+  y: 0,
   z,
   yaw: Math.PI,
   hp: 100,
@@ -181,7 +197,13 @@ export class CombatGame {
   private staminaDelay = 0;
   private distanceWalked = 0;
   private deathTime = 0;
-  obstacles: { x: number; z: number; hx: number; hz: number }[] = [];
+  obstacles: Obstacle[] = [];
+  bounds = { minX: -5.2, maxX: 5.2, minZ: -7.3, maxZ: 7.3 };
+  heightAt: (x: number, z: number) => number = () => 0;
+  enemyDormant = false;
+  protected isObstacleActive(_o: Obstacle) {
+    return true;
+  }
 
   start(kind: EnemyKind = "gaoler") {
     this.player = fighter(0, 5);
@@ -204,12 +226,18 @@ export class CombatGame {
     this.staminaDelay = this.distanceWalked = this.deathTime = 0;
     this.lock = false;
     this.hitPause = 0;
+    this.enemyDormant = false;
   }
   get distance() {
     return length(this.enemy.x - this.player.x, this.enemy.z - this.player.z);
   }
   get fighting() {
-    return this.phase === "playing" && this.enemy.hp > 0 && this.distance < 6;
+    return (
+      this.phase === "playing" &&
+      !this.enemyDormant &&
+      this.enemy.hp > 0 &&
+      this.distance < 7
+    );
   }
   get enemyAngle() {
     return Math.atan2(
@@ -217,7 +245,7 @@ export class CombatGame {
       this.enemy.z - this.player.z,
     );
   }
-  private set(f: Fighter, mode: Motion) {
+  protected set(f: Fighter, mode: Motion) {
     if (f.mode !== mode) {
       f.mode = mode;
       f.time = 0;
@@ -237,7 +265,7 @@ export class CombatGame {
     if (
       (p.mode === "dodge" && p.time < DODGE.duration) ||
       p.mode === "hit" ||
-      p.stamina < 16
+      p.stamina < Math.ceil(16 * WEAPONS[p.weapon].cost)
     )
       return;
     this.beginAttack(1);
@@ -246,8 +274,9 @@ export class CombatGame {
   private beginAttack(stage: number) {
     const p = this.player,
       a = ATTACKS[stage - 1];
-    if (p.stamina < a.cost) return false;
-    p.stamina -= a.cost;
+    const cost = Math.ceil(a.cost * WEAPONS[p.weapon].cost);
+    if (p.stamina < cost) return false;
+    p.stamina -= cost;
     this.staminaDelay = 0.65;
     this.swingHit = false;
     if (this.distance < 4) p.yaw = this.enemyAngle;
@@ -373,7 +402,7 @@ export class CombatGame {
       this.vx = this.vz = 0;
     }
   }
-  get nearby() {
+  get nearby(): string {
     if (
       !this.chestOpened &&
       length(this.player.x - CHEST.x, this.player.z - CHEST.z) < CHEST.radius
@@ -404,7 +433,7 @@ export class CombatGame {
     if (dt <= 0) return;
     const p = this.player,
       e = this.enemy;
-    p.time += dt;
+    p.time += dt * (p.mode === "attack" ? WEAPONS[p.weapon].tempo : 1);
     e.time += dt;
     p.recoil = Math.max(0, p.recoil - dt);
     e.recoil = Math.max(0, e.recoil - dt);
@@ -444,8 +473,16 @@ export class CombatGame {
           Math.sin(this.enemyAngle - p.yaw),
           Math.cos(this.enemyAngle - p.yaw),
         );
-        if (e.hp > 0 && this.distance < 2.05 && Math.abs(angle) < 1.1) {
-          e.hp = Math.max(0, e.hp - attack.damage);
+        if (
+          e.hp > 0 &&
+          this.distance < WEAPONS[p.weapon].reach &&
+          Math.abs(p.y - e.y) < 1.1 &&
+          Math.abs(angle) < 1.1
+        ) {
+          e.hp = Math.max(
+            0,
+            e.hp - Math.round(attack.damage * WEAPONS[p.weapon].damage),
+          );
           e.reaction = (e.reaction + 1) % 3;
           e.recoil = p.combo === 3 ? 0.15 : 0.11;
           this.hitPause = Math.max(
@@ -532,7 +569,8 @@ export class CombatGame {
     }
     this.distanceWalked += p.speed * dt;
     if (this.distanceWalked > 1.8 && this.tutorial === 0) this.tutorial = 1;
-    if (e.hp > 0 && this.phase === "playing") this.enemyUpdate(dt);
+    if (e.hp > 0 && this.phase === "playing" && !this.enemyDormant)
+      this.enemyUpdate(dt);
   }
   private enemyUpdate(dt: number) {
     const e = this.enemy,
@@ -568,24 +606,35 @@ export class CombatGame {
       return;
     }
     if (e.mode === "attack") {
-      if (e.time < 0.25) {
-        this.move(e, Math.sin(e.yaw) * dt * 2.2, Math.cos(e.yaw) * dt * 2.2);
-        e.speed = 2.2;
+      const mimic = e.kind === "mimic";
+      if (e.time < (mimic ? 0.55 : 0.25)) {
+        const speed = mimic ? 3.6 : 2.2;
+        this.move(
+          e,
+          Math.sin(e.yaw) * dt * speed,
+          Math.cos(e.yaw) * dt * speed,
+        );
+        e.speed = speed;
       }
       const clip = ATTACKS[Math.max(0, e.combo - 1)],
         windupPose = clip.contact * 0.72;
-      const contactTime =
-        ((clip.contact - windupPose) / (clip.duration - windupPose)) * 0.68;
+      const contactTime = mimic
+        ? 0.43
+        : ((clip.contact - windupPose) / (clip.duration - windupPose)) * 0.68;
       if (e.time > contactTime && !this.enemyHit) {
         this.enemyHit = true;
         const diff = Math.atan2(
           Math.sin(angle - e.yaw),
           Math.cos(angle - e.yaw),
         );
-        if (d < profile.reach && Math.abs(diff) < 1.15)
+        if (
+          d < profile.reach &&
+          Math.abs(p.y - e.y) < 1.1 &&
+          Math.abs(diff) < 1.15
+        )
           this.damagePlayer(profile.damage);
       }
-      if (e.time > 0.68) this.set(e, "recover");
+      if (e.time > (mimic ? 1 : 0.68)) this.set(e, "recover");
       return;
     }
     if (e.mode === "recover") {
@@ -611,12 +660,17 @@ export class CombatGame {
     const can = (x: number, z: number) =>
       !this.obstacles.some(
         (o) =>
-          Math.abs(x - o.x) < o.hx + 0.28 && Math.abs(z - o.z) < o.hz + 0.28,
-      );
-    const x = clamp(f.x + dx, -5.2, 5.2),
-      z = clamp(f.z + dz, -7.3, 7.3);
+          this.isObstacleActive(o) &&
+          (o.minY === undefined || f.y >= o.minY) &&
+          (o.maxY === undefined || f.y < o.maxY) &&
+          Math.abs(x - o.x) < o.hx + 0.28 &&
+          Math.abs(z - o.z) < o.hz + 0.28,
+      ) && this.heightAt(x, z) < f.y + 0.3;
+    const x = clamp(f.x + dx, this.bounds.minX, this.bounds.maxX),
+      z = clamp(f.z + dz, this.bounds.minZ, this.bounds.maxZ);
     if (can(x, f.z)) f.x = x;
     if (can(f.x, z)) f.z = z;
+    f.y = this.heightAt(f.x, f.z);
     const other = f === this.player ? this.enemy : this.player;
     if (other.hp > 0 && f.hp > 0) {
       const ox = f.x - other.x,

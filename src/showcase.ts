@@ -7,6 +7,8 @@ import {
 import type { LocationId } from "./locations";
 
 export const DEMO_ENEMIES: Record<LocationId, EnemyKind> = {
+  forest: "effigy",
+  crypt: "mimic",
   chapel: "gaoler",
   roofs: "watcher",
   courtyard: "effigy",
