@@ -23,10 +23,36 @@ export interface Fighter {
   reaction: number;
   recoil: number;
   dodgeSide: "Left" | "Right" | "Back" | "Forward";
+  death: "Front" | "Back" | "Side";
+  weapon: "sword" | "relic";
   kind: "pilgrim" | EnemyKind;
   maxHp: number;
 }
 export type EnemyKind = "gaoler" | "effigy" | "watcher";
+export const DODGE = {
+  duration: 0.82,
+  travelStart: 0.14,
+  travelEnd: 0.65,
+  distance: 2.25,
+  invulnerableStart: 0.1,
+  invulnerableEnd: 0.57,
+} as const;
+export const CHEST = { x: -3.85, z: 4.4, radius: 1.55 } as const;
+export const SECRETS = [
+  { id: "inscription", x: -4.1, z: 0.4 },
+  { id: "echo", x: 4.3, z: -4.8 },
+] as const;
+// Names describe the direction of the fall, not the attacker's position.
+export function deathFromImpact(
+  target: Fighter,
+  source: { x: number; z: number },
+): Fighter["death"] {
+  const dx = source.x - target.x,
+    dz = source.z - target.z;
+  const d = Math.hypot(dx, dz) || 1;
+  const front = (dx * Math.sin(target.yaw) + dz * Math.cos(target.yaw)) / d;
+  return Math.abs(front) < 0.5 ? "Side" : front > 0 ? "Back" : "Front";
+}
 export const ENEMIES = {
   gaoler: {
     name: "НОСИЛЬЩИК",
@@ -99,7 +125,8 @@ export interface GameEvent {
     | "block"
     | "death"
     | "win"
-    | "secret";
+    | "secret"
+    | "weapon";
   x: number;
   z: number;
 }
@@ -119,6 +146,8 @@ const fighter = (x: number, z: number): Fighter => ({
   reaction: 0,
   recoil: 0,
   dodgeSide: "Back",
+  death: "Back",
+  weapon: "sword",
   kind: "pilgrim",
   maxHp: 100,
 });
@@ -136,6 +165,7 @@ export class CombatGame {
   elapsed = 0;
   tutorial = 0;
   secrets = new Set<string>();
+  chestOpened = false;
   events: GameEvent[] = [];
   lock = false;
   hitPause = 0;
@@ -143,6 +173,7 @@ export class CombatGame {
   private vz = 0;
   private dodgeX = 0;
   private dodgeZ = -1;
+  private dodgeTravel = 0;
   private swingHit = false;
   private enemyHit = false;
   private dodgeRequest: { x: number; z: number; remaining: number } | null =
@@ -165,6 +196,7 @@ export class CombatGame {
     this.elapsed = 0;
     this.tutorial = 0;
     this.secrets.clear();
+    this.chestOpened = false;
     this.events = [];
     this.vx = this.vz = 0;
     this.dodgeRequest = null;
@@ -203,7 +235,7 @@ export class CombatGame {
       return;
     }
     if (
-      (p.mode === "dodge" && p.time < 0.36) ||
+      (p.mode === "dodge" && p.time < DODGE.duration) ||
       p.mode === "hit" ||
       p.stamina < 16
     )
@@ -252,6 +284,7 @@ export class CombatGame {
     }
     this.dodgeX = x / l;
     this.dodgeZ = z / l;
+    this.dodgeTravel = 0;
     const side = this.dodgeX * Math.cos(p.yaw) - this.dodgeZ * Math.sin(p.yaw);
     const forward =
       this.dodgeX * Math.sin(p.yaw) + this.dodgeZ * Math.cos(p.yaw);
@@ -273,7 +306,12 @@ export class CombatGame {
   damagePlayer(amount: number) {
     const p = this.player;
     if (p.hp <= 0 || this.phase !== "playing") return false;
-    if (p.mode === "dodge" && p.time >= 0.05 && p.time <= 0.38) return false;
+    if (
+      p.mode === "dodge" &&
+      p.time >= DODGE.invulnerableStart &&
+      p.time <= DODGE.invulnerableEnd
+    )
+      return false;
     if (p.mode === "guard" && p.stamina >= 12) {
       p.stamina -= 12;
       amount = Math.ceil(amount * 0.15);
@@ -291,6 +329,7 @@ export class CombatGame {
     }
     p.hp = Math.max(0, p.hp - amount);
     if (p.hp === 0) {
+      p.death = deathFromImpact(p, this.enemy);
       this.set(p, "dead");
       this.phase = "lost";
       this.emit("death");
@@ -304,10 +343,16 @@ export class CombatGame {
       return;
     }
     if (this.player.hp <= 0) return;
-    for (const [id, x, z] of [
-      ["inscription", -4.1, 0.4],
-      ["echo", 4.3, -4.8],
-    ] as const) {
+    if (
+      !this.chestOpened &&
+      length(this.player.x - CHEST.x, this.player.z - CHEST.z) < CHEST.radius
+    ) {
+      this.chestOpened = true;
+      this.player.weapon = "relic";
+      this.emit("weapon");
+      return;
+    }
+    for (const { id, x, z } of SECRETS) {
       if (
         length(this.player.x - x, this.player.z - z) < 1.7 &&
         !this.secrets.has(id)
@@ -329,10 +374,12 @@ export class CombatGame {
     }
   }
   get nearby() {
-    for (const [id, x, z] of [
-      ["inscription", -4.1, 0.4],
-      ["echo", 4.3, -4.8],
-    ] as const) {
+    if (
+      !this.chestOpened &&
+      length(this.player.x - CHEST.x, this.player.z - CHEST.z) < CHEST.radius
+    )
+      return "Открыть сундук";
+    for (const { id, x, z } of SECRETS) {
       if (
         length(this.player.x - x, this.player.z - z) < 1.7 &&
         !this.secrets.has(id)
@@ -344,7 +391,7 @@ export class CombatGame {
       this.player.z < -6.1 &&
       Math.abs(this.player.x) < 2
     )
-      return "Покинуть архив";
+      return "Пройти дальше";
     return "";
   }
   update(dt: number, input: MoveInput) {
@@ -385,7 +432,10 @@ export class CombatGame {
         this.dodge(requested);
       }
     }
-    if (p.mode === "dodge" && p.time > 0.52) this.set(p, "idle");
+    if (p.mode === "dodge" && p.time >= DODGE.duration) {
+      this.set(p, "idle");
+      this.vx = this.vz = 0;
+    }
     if (p.mode === "attack") {
       const attack = ATTACKS[p.combo - 1];
       if (!this.swingHit && p.time >= attack.contact) {
@@ -404,6 +454,7 @@ export class CombatGame {
           );
           this.emit("hit", e);
           if (e.hp === 0) {
+            e.death = deathFromImpact(e, p);
             this.set(e, "dead");
             this.phase = "won";
             this.emit("win", e);
@@ -442,11 +493,6 @@ export class CombatGame {
             : 3.1;
     let dx = input.x * speed,
       dz = input.z * speed;
-    if (p.mode === "dodge") {
-      const curve = Math.sin(clamp(p.time / 0.52, 0, 1) * Math.PI);
-      dx = this.dodgeX * (3.4 + curve * 3.8);
-      dz = this.dodgeZ * (3.4 + curve * 3.8);
-    }
     if (
       p.mode === "attack" &&
       p.time > 0.1 &&
@@ -455,10 +501,25 @@ export class CombatGame {
       dx += Math.sin(p.yaw) * ATTACKS[p.combo - 1].lunge;
       dz += Math.cos(p.yaw) * ATTACKS[p.combo - 1].lunge;
     }
-    const a = 1 - Math.exp(-dt * (p.mode === "dodge" ? 28 : 13));
-    this.vx += (dx - this.vx) * a;
-    this.vz += (dz - this.vz) * a;
-    this.move(p, this.vx * dt, this.vz * dt);
+    if (p.mode === "dodge") {
+      // Compression and landing stay planted. Travel belongs to the tucked roll.
+      const u = clamp(
+        (p.time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
+        0,
+        1,
+      );
+      const travel = DODGE.distance * (0.5 - 0.5 * Math.cos(Math.PI * u));
+      const step = travel - this.dodgeTravel;
+      this.dodgeTravel = travel;
+      this.vx = (this.dodgeX * step) / dt;
+      this.vz = (this.dodgeZ * step) / dt;
+      this.move(p, this.dodgeX * step, this.dodgeZ * step);
+    } else {
+      const a = 1 - Math.exp(-dt * 13);
+      this.vx += (dx - this.vx) * a;
+      this.vz += (dz - this.vz) * a;
+      this.move(p, this.vx * dt, this.vz * dt);
+    }
     p.speed = length(this.vx, this.vz);
     if (["idle", "move"].includes(p.mode)) {
       this.set(p, movement > 0.08 ? "move" : "idle");
@@ -479,7 +540,12 @@ export class CombatGame {
       d = this.distance;
     const profile = ENEMIES[e.kind as EnemyKind];
     const angle = Math.atan2(p.x - e.x, p.z - e.z);
-    if (e.mode !== "attack")
+    // The final windup commits to a direction. A roll can actually get behind it.
+    if (
+      ["idle", "move"].includes(e.mode) ||
+      (e.mode === "windup" && e.time < profile.windup * 0.5) ||
+      (e.mode === "recover" && e.time > 0.55)
+    )
       e.yaw +=
         Math.atan2(Math.sin(angle - e.yaw), Math.cos(angle - e.yaw)) *
         (1 - Math.exp(-dt * 7));

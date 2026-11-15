@@ -48,6 +48,10 @@ function copy(p) {
     ]),
   );
 }
+function smooth(u) {
+  u = Math.min(1, Math.max(0, u));
+  return u * u * (3 - 2 * u);
+}
 function wm(info, pose, node, cache = new Map()) {
   if (cache.has(node)) return cache.get(node).clone();
   const t = pose.get(node),
@@ -253,6 +257,7 @@ for (const character of ["prisoner", "gaoler"]) {
   for (const animation of sourceDoc.getRoot().listAnimations()) {
     const name = animation.getName();
     if (name === "Death") continue;
+    const fullBody = animation.getExtras().fullBody === true;
     const sourceTimes = animation.listSamplers()[0].getInput().getArray(),
       duration = sourceTimes.at(-1),
       poses = [];
@@ -276,31 +281,33 @@ for (const character of ["prisoner", "gaoler"]) {
           .multiply(targetWorld.get(boneName).q);
         setWQ(target, dst, dn, desired);
       }
-      // Endpoint motion follows each limb's own proportion, not the height of the head.
-      for (const side of ["L", "R"]) {
-        for (const [a, b, c, ratio] of [
-          [`thigh_${side}`, `shin_${side}`, `foot_${side}`, legRatio],
-          [`upperarm_${side}`, `forearm_${side}`, `hand_${side}`, armRatio],
-        ]) {
-          const endpoint = targetWorld
-            .get(c)
-            .p.clone()
-            .addScaledVector(
-              wp(source, src, source.byName.get(c)).sub(sourceWorld.get(c).p),
-              ratio,
-            );
-          const pole = targetWorld
-            .get(b)
-            .p.clone()
-            .addScaledVector(
-              wp(source, src, source.byName.get(b)).sub(sourceWorld.get(b).p),
-              ratio,
-            );
-          const endQ = wq(target, dst, target.byName.get(c));
-          ik(target, dst, a, b, c, endpoint, pole);
-          setWQ(target, dst, target.byName.get(c), endQ);
+      // Fixed-reference endpoint deltas work for planted combat poses. They must
+      // not pull limbs back towards standing reference anchors during a roll.
+      if (!fullBody)
+        for (const side of ["L", "R"]) {
+          for (const [a, b, c, ratio] of [
+            [`thigh_${side}`, `shin_${side}`, `foot_${side}`, legRatio],
+            [`upperarm_${side}`, `forearm_${side}`, `hand_${side}`, armRatio],
+          ]) {
+            const endpoint = targetWorld
+              .get(c)
+              .p.clone()
+              .addScaledVector(
+                wp(source, src, source.byName.get(c)).sub(sourceWorld.get(c).p),
+                ratio,
+              );
+            const pole = targetWorld
+              .get(b)
+              .p.clone()
+              .addScaledVector(
+                wp(source, src, source.byName.get(b)).sub(sourceWorld.get(b).p),
+                ratio,
+              );
+            const endQ = wq(target, dst, target.byName.get(c));
+            ik(target, dst, a, b, c, endpoint, pole);
+            setWQ(target, dst, target.byName.get(c), endQ);
+          }
         }
-      }
       // Rebuild the right-hand grip basis after IK. Different bind wrist rolls
       // must not rotate the blade away from the authored cut direction.
       {
@@ -312,7 +319,9 @@ for (const character of ["prisoner", "gaoler"]) {
         const blade = new Vector3(0, 0, -1).applyQuaternion(
           wq(source, src, source.byName.get("hand_R")),
         );
-        blade.addScaledVector(finger, -blade.dot(finger)).normalize();
+        if (fullBody) {
+          finger.addScaledVector(blade, -finger.dot(blade)).normalize();
+        } else blade.addScaledVector(finger, -blade.dot(finger)).normalize();
         const z = blade.negate(),
           x = finger.clone().cross(z).normalize();
         z.crossVectors(x, finger).normalize();
@@ -328,17 +337,36 @@ for (const character of ["prisoner", "gaoler"]) {
       const floor = floorY(target, dst, meshes),
         correction = 0.012 - floor;
       dst.get(pelvis).p.y += correction;
+      if (fullBody) {
+        // At entry/recovery use the *baked target* Guard, because the planted
+        // combat IK has proportion-specific offsets absent from the airborne FK.
+        const guard = root
+          .listAnimations()
+          .find((a) => a.getName() === "Guard");
+        const amount = Math.max(
+          1 - smooth(time / 0.1),
+          name.startsWith("Dodge") ? smooth((time - 0.7) / 0.12) : 0,
+        );
+        if (guard && amount > 0) {
+          const resting = sample(target, guard, 0);
+          for (const [node, state] of dst) {
+            state.p.lerp(resting.get(node).p, amount);
+            state.q.slerp(resting.get(node).q, amount).normalize();
+          }
+          dst.get(pelvis).p.y += 0.012 - floorY(target, dst, meshes);
+        }
+      }
       maximumCorrection = Math.max(maximumCorrection, Math.abs(correction));
       poses.push(dst);
     }
-    const output = targetDoc
-      .createAnimation(name)
-      .setExtras({
-        retargetedFor: character,
-        method:
-          "Native Idle world delta, arm/leg endpoint IK using target lengths, weighted floor correction",
-        version: 2,
-      });
+    const output = targetDoc.createAnimation(name).setExtras({
+      retargetedFor: character,
+      method:
+        "Native Idle world delta, arm/leg endpoint IK using target lengths, weighted floor correction",
+      version: fullBody ? 3 : 2,
+      provenance: animation.getExtras().provenance,
+      fullBody,
+    });
     const buffer = root.listBuffers()[0],
       input = targetDoc
         .createAccessor(`${name}_time`)
@@ -395,7 +423,7 @@ for (const character of ["prisoner", "gaoler"]) {
     sourceRig: character,
     source: "Patch anymove CC0 character",
     motion:
-      "Original new0 combat poses, asset-time retargeted with IK and floor checks",
+      "Original new0 combat v2 and CC0 Quaternius roll/death adaptation v3, asset-time retargeted with floor checks",
   };
   const prepared = animationOnly(targetDoc);
   if (

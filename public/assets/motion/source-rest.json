@@ -700,22 +700,6 @@
       "duration": 1
     },
     {
-      "name": "DodgeLeft",
-      "duration": 0.52
-    },
-    {
-      "name": "DodgeRight",
-      "duration": 0.52
-    },
-    {
-      "name": "DodgeBack",
-      "duration": 0.52
-    },
-    {
-      "name": "DodgeForward",
-      "duration": 0.52
-    },
-    {
       "name": "HitFront",
       "duration": 0.4
     },
@@ -734,6 +718,34 @@
     {
       "name": "BlockHit",
       "duration": 0.32
+    },
+    {
+      "name": "DodgeForward",
+      "duration": 0.82
+    },
+    {
+      "name": "DodgeBack",
+      "duration": 0.82
+    },
+    {
+      "name": "DodgeLeft",
+      "duration": 0.82
+    },
+    {
+      "name": "DodgeRight",
+      "duration": 0.82
+    },
+    {
+      "name": "DeathBack",
+      "duration": 1.85
+    },
+    {
+      "name": "DeathFront",
+      "duration": 1.75
+    },
+    {
+      "name": "DeathSide",
+      "duration": 1.7
     }
   ],
   "contactTimes": {
@@ -745,5 +757,15 @@
     "Attack1": 0.52,
     "Attack2": 0.51
   },
-  "retarget": "Asset-time native Idle world delta with destination arm/leg IK and weighted skin floor alignment."
+  "retarget": "Asset-time native Idle world delta, destination arm/leg IK for grounded combat, direct FK for full-body rolls/falls, baked target Guard endpoints and weighted skin floor alignment.",
+  "motionSources": {
+    "author": "Quaternius",
+    "license": "CC0-1.0",
+    "source": "https://quaternius.itch.io/universal-animation-library",
+    "originalClips": {
+      "Roll": 1.4666667,
+      "Death01": 2.4
+    },
+    "research": "KayKit Adventure Mage directional Dodges were evaluated and rejected because they do not invert the torso. No KayKit data is shipped."
+  }
 }

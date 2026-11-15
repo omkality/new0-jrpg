@@ -1,43 +1,44 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { assetUrl } from "./assets";
+import { CHEST } from "./game";
 
 export const LOCATIONS = {
   chapel: {
     name: "Малахитовый неф",
-    fog: 0x162c2b,
-    density: 0.062,
-    sky: 0x142524,
-    ambient: 0x9bbcb0,
-    ground: 0x18191b,
-    fill: 0x92b2a4,
-    sun: 0xc2c7ae,
-    sunPower: 0.7,
-    torch: 7,
+    fog: 0x293e46,
+    density: 0.045,
+    sky: 0x17282e,
+    ambient: 0xa3b6ca,
+    ground: 0x171e29,
+    fill: 0xb4c6db,
+    sun: 0xc9dce7,
+    sunPower: 1.25,
+    torch: 3.2,
   },
   roofs: {
     name: "Багровые крыши",
-    fog: 0x443440,
+    fog: 0x4d4459,
     density: 0.026,
-    sky: 0x66515d,
-    ambient: 0xb4a0b6,
-    ground: 0x242027,
-    fill: 0xb6a4ad,
-    sun: 0xf0baa4,
-    sunPower: 0.82,
-    torch: 5,
+    sky: 0x69556c,
+    ambient: 0xb9b0cc,
+    ground: 0x222331,
+    fill: 0xbcc9e1,
+    sun: 0xe0cedc,
+    sunPower: 1.1,
+    torch: 2.5,
   },
   courtyard: {
     name: "Двор забвения",
-    fog: 0x54604b,
-    density: 0.042,
-    sky: 0x818873,
-    ambient: 0xb6c2a1,
-    ground: 0x1b2018,
-    fill: 0xb8c0a0,
-    sun: 0xd3d6b8,
-    sunPower: 0.72,
-    torch: 4,
+    fog: 0x526364,
+    density: 0.035,
+    sky: 0x7a898b,
+    ambient: 0xb3c8c6,
+    ground: 0x19272b,
+    fill: 0xb2c7d3,
+    sun: 0xd7e2e5,
+    sunPower: 1.15,
+    torch: 2.4,
   },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
@@ -55,6 +56,8 @@ export class LocationStage {
   private flickerLights: THREE.PointLight[] = [];
   private flames: THREE.Mesh[] = [];
   private beamMaterials: THREE.MeshBasicMaterial[] = [];
+  private chestLid = new THREE.Group();
+  private marks = new Map<string, THREE.Mesh>();
   private wall: THREE.MeshStandardMaterial;
   private stone: THREE.MeshStandardMaterial;
   private column: THREE.MeshStandardMaterial;
@@ -91,25 +94,25 @@ export class LocationStage {
       "TEX_Wall_03",
       4,
       2,
-      chapel ? 0x8fa59c : garden ? 0x909778 : 0xa69599,
+      chapel ? 0xa8b9c1 : garden ? 0x98aba3 : 0xb0a9be,
     );
     this.stone = material(
       "TEX_Arch_02",
       1,
       1,
-      chapel ? 0xb4c4ad : garden ? 0xb4b293 : 0xb9aaa2,
+      chapel ? 0xc3cbd2 : garden ? 0xbfc9bf : 0xc5bacb,
     );
     this.column = material(
       "TEX_Pillar_01",
       1,
       2,
-      chapel ? 0x9baf9f : garden ? 0xa3ac8d : 0xaa969c,
+      chapel ? 0xb4c1c9 : garden ? 0xa6b8af : 0xb8a9bf,
     );
     this.floor = material(
       "TEX_Ground_04",
       12,
       20,
-      chapel ? 0x829e94 : garden ? 0x969c75 : 0x8d7f8c,
+      chapel ? 0xa2b3b9 : garden ? 0x9cad9f : 0xa7a0b5,
     );
     this.floor.bumpMap = this.floor.map;
     this.floor.bumpScale = 0.028;
@@ -124,11 +127,11 @@ export class LocationStage {
       roughness: 1,
       vertexColors: true,
     });
-    this.group.add(new THREE.HemisphereLight(spec.ambient, spec.ground, 0.42));
+    this.group.add(new THREE.HemisphereLight(spec.ambient, spec.ground, 0.63));
     const sun = new THREE.DirectionalLight(spec.sun, spec.sunPower);
     sun.position.set(-5, 10, -4);
     this.group.add(sun);
-    const bounce = new THREE.DirectionalLight(spec.fill, 0.18);
+    const bounce = new THREE.DirectionalLight(spec.fill, 0.32);
     bounce.position.set(5, 4, 8);
     this.group.add(bounce);
     const floor = new THREE.Mesh(
@@ -142,11 +145,33 @@ export class LocationStage {
     else if (garden) this.courtyard();
     else this.roofs();
     this.relics();
+    this.chest();
     this.exit();
     this.rubble();
     this.flush();
   }
-  update(time: number, dt: number, opened: boolean) {
+  update(
+    time: number,
+    dt: number,
+    opened: boolean,
+    chestOpened: boolean,
+    collected: Set<string>,
+  ) {
+    this.chestLid.rotation.x = THREE.MathUtils.damp(
+      this.chestLid.rotation.x,
+      chestOpened ? -1.3 : 0,
+      7,
+      dt,
+    );
+    for (const [id, mark] of this.marks) {
+      const material = mark.material as THREE.MeshBasicMaterial;
+      material.opacity = THREE.MathUtils.damp(
+        material.opacity,
+        collected.has(id) ? 0 : 0.7 + Math.sin(time * 1.6) * 0.12,
+        8,
+        dt,
+      );
+    }
     for (let i = 0; i < this.beamMaterials.length; i++)
       this.beamMaterials[i].opacity = 0.06 + Math.sin(time * 0.55 + i) * 0.008;
     for (let i = 0; i < this.flickerLights.length; i++)
@@ -185,7 +210,7 @@ export class LocationStage {
     }
     const glass = new THREE.MeshBasicMaterial({
       map: this.pattern("glass"),
-      color: 0x829a83,
+      color: 0x9eb8c9,
       toneMapped: false,
     });
     for (const sign of [-1, 1])
@@ -513,6 +538,108 @@ export class LocationStage {
       { x: -4.1, z: 0.4, hx: 0.85, hz: 0.58 },
       { x: 4.3, z: -4.8, hx: 0.5, hz: 0.5 },
     );
+    const glyphCanvas = document.createElement("canvas");
+    glyphCanvas.width = glyphCanvas.height = 128;
+    const ctx = glyphCanvas.getContext("2d")!;
+    ctx.strokeStyle = "#cedcf0";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(64, 64, 38, 0.2, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(64, 13);
+    ctx.lineTo(43, 83);
+    ctx.lineTo(87, 54);
+    ctx.lineTo(67, 114);
+    ctx.moveTo(24, 64);
+    ctx.lineTo(107, 64);
+    ctx.stroke();
+    const glyph = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.68, 0.68),
+      new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(glyphCanvas),
+        color: 0xb7d2ed,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.8,
+      }),
+    );
+    glyph.rotation.x = -Math.PI / 2;
+    glyph.position.set(-4.1, 1.045, 0.4);
+    this.group.add(glyph);
+    this.marks.set("inscription", glyph);
+    const echo = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.16),
+      new THREE.MeshBasicMaterial({
+        color: 0xbaaddb,
+        transparent: true,
+        opacity: 0.8,
+      }),
+    );
+    echo.position.set(4.3, 1.22, -4.8);
+    this.group.add(echo);
+    this.marks.set("echo", echo);
+  }
+  private chest() {
+    const root = new THREE.Group();
+    root.position.set(CHEST.x, 0, CHEST.z);
+    const wood = new THREE.MeshStandardMaterial({
+      map: this.pattern("bark"),
+      color: 0x6b6376,
+      roughness: 0.96,
+    });
+    const iron = new THREE.MeshStandardMaterial({
+      color: 0x77818c,
+      roughness: 0.8,
+      metalness: 0.22,
+    });
+    const boxes = (
+      parent: THREE.Group,
+      material: THREE.Material,
+      sizes: number[][],
+    ) => {
+      const geometries = sizes.map(([w, h, d, x, y, z]) =>
+        new THREE.BoxGeometry(w, h, d).translate(x, y, z),
+      );
+      parent.add(new THREE.Mesh(mergeGeometries(geometries)!, material));
+      for (const geo of geometries) geo.dispose();
+    };
+    boxes(root, wood, [
+      [1.35, 0.58, 0.12, 0, 0.36, 0.4],
+      [1.35, 0.58, 0.12, 0, 0.36, -0.4],
+      [0.12, 0.58, 0.8, -0.64, 0.36, 0],
+      [0.12, 0.58, 0.8, 0.64, 0.36, 0],
+      [1.35, 0.12, 0.85, 0, 0.12, 0],
+    ]);
+    boxes(root, iron, [
+      [1.4, 0.06, 0.96, 0, 0.15, 0],
+      [1.4, 0.06, 0.96, 0, 0.63, 0],
+      [0.08, 0.5, 0.98, -0.45, 0.38, 0],
+      [0.08, 0.5, 0.98, 0.45, 0.38, 0],
+      [0.15, 0.2, 0.08, 0, 0.49, 0.49],
+    ]);
+    const lining = new THREE.Mesh(
+      new THREE.BoxGeometry(1.14, 0.3, 0.66),
+      new THREE.MeshStandardMaterial({ color: 0x15202c, roughness: 1 }),
+    );
+    lining.position.y = 0.31;
+    root.add(lining);
+    this.chestLid.position.set(0, 0.65, -0.43);
+    boxes(this.chestLid, wood, [[1.4, 0.18, 0.96, 0, 0.09, 0.43]]);
+    boxes(this.chestLid, iron, [
+      [0.08, 0.22, 0.98, -0.45, 0.09, 0.43],
+      [0.08, 0.22, 0.98, 0.45, 0.09, 0.43],
+      [1.44, 0.05, 0.98, 0, 0.02, 0.43],
+      [0.17, 0.23, 0.055, 0, 0.03, 0.94],
+    ]);
+    root.add(this.chestLid);
+    this.group.add(root);
+    this.obstacles.push({ x: CHEST.x, z: CHEST.z, hx: 0.7, hz: 0.49 });
+  }
+  reset() {
+    this.chestLid.rotation.x = 0;
+    for (const mark of this.marks.values())
+      (mark.material as THREE.MeshBasicMaterial).opacity = 0.8;
   }
   private rubble() {
     for (let i = 0; i < 26; i++) {
@@ -536,8 +663,8 @@ export class LocationStage {
     c.height = 256;
     const ctx = c.getContext("2d")!,
       img = ctx.createImageData(512, 256);
-    const top = new THREE.Color(id === "roofs" ? 0x292c3c : 0x424e46),
-      horizon = new THREE.Color(id === "roofs" ? 0x8b6675 : 0x889483);
+    const top = new THREE.Color(id === "roofs" ? 0x323345 : 0x3b505b),
+      horizon = new THREE.Color(id === "roofs" ? 0x9c718c : 0x9aadb3);
     for (let y = 0; y < 256; y++)
       for (let x = 0; x < 512; x++) {
         const t = Math.pow(Math.max(0, 1 - Math.abs(y - 128) / 128), 1.9),
@@ -658,7 +785,17 @@ export class LocationStage {
         for (const cx of [-4.2, 4.2])
           for (const cz of [-7, 0, 6.7])
             shade -= 0.2 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) * 1.5);
-        shade += 0.2 * Math.exp(-((x + 1.6) ** 2 + (z - 3.7) ** 2) / 8);
+        if (this.id === "chapel") {
+          for (const windowZ of [-3.5, 3.4]) {
+            const band = z - (windowZ + 2.1 + x * 0.42);
+            shade +=
+              0.42 *
+              Math.exp(-(band * band) / 0.65) *
+              Math.exp(-((x + 1) ** 2) / 28);
+          }
+        } else if (this.id === "courtyard") {
+          shade += 0.28 * Math.exp(-((x + 1.4) ** 2 + (z + 3) ** 2) / 5);
+        }
       }
       colors[i * 3] = shade;
       colors[i * 3 + 1] = shade;
@@ -800,7 +937,7 @@ export class LocationStage {
     ctx.putImageData(pixels, 0, 0);
     const material = new THREE.MeshBasicMaterial({
       map: new THREE.CanvasTexture(canvas),
-      color: this.id === "chapel" ? 0x9bc5b0 : 0xc4c6a1,
+      color: this.id === "chapel" ? 0xb4cee5 : 0xd2d3e6,
       transparent: true,
       opacity: 0.06,
       depthWrite: false,

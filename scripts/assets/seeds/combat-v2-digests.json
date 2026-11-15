@@ -1,0 +1,20 @@
+{
+  "combat.glb": {
+    "Death": "f906007ae8eda7e88dc8b1335e877822f9446e7a9459a9b9cb3d5d8bcfd266a1",
+    "Attack1": "f3698204a6aabf0f4befda12218908eee7a925041c1d61c6b318f08381f45d9c",
+    "Attack2": "c5de19d3cbd7ebbd944d18e3967355290eddcdf860b1c60a4bbbfa4f75459853",
+    "Attack3": "21666db5aa1f36ed6ca69792f2fd92fbb1156bb0e5de34301fda6e2cbc0c6c78"
+  },
+  "prisoner-combat.glb": {
+    "Death": "9dfa4f15b9ba198a18e0c82081f7903c33fdad8224ccf096bb6f1b35158525f8",
+    "Attack1": "a34a5d007b0e20ecdfe6b9dbc3cadb82fe55af5761dee27b6cbb8c5a026342d9",
+    "Attack2": "a9abb9c870d8e2e3d1613f2152d341ce483e92cffcf36834f2a14a4e37cb9bdf",
+    "Attack3": "a9faf628074672995b5b6ddff678eff9122613d4692c2c11b8bace72818c6239"
+  },
+  "gaoler-combat.glb": {
+    "Death": "94fad499bed902fc7c2e086e04e253165845c6322552deb32d2aef010433ffd6",
+    "Attack1": "5f36f51f0aee2c7458160864eb8f4bd12ee7383c108028e59e2860bd5f62c6bf",
+    "Attack2": "8b84ac41da4c9b7e399e5121ff5886df708c65f52e6ce4e2507c376031b63ef6",
+    "Attack3": "c6fcccbe4e7508b15649070afb968c66b2ab6df58c6a6e971a1226238b564261"
+  }
+}

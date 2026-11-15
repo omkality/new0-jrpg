@@ -67,7 +67,7 @@ export class DeviceCheck {
     this.elapsed += rawMs / 1000;
     // Exclude first second of each location, including its initial camera placement.
     if (this.elapsed > 1) this.samples.add(rawMs);
-    if ((completed && this.elapsed >= 15) || this.elapsed >= 24) {
+    if ((completed && this.elapsed >= 15) || this.elapsed >= 32) {
       this.store(completed, scale);
       if (++this.index === this.locations.length) this.done = true;
       else {

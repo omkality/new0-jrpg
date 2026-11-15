@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CombatGame, ATTACKS } from "../src/game.ts";
-import { Showcase } from "../src/showcase.ts";
+import { CombatGame, ATTACKS, DODGE, CHEST } from "../src/game.ts";
+import { Showcase, DEMO_ENEMIES } from "../src/showcase.ts";
 
 const still = { x: 0, z: 0, guard: false };
 test("gameplay contact and chain links match the authored animation contract", () => {
@@ -18,6 +18,10 @@ test("gameplay contact and chain links match the authored animation contract", (
     assert.equal(ATTACKS[i].contact, clip.contact);
     if (clip.link !== null) assert.equal(ATTACKS[i].link, clip.link);
   }
+  assert.equal(DODGE.duration, contract.dodges);
+  assert.equal(DODGE.travelStart, contract.dodgeTravel.start);
+  assert.equal(DODGE.travelEnd, contract.dodgeTravel.end);
+  assert.equal(DODGE.distance, contract.dodgeTravel.distance);
 });
 test("queued combo follows through before solo recovery ends, contact hold does not skip a hit", () => {
   const g = new CombatGame();
@@ -55,8 +59,8 @@ test("review input driver demonstrates all three attacks, a block, a dodge and w
   assert.ok(blocked);
   assert.ok(dodged);
   assert.equal(g.phase, "finished");
-  assert.equal(g.player.mode,"idle");
-  assert.equal(g.player.speed,0);
+  assert.equal(g.player.mode, "idle");
+  assert.equal(g.player.speed, 0);
 });
 function advance(g, seconds, input = still) {
   for (let n = 0; n < Math.round(seconds * 120); n++) g.update(1 / 120, input);
@@ -160,6 +164,102 @@ test("early dodge has an invulnerable window and costs stamina", () => {
   advance(g, 0.6);
   assert.equal(g.damagePlayer(15), true);
   assert.equal(g.player.hp, 85);
+});
+test("roll compression and landing are planted, attacks cannot truncate the rotation", () => {
+  const g = new CombatGame();
+  g.start();
+  const x = g.player.x;
+  g.dodge({ x: 1, z: 0 });
+  advance(g, DODGE.travelStart - 0.02);
+  assert.equal(g.player.x, x);
+  advance(g, 0.3);
+  g.attack();
+  assert.equal(g.player.mode, "dodge");
+  advance(g, 0.25);
+  const landed = g.player.x;
+  assert.ok(Math.abs(landed - x - DODGE.distance) < 0.001);
+  advance(g, 0.12);
+  assert.equal(g.player.x, landed);
+  advance(g, 0.1);
+  assert.equal(g.player.mode, "idle");
+});
+test("a real killing blow selects back, front and side falls from the impact direction", () => {
+  for (const [x, z, fall] of [
+    [0, -2.4, "Back"],
+    [0, -5.2, "Front"],
+    [-1.4, -3.8, "Side"],
+  ]) {
+    const g = new CombatGame();
+    g.start();
+    g.player.x = x;
+    g.player.z = z;
+    g.enemy.mode = "windup";
+    g.enemy.time = 0.6;
+    g.enemy.combo = 1;
+    g.enemy.hp = 1;
+    g.attack();
+    advance(g, 0.36);
+    assert.equal(g.enemy.mode, "dead");
+    assert.equal(g.enemy.death, fall);
+    const pose = { x: g.enemy.x, z: g.enemy.z, yaw: g.enemy.yaw };
+    advance(g, 2);
+    assert.deepEqual({ x: g.enemy.x, z: g.enemy.z, yaw: g.enemy.yaw }, pose);
+  }
+});
+test("three varied tours collect both secrets, equip the chest weapon and exit through collision", () => {
+  const falls = new Set(),
+    opponents = new Set(),
+    chains = new Set();
+  for (const location of ["chapel", "roofs", "courtyard"]) {
+    const g = new CombatGame();
+    g.start(DEMO_ENEMIES[location]);
+    g.obstacles = [
+      { x: CHEST.x, z: CHEST.z, hx: 0.7, hz: 0.49 },
+      { x: -4.1, z: 0.4, hx: 0.85, hz: 0.58 },
+      { x: 4.3, z: -4.8, hx: 0.5, hz: 0.5 },
+      ...[-7, 0, 6.7].flatMap((z) =>
+        [-4.2, 4.2].map((x) => ({ x, z, hx: 0.4, hz: 0.4 })),
+      ),
+    ];
+    const tour = new Showcase(g, location),
+      cameras = [];
+    let block = false,
+      roll = false,
+      largestChain = 0,
+      maxStep = 0;
+    for (let n = 0; n < 120 * 30 && g.phase !== "finished"; n++) {
+      const before = { x: g.player.x, z: g.player.z };
+      g.update(1 / 120, tour.update(1 / 120));
+      maxStep = Math.max(
+        maxStep,
+        Math.hypot(g.player.x - before.x, g.player.z - before.z),
+      );
+      block ||= g.player.recoil > 0;
+      roll ||= g.player.mode === "dodge";
+      largestChain = Math.max(largestChain, g.player.combo);
+      cameras.push(tour.cameraYaw);
+      if (g.player.combo) chains.add(g.player.combo);
+    }
+    assert.equal(g.phase, "finished", location + ": " + tour.label);
+    assert.deepEqual([...g.secrets], ["inscription", "echo"]);
+    assert.equal(g.player.weapon, "relic");
+    assert.ok(g.chestOpened);
+    assert.ok(block && roll && largestChain >= 2);
+    assert.ok(maxStep < 0.09, "no teleports");
+    assert.ok(
+      Math.max(...cameras) - Math.min(...cameras) > 0.8,
+      "camera explores the scene",
+    );
+    falls.add(g.enemy.death);
+    opponents.add(g.enemy.kind);
+    g.start(DEMO_ENEMIES[location]);
+    assert.equal(g.player.weapon, "sword");
+    assert.equal(g.chestOpened, false);
+    assert.equal(g.secrets.size, 0);
+  }
+  assert.equal(opponents.size, 3);
+  assert.equal(falls.size, 3);
+  assert.deepEqual([...chains].sort(), [1, 2, 3]);
 });
 test("movement is time based, accelerates and remains within the room", () => {
   const a = new CombatGame(),
