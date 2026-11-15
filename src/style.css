@@ -140,7 +140,7 @@ a {
   z-index: 5;
 }
 /* Keep the real touch layout measurable during the input-driven device tour. */
-#touch-controls.measure-only {
+.measure-only {
   visibility: hidden;
 }
 #joystick {
@@ -320,4 +320,18 @@ a {
   border: 1px solid #adbcc888;
   padding: 9px;
   font-size: 10px;
+}
+#heal {
+  position: absolute;
+  right: 20px;
+  bottom: calc(240px + var(--safe-bottom));
+  z-index: 6;
+  color: #dce8e3;
+  background: #263d3ad9;
+  border: 1px solid #b8ccc888;
+  padding: 9px;
+  font-size: 10px;
+}
+#heal:disabled {
+  opacity: 0.5;
 }

@@ -2,9 +2,10 @@ import * as THREE from "three";
 import { ConnectedEnvironment, LOCATIONS, type LocationId } from "./locations";
 import { Actor } from "./actor";
 import { Campaign } from "./campaign";
-import { AREA_ORDER, AREAS, type AreaId } from "./world-layout";
+import { ENCOUNTERS, type AreaId } from "./world-layout";
 import type { GameEvent } from "./game";
 import { LevelProps } from "./level-props";
+import { cameraClearance } from "./camera-clearance";
 import {
   loadProps,
   modelCacheSize,
@@ -17,7 +18,7 @@ export class World {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(57, 1, 0.08, 165);
   player = new Actor();
-  private actors = new Map<AreaId, Actor>();
+  private actors = new Map<string, Actor>();
   private props: LevelProps;
   private environment: ConnectedEnvironment;
   private readyTextures: Promise<void>;
@@ -31,12 +32,14 @@ export class World {
   private position = new THREE.Vector3(0.7, 2.5, 9);
   private desiredAim = new THREE.Vector3();
   private desiredPosition = new THREE.Vector3();
+  private cameraFocus = new THREE.Vector3();
   private fogColor = new THREE.Color();
   private playerFill = new THREE.PointLight(0xcdd8e4, 2.2, 4.2, 2);
   private shadows: THREE.Mesh[] = [];
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
+  private wasInspecting = false;
   private resizeHandler = () => this.resize();
   private contextHandler = (e: Event) => {
     e.preventDefault();
@@ -73,19 +76,22 @@ export class World {
       new THREE.TextureLoader(manager),
     );
     this.scene.add(this.environment.root, this.playerFill, this.player.root);
-    for (const id of AREA_ORDER)
-      if (id !== "crypt") {
-        const kind = AREAS[id].enemy.kind as "effigy" | "watcher" | "gaoler";
+    for (const spec of ENCOUNTERS)
+      if (spec.kind !== "mimic") {
+        const kind = spec.kind;
         const actor = new Actor(true, kind);
-        this.actors.set(id, actor);
+        this.actors.set(spec.id, actor);
         this.scene.add(actor.root);
       }
     this.props = new LevelProps(game);
     this.scene.add(this.props.root);
     const shadowTexture = new THREE.CanvasTexture(this.radial("#000000", 0.75));
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i <= ENCOUNTERS.length; i++) {
       const shadow = new THREE.Mesh(
-        new THREE.PlaneGeometry(i === 4 ? 2 : 1.35, i === 4 ? 1.7 : 1.2),
+        new THREE.PlaneGeometry(
+          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 2 : 1.35,
+          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 1.7 : 1.2,
+        ),
         new THREE.MeshBasicMaterial({
           map: shadowTexture,
           transparent: true,
@@ -195,9 +201,8 @@ export class World {
     this.player.update(dt, p);
     this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
     let shadowIndex = 1;
-    for (const id of AREA_ORDER) {
-      const e = this.game.enemies.get(id)!,
-        shadow = this.shadows[shadowIndex++];
+    for (const [id, e] of this.game.enemies) {
+      const shadow = this.shadows[shadowIndex++];
       const visible = Math.abs(e.z - p.z) < 36;
       shadow.visible = visible;
       shadow.position.set(e.x, e.y + 0.015, e.z);
@@ -240,7 +245,7 @@ export class World {
       this.desiredPosition.x = THREE.MathUtils.clamp(
         this.desiredPosition.x,
         3.7,
-        6.2,
+        5.9, // The east window's 32 cm stone frame projects into the room.
       );
       this.desiredPosition.y = Math.min(this.desiredPosition.y, 8.6);
     }
@@ -273,8 +278,35 @@ export class World {
         );
     }
     const alpha = 1 - Math.exp(-dt * 8);
+    this.cameraFocus.set(p.x, p.y + 1.2, p.z);
+    if (inspect) this.cameraFocus.copy(this.desiredAim);
+    this.desiredPosition.lerpVectors(
+      this.cameraFocus,
+      this.desiredPosition,
+      cameraClearance(
+        this.cameraFocus,
+        this.desiredPosition,
+        this.game.obstacles,
+        this.game.openDoors,
+      ),
+    );
+    if (this.wasInspecting && !inspect && p.mode === "hit") {
+      this.aim.copy(this.desiredAim);
+      this.position.copy(this.desiredPosition);
+    }
+    this.wasInspecting = !!inspect;
     this.aim.lerp(this.desiredAim, alpha);
     this.position.lerp(this.desiredPosition, alpha);
+    this.position.lerpVectors(
+      this.cameraFocus,
+      this.position,
+      cameraClearance(
+        this.cameraFocus,
+        this.position,
+        this.game.obstacles,
+        this.game.openDoors,
+      ),
+    );
     this.camera.position.copy(this.position);
     this.cameraKick *= Math.exp(-dt * 30);
     this.camera.position.x += Math.sin(this.elapsed * 67) * this.cameraKick;

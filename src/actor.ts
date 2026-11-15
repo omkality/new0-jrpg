@@ -6,6 +6,9 @@ import { assetUrl } from "./assets";
 import { heldWeapon } from "./level-props";
 import { loadModel as load } from "./asset-store";
 import type { WeaponId } from "./world-layout";
+import { armourModel, flaskModel } from "./gear-visuals";
+import { GearPose } from "./gear-pose";
+import { GearCollision } from "./gear-collision";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
@@ -20,6 +23,10 @@ interface RigState {
   dropped: boolean;
   floorOffset: number;
   profile: string;
+  armour?: THREE.Group;
+  flask?: THREE.Group;
+  gear: GearPose;
+  collision?: GearCollision;
 }
 interface FloorClip {
   duration: number;
@@ -91,7 +98,7 @@ export class Actor {
             m.envMapIntensity = 0.2;
             m.color.set(
               kind === "pilgrim"
-                ? 0xc9c1b1
+                ? 0xd5d9d6
                 : kind === "effigy"
                   ? 0xb5c3b9
                   : kind === "gaoler"
@@ -99,6 +106,15 @@ export class Actor {
                     : 0x9fa8a9,
             );
             o.material = m;
+            if (/linen|headwrap/.test(m.name)) {
+              m.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                  "#include <map_fragment>",
+                  "#include <map_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.2126,0.7152,0.0722))), diffuseColor.rgb, 0.2);",
+                );
+              };
+              m.customProgramCacheKey = () => "new0-ashen-cloth-v8";
+            }
             o.frustumCulled = false;
           }
         });
@@ -121,6 +137,19 @@ export class Actor {
           weapons.set("relic", weapon);
         }
         for (const item of new Set(weapons.values())) hand?.add(item);
+        let armour: THREE.Group | undefined, flask: THREE.Group | undefined;
+        if (kind === "pilgrim") {
+          armour = armourModel();
+          armour.position.set(0, 1.16, 0.01);
+          armour.visible = false;
+          rig.add(armour);
+          rig.updateMatrixWorld(true);
+          rig.getObjectByName("chest")?.attach(armour);
+          flask = flaskModel();
+          flask.scale.setScalar(0.72);
+          flask.visible = false;
+          rig.getObjectByName("hand_L")?.add(flask);
+        }
         this.states.set(kind, {
           rig,
           mixer,
@@ -132,6 +161,13 @@ export class Actor {
           dropped: false,
           floorOffset: 0,
           profile: model,
+          armour,
+          flask,
+          gear: new GearPose(rig),
+          collision:
+            hand && kind !== "effigy"
+              ? new GearCollision(rig, hand, weapons)
+              : undefined,
         });
       }),
     );
@@ -196,6 +232,16 @@ export class Actor {
     this.root.position.set(f.x, f.y, f.z);
     this.root.rotation.set(0, f.yaw, 0);
     const mode = f.mode;
+    if (s.armour) s.armour.visible = f.armour > 0;
+    if (s.flask) {
+      s.flask.visible = mode === "heal";
+      const stopper = s.flask.getObjectByName("FlaskStopper"),
+        liquid = s.flask.getObjectByName("FlaskLiquid");
+      if (stopper) stopper.visible = false;
+      if (liquid)
+        liquid.scale.y =
+          mode === "heal" ? Math.max(0.1, 0.92 - f.time * 0.6) : 0.92;
+    }
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
     const name =
       mode === "dead"
@@ -268,6 +314,27 @@ export class Actor {
         ? offset
         : THREE.MathUtils.damp(s.floorOffset, offset, 28, dt);
     this.root.position.y = f.y + s.floorOffset;
+    if (!(mode === "dead" && f.time > 0.65)) {
+      this.root.updateMatrixWorld(true);
+      s.collision?.update();
+      const item =
+        kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : f.weapon;
+      s.gear.apply(
+        item,
+        name,
+        f.y,
+        s.collision
+          ? (matrix) =>
+              s.collision!.penalty(
+                kind === "gaoler" ? "sword" : item,
+                matrix,
+                f.y,
+              )
+          : undefined,
+        action.time,
+      );
+    }
+    if (mode === "heal") s.gear.drink(f.time);
 
     if (mode === "dead" && f.time > 0.65) {
       if (!s.dropped) {
@@ -322,6 +389,7 @@ export class Actor {
   }
   dispose() {
     for (const s of this.states.values()) {
+      s.collision?.dispose();
       s.mixer.stopAllAction();
       s.mixer.uncacheRoot(s.rig);
       s.rig.traverse((o) => {

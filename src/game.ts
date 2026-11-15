@@ -10,7 +10,8 @@ export type Motion =
   | "hit"
   | "dead"
   | "windup"
-  | "recover";
+  | "recover"
+  | "heal";
 export interface Fighter {
   x: number;
   y: number;
@@ -30,6 +31,7 @@ export interface Fighter {
   weapon: WeaponId;
   kind: "pilgrim" | EnemyKind;
   maxHp: number;
+  armour: number;
 }
 export type EnemyKind = "gaoler" | "effigy" | "watcher" | "mimic";
 export const DODGE = {
@@ -166,6 +168,7 @@ const fighter = (x: number, z: number): Fighter => ({
   weapon: "sword",
   kind: "pilgrim",
   maxHp: 100,
+  armour: 0,
 });
 
 export class CombatGame {
@@ -191,7 +194,7 @@ export class CombatGame {
   private dodgeZ = -1;
   private dodgeTravel = 0;
   private swingHit = false;
-  private enemyHit = false;
+  private enemyHit = new WeakSet<Fighter>();
   private dodgeRequest: { x: number; z: number; remaining: number } | null =
     null;
   private staminaDelay = 0;
@@ -203,6 +206,42 @@ export class CombatGame {
   enemyDormant = false;
   protected isObstacleActive(_o: Obstacle) {
     return true;
+  }
+  protected get opponents(): Fighter[] {
+    return [this.enemy];
+  }
+  protected asleep(e: Fighter) {
+    return e === this.enemy && this.enemyDormant;
+  }
+  protected clearLine(a: Fighter, b: Fighter) {
+    if (Math.abs(a.y - b.y) > 1.1) return false;
+    const dx = b.x - a.x,
+      dz = b.z - a.z;
+    return !this.obstacles.some((o) => {
+      if (
+        !this.isObstacleActive(o) ||
+        (o.minY !== undefined && a.y < o.minY) ||
+        (o.maxY !== undefined && a.y >= o.maxY)
+      )
+        return false;
+      let lo = 0.04,
+        hi = 0.96;
+      for (const [start, delta, center, half] of [
+        [a.x, dx, o.x, o.hx],
+        [a.z, dz, o.z, o.hz],
+      ]) {
+        if (Math.abs(delta) < 1e-8) {
+          if (Math.abs(start - center) > half) return false;
+        } else {
+          const u = (center - half - start) / delta,
+            v = (center + half - start) / delta;
+          lo = Math.max(lo, Math.min(u, v));
+          hi = Math.min(hi, Math.max(u, v));
+        }
+        if (lo > hi) return false;
+      }
+      return true;
+    });
   }
 
   start(kind: EnemyKind = "gaoler") {
@@ -222,7 +261,8 @@ export class CombatGame {
     this.events = [];
     this.vx = this.vz = 0;
     this.dodgeRequest = null;
-    this.swingHit = this.enemyHit = false;
+    this.swingHit = false;
+    this.enemyHit = new WeakSet();
     this.staminaDelay = this.distanceWalked = this.deathTime = 0;
     this.lock = false;
     this.hitPause = 0;
@@ -265,6 +305,7 @@ export class CombatGame {
     if (
       (p.mode === "dodge" && p.time < DODGE.duration) ||
       p.mode === "hit" ||
+      p.mode === "heal" ||
       p.stamina < Math.ceil(16 * WEAPONS[p.weapon].cost)
     )
       return;
@@ -332,7 +373,7 @@ export class CombatGame {
     this.emit("dodge");
     if (this.tutorial >= 1 && this.tutorial < 3) this.tutorial = 3;
   }
-  damagePlayer(amount: number) {
+  damagePlayer(amount: number, source: Fighter = this.enemy) {
     const p = this.player;
     if (p.hp <= 0 || this.phase !== "playing") return false;
     if (
@@ -341,7 +382,9 @@ export class CombatGame {
       p.time <= DODGE.invulnerableEnd
     )
       return false;
-    if (p.mode === "guard" && p.stamina >= 12) {
+    amount = Math.ceil(amount * (p.armour ? 0.72 : 1));
+    const facing = Math.cos(Math.atan2(source.x - p.x, source.z - p.z) - p.yaw);
+    if (p.mode === "guard" && p.stamina >= 12 && facing > 0.2) {
       p.stamina -= 12;
       amount = Math.ceil(amount * 0.15);
       p.recoil = 0.32;
@@ -351,14 +394,14 @@ export class CombatGame {
       p.reaction = (p.reaction + 1) % 3;
       p.combo = p.chain = 0;
       this.set(p, "hit");
-      this.vx += Math.sin(this.enemy.yaw) * 1.5;
-      this.vz += Math.cos(this.enemy.yaw) * 1.5;
+      this.vx += Math.sin(source.yaw) * 1.5;
+      this.vz += Math.cos(source.yaw) * 1.5;
       this.hitPause = Math.max(this.hitPause, 0.04);
       this.emit("hurt");
     }
     p.hp = Math.max(0, p.hp - amount);
     if (p.hp === 0) {
-      p.death = deathFromImpact(p, this.enemy);
+      p.death = deathFromImpact(p, source);
       this.set(p, "dead");
       this.phase = "lost";
       this.emit("death");
@@ -434,13 +477,17 @@ export class CombatGame {
     const p = this.player,
       e = this.enemy;
     p.time += dt * (p.mode === "attack" ? WEAPONS[p.weapon].tempo : 1);
-    e.time += dt;
+    for (const foe of this.opponents) {
+      foe.time += dt;
+      foe.recoil = Math.max(0, foe.recoil - dt);
+    }
     p.recoil = Math.max(0, p.recoil - dt);
-    e.recoil = Math.max(0, e.recoil - dt);
     if (p.hp <= 0) {
       this.deathTime += dt;
-      e.speed = 0;
-      this.set(e, "idle");
+      for (const foe of this.opponents) {
+        foe.speed = 0;
+        if (foe.hp > 0) this.set(foe, "idle");
+      }
       return;
     }
     this.staminaDelay -= dt;
@@ -469,34 +516,39 @@ export class CombatGame {
       const attack = ATTACKS[p.combo - 1];
       if (!this.swingHit && p.time >= attack.contact) {
         this.swingHit = true;
-        const angle = Math.atan2(
-          Math.sin(this.enemyAngle - p.yaw),
-          Math.cos(this.enemyAngle - p.yaw),
-        );
-        if (
-          e.hp > 0 &&
-          this.distance < WEAPONS[p.weapon].reach &&
-          Math.abs(p.y - e.y) < 1.1 &&
-          Math.abs(angle) < 1.1
-        ) {
-          e.hp = Math.max(
-            0,
-            e.hp - Math.round(attack.damage * WEAPONS[p.weapon].damage),
+        for (const e of this.opponents) {
+          const targetAngle = Math.atan2(e.x - p.x, e.z - p.z);
+          const angle = Math.atan2(
+            Math.sin(targetAngle - p.yaw),
+            Math.cos(targetAngle - p.yaw),
           );
-          e.reaction = (e.reaction + 1) % 3;
-          e.recoil = p.combo === 3 ? 0.15 : 0.11;
-          this.hitPause = Math.max(
-            this.hitPause,
-            p.combo === 3 ? 0.055 : 0.032,
-          );
-          this.emit("hit", e);
-          if (e.hp === 0) {
-            e.death = deathFromImpact(e, p);
-            this.set(e, "dead");
-            this.phase = "won";
-            this.emit("win", e);
-          } else if (e.mode !== "attack") {
-            this.set(e, "hit");
+          if (
+            e.hp > 0 &&
+            length(e.x - p.x, e.z - p.z) < WEAPONS[p.weapon].reach &&
+            Math.abs(p.y - e.y) < 1.1 &&
+            Math.abs(angle) < 1.1 &&
+            this.clearLine(p, e)
+          ) {
+            e.hp = Math.max(
+              0,
+              e.hp - Math.round(attack.damage * WEAPONS[p.weapon].damage),
+            );
+            e.reaction = (e.reaction + 1) % 3;
+            e.recoil = p.combo === 3 ? 0.15 : 0.11;
+            this.hitPause = Math.max(
+              this.hitPause,
+              p.combo === 3 ? 0.055 : 0.032,
+            );
+            this.emit("hit", e);
+            if (e.hp === 0) {
+              e.death = deathFromImpact(e, p);
+              this.set(e, "dead");
+              if (this.opponents.every((foe) => foe.hp <= 0))
+                this.phase = "won";
+              this.emit("win", e);
+            } else if (e.mode !== "attack") {
+              this.set(e, "hit");
+            }
           }
         }
       }
@@ -525,7 +577,7 @@ export class CombatGame {
         ? 1.1
         : p.mode === "attack"
           ? 0.65
-          : p.mode === "hit"
+          : p.mode === "hit" || p.mode === "heal"
             ? 0
             : 3.1;
     let dx = input.x * speed,
@@ -569,13 +621,18 @@ export class CombatGame {
     }
     this.distanceWalked += p.speed * dt;
     if (this.distanceWalked > 1.8 && this.tutorial === 0) this.tutorial = 1;
-    if (e.hp > 0 && this.phase === "playing" && !this.enemyDormant)
-      this.enemyUpdate(dt);
+    if (this.phase === "playing")
+      for (const foe of this.opponents)
+        if (foe.hp > 0 && !this.asleep(foe)) this.enemyUpdate(dt, foe);
   }
-  private enemyUpdate(dt: number) {
-    const e = this.enemy,
-      p = this.player,
-      d = this.distance;
+  private enemyUpdate(dt: number, e: Fighter) {
+    const p = this.player,
+      d = length(e.x - p.x, e.z - p.z);
+    if (!this.clearLine(e, p)) {
+      e.speed = 0;
+      this.set(e, "idle");
+      return;
+    }
     const profile = ENEMIES[e.kind as EnemyKind];
     const angle = Math.atan2(p.x - e.x, p.z - e.z);
     // The final windup commits to a direction. A roll can actually get behind it.
@@ -601,7 +658,7 @@ export class CombatGame {
     if (e.mode === "windup") {
       if (e.time > profile.windup) {
         this.set(e, "attack");
-        this.enemyHit = false;
+        this.enemyHit.delete(e);
       }
       return;
     }
@@ -621,8 +678,8 @@ export class CombatGame {
       const contactTime = mimic
         ? 0.43
         : ((clip.contact - windupPose) / (clip.duration - windupPose)) * 0.68;
-      if (e.time > contactTime && !this.enemyHit) {
-        this.enemyHit = true;
+      if (e.time > contactTime && !this.enemyHit.has(e)) {
+        this.enemyHit.add(e);
         const diff = Math.atan2(
           Math.sin(angle - e.yaw),
           Math.cos(angle - e.yaw),
@@ -632,7 +689,7 @@ export class CombatGame {
           Math.abs(p.y - e.y) < 1.1 &&
           Math.abs(diff) < 1.15
         )
-          this.damagePlayer(profile.damage);
+          this.damagePlayer(profile.damage, e);
       }
       if (e.time > (mimic ? 1 : 0.68)) this.set(e, "recover");
       return;
@@ -671,16 +728,34 @@ export class CombatGame {
     if (can(x, f.z)) f.x = x;
     if (can(f.x, z)) f.z = z;
     f.y = this.heightAt(f.x, f.z);
-    const other = f === this.player ? this.enemy : this.player;
-    if (other.hp > 0 && f.hp > 0) {
-      const ox = f.x - other.x,
-        oz = f.z - other.z,
-        d = length(ox, oz);
-      const separation = this.enemy.kind === "gaoler" ? 1.1 : 0.82;
-      if (d > 0 && d < separation) {
-        f.x = other.x + (ox / d) * separation;
-        f.z = other.z + (oz / d) * separation;
+    const others =
+      f === this.player
+        ? this.opponents
+        : [this.player, ...this.opponents.filter((e) => e !== f)];
+    for (const other of others)
+      if (other.hp > 0 && f.hp > 0 && Math.abs(other.y - f.y) < 1) {
+        const ox = f.x - other.x,
+          oz = f.z - other.z,
+          d = length(ox, oz);
+        const separation =
+          f.kind === "gaoler" || other.kind === "gaoler" ? 1.1 : 0.82;
+        if (d > 0 && d < separation) {
+          const sx = clamp(
+            other.x + (ox / d) * separation,
+            this.bounds.minX,
+            this.bounds.maxX,
+          );
+          const sz = clamp(
+            other.z + (oz / d) * separation,
+            this.bounds.minZ,
+            this.bounds.maxZ,
+          );
+          if (can(sx, sz)) {
+            f.x = sx;
+            f.z = sz;
+            f.y = this.heightAt(sx, sz);
+          }
+        }
       }
-    }
   }
 }

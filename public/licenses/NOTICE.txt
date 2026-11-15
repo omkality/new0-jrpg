@@ -10,3 +10,14 @@ https://mediabunny.dev/
 
 The complete MPL-2.0 text is supplied alongside this notice as
 mediabunny-MPL-2.0.txt. No Mediabunny source files were modified.
+
+Three.js 0.187.0
+Copyright (c) 2010-2026 three.js authors
+License: MIT, complete notice supplied in three-MIT.txt.
+https://github.com/mrdoob/three.js
+
+three-mesh-bvh 0.9.18
+Copyright (c) 2018 Garrett Johnson
+License: MIT, complete notice supplied in three-mesh-bvh-MIT.txt.
+Unmodified npm library used for posed clothing and weapon surface checks.
+https://github.com/gkjohnson/three-mesh-bvh

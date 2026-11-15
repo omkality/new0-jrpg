@@ -1,8 +1,16 @@
 import * as THREE from "three";
 import { Campaign } from "./campaign";
-import { CHESTS, KEYS, COINS, DOORS, type WeaponId } from "./world-layout";
+import {
+  CHESTS,
+  KEYS,
+  COINS,
+  DOORS,
+  POTIONS,
+  type WeaponId,
+} from "./world-layout";
 import { prop, propModel } from "./asset-store";
 import { WEAPONS, WEAPON_MOUNTS } from "./weapon-spec";
+import { blackGate, flaskModel, armourModel, lootGlow } from "./gear-visuals";
 
 export function heldWeapon(id: WeaponId) {
   const group = new THREE.Group();
@@ -29,9 +37,10 @@ export class LevelProps {
   }[] = [];
   private keys: { object: THREE.Object3D; id: string }[] = [];
   private coins: { object: THREE.Object3D; id: string }[] = [];
+  private potions: { object: THREE.Object3D; id: string }[] = [];
   private doors: {
     object: THREE.Object3D;
-    pivot: THREE.Object3D;
+    pivots: THREE.Object3D[];
     id: string;
   }[] = [];
   private drops: {
@@ -61,6 +70,13 @@ export class LevelProps {
       );
       if (c.weapon === "spear") weapon.position.x = -0.045;
       anchor.add(weapon);
+      if ("armour" in c && c.armour) {
+        const armour = armourModel();
+        armour.scale.setScalar(0.62);
+        armour.rotation.x = -Math.PI / 2;
+        armour.position.set(-0.14, 0.08, 0.02);
+        anchor.add(armour);
+      }
       // The anchor and the decorative cloth/coins are both hidden only after pickup.
       const contents = new THREE.Group();
       loot.parent!.add(contents);
@@ -81,25 +97,43 @@ export class LevelProps {
       const object = prop("coins");
       object.position.set(c.x, c.y + 0.035, c.z);
       object.scale.setScalar(1.6);
+      const glow = lootGlow(0xffedc0);
+      glow.position.y = 0.12;
+      object.add(glow);
       this.root.add(object);
       this.coins.push({ object, id: c.id });
     }
-    for (const d of DOORS) {
-      const object = prop("door");
-      object.position.set(d.x, d.y, d.z);
-      object.scale.set(d.width / 1.5, 1, 1);
-      const pivot = object.getObjectByName("DoorPivot")!;
+    const bottle = flaskModel();
+    const glow = lootGlow(0xcbdedb);
+    glow.position.y = 0.17;
+    bottle.add(glow);
+    for (const p of POTIONS) {
+      const object = bottle.clone(true);
+      object.position.set(p.x, p.y + 0.04, p.z);
+      object.scale.setScalar(1.2);
       this.root.add(object);
-      this.doors.push({ object, pivot, id: d.id });
+      this.potions.push({ object, id: p.id });
+    }
+    for (const d of DOORS) {
+      const object = d.id === "gate" ? blackGate() : prop("door");
+      object.position.set(d.x, d.y, d.z);
+      if (d.id !== "gate") object.scale.set(d.width / 1.5, 1, 1);
+      const pivots =
+        d.id === "gate"
+          ? [
+              object.getObjectByName("GateLeft")!,
+              object.getObjectByName("GateRight")!,
+            ]
+          : [object.getObjectByName("DoorPivot")!];
+      this.root.add(object);
+      this.doors.push({ object, pivots, id: d.id });
     }
     for (let i = 0; i < this.game.drops.length; i++) {
       const object = new THREE.Group(),
         variants = new Map<WeaponId, THREE.Object3D>();
       for (const id of ["sword", "axe", "spear"] as const) {
         const weapon = prop(WEAPONS[id].asset);
-        weapon.scale.setScalar(
-          id === "spear" ? 0.7 : id === "axe" ? 0.86 : 0.79,
-        );
+        weapon.scale.setScalar(WEAPON_MOUNTS[id].scale);
         weapon.rotation.set(Math.PI / 2, 0.25, Math.PI / 2);
         weapon.visible = false;
         object.add(weapon);
@@ -128,7 +162,8 @@ export class LevelProps {
       c.lid.rotation.x = 0;
       c.loot.visible = true;
     }
-    for (const d of this.doors) d.pivot.rotation.y = 0;
+    for (const d of this.doors)
+      for (const pivot of d.pivots) pivot.rotation.y = 0;
     this.mimicAction?.stop();
     this.mimicName = "";
     this.mimic.rotation.set(0, 0, 0);
@@ -171,13 +206,27 @@ export class LevelProps {
       c.object.visible =
         !g.collectedCoins.has(c.id) &&
         Math.abs(c.object.position.z - g.player.z) < 24;
+    for (const p of this.potions) {
+      p.object.visible =
+        !g.collectedPotions.has(p.id) &&
+        Math.abs(p.object.position.z - g.player.z) < 30;
+      const sprite = p.object.children.find(
+        (o) => o instanceof THREE.Sprite,
+      ) as THREE.Sprite;
+      if (sprite)
+        sprite.material.opacity =
+          0.65 + Math.sin(time * 2 + p.object.position.x) * 0.15;
+    }
     for (const d of this.doors)
-      d.pivot.rotation.y = THREE.MathUtils.damp(
-        d.pivot.rotation.y,
-        g.openDoors.has(d.id) ? -1.65 : 0,
-        4,
-        dt,
-      );
+      for (let i = 0; i < d.pivots.length; i++)
+        d.pivots[i].rotation.y = THREE.MathUtils.damp(
+          d.pivots[i].rotation.y,
+          g.openDoors.has(d.id)
+            ? (g.doorSwing.get(d.id) ?? 1) * (i === 1 ? -1 : 1) * 1.65
+            : 0,
+          4,
+          dt,
+        );
     for (let i = 0; i < this.drops.length; i++) {
       const slot = g.drops[i],
         view = this.drops[i];
@@ -226,8 +275,11 @@ export class LevelProps {
   }
   inspect() {
     const p = this.game.player;
+    if (!this.game.inspecting || p.mode === "hit" || p.mode === "dead")
+      return null;
     for (const c of CHESTS)
       if (
+        this.game.inspecting === c.id &&
         this.game.openedChests.has(c.id) &&
         !this.game.lootedChests.has(c.id) &&
         Math.abs(c.y - p.y) < 0.8 &&
