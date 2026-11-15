@@ -1,0 +1,30 @@
+name: Prototype checks
+on:
+  push:
+    branches: [dev, master, 'feat/**', 'fix/**']
+  pull_request:
+    branches: [dev, master]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+      - run: docker compose --profile test run --build --rm tests
+      - run: docker compose up -d --build --wait
+      - run: curl --fail http://localhost:8085/api/health
+      - run: curl --fail http://localhost:8085/ > /dev/null
+      - run: docker compose -p new0-smoke -f compose.yaml -f tests/compose.smoke.yaml up -d --no-build --wait
+      - run: python3 scripts/smoke_api.py
+      - if: always()
+        run: |
+          docker compose -p new0-smoke -f compose.yaml -f tests/compose.smoke.yaml down -v
+          docker compose down
