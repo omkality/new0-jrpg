@@ -133,6 +133,22 @@ export class Input {
       });
     }
   }
+  bindGuard(element: HTMLElement) {
+    element.addEventListener("pointerdown", (e) => {
+      if (!this.enabled) return;
+      this.guarding = true;
+      this.guardPointer = e.pointerId;
+      element.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"])
+      element.addEventListener(name, (e) => {
+        if ((e as PointerEvent).pointerId === this.guardPointer) {
+          this.guarding = false;
+          this.guardPointer = null;
+        }
+      });
+  }
   axis() {
     if (!this.enabled) return { x: 0, y: 0 };
     let x =

@@ -159,3 +159,18 @@ test("a tap attacks, dragging only looks, and cancelled right mouse releases gua
   dispatch(canvas, "pointercancel", { pointerId: 3, button: -1 });
   assert.equal(input.guarding, false);
 });
+
+test("touch guard is independent of the movement stick and releases on lost capture", () => {
+  const { input, joystick } = setup(),
+    shield = new FakeElement();
+  input.bindGuard(shield);
+  dispatch(joystick, "pointerdown", { pointerId: 1, clientX: 50, clientY: 0 });
+  dispatch(shield, "pointerdown", { pointerId: 2 });
+  assert.equal(input.guarding, true);
+  assert.equal(input.axis().y, -1);
+  dispatch(shield, "lostpointercapture", { pointerId: 2 });
+  assert.equal(input.guarding, false);
+  assert.equal(input.axis().y, -1);
+  dispatch(joystick, "pointerup", { pointerId: 1 });
+  assert.deepEqual(input.axis(), { x: 0, y: 0 });
+});

@@ -59,9 +59,38 @@ a {
 }
 #world {
   touch-action: none;
+  outline:none;
 }
 #hud {
   pointer-events: none;
+}
+#atmosphere {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+  opacity: 0.16;
+}
+.encounter-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 10px;
+  color: #c3c7bb;
+  margin-top: 12px;
+}
+.encounter-label select,
+#review select {
+  font: inherit;
+  color: #d8d7c9;
+  background: #1c2827;
+  border: 1px solid #9aa49360;
+  padding: 6px 10px;
+  min-width: 160px;
 }
 .hidden {
   display: none !important;
@@ -302,6 +331,20 @@ p {
   width: 61px;
   height: 61px;
   margin-bottom: 3px;
+}
+.touch-actions #guard {
+  position: absolute;
+  right: 5px;
+  bottom: 98px;
+  width: 59px;
+  height: 59px;
+}
+.touch-actions #guard[aria-pressed="true"] {
+  background: #bec9ab60;
+  border-color: #e6e9cb;
+}
+.touch-actions #guard.locked {
+  opacity: 0.42;
 }
 .touch-actions button:active {
   background: #d9d5b963;
