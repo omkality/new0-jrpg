@@ -5,7 +5,7 @@ import { Campaign } from "./campaign";
 import { ENCOUNTERS, type AreaId } from "./world-layout";
 import type { GameEvent } from "./game";
 import { LevelProps } from "./level-props";
-import { cameraClearance } from "./camera-clearance";
+import { cameraClearance, FollowCameraClearance } from "./camera-clearance";
 import {
   loadProps,
   modelCacheSize,
@@ -33,6 +33,8 @@ export class World {
   private desiredAim = new THREE.Vector3();
   private desiredPosition = new THREE.Vector3();
   private cameraFocus = new THREE.Vector3();
+  private cameraSolver = new FollowCameraClearance();
+  private cameraBounds = { minX: -7.1, maxX: 7.1, maxY: Infinity };
   private fogColor = new THREE.Color();
   private playerFill = new THREE.PointLight(0xcdd8e4, 2.2, 4.2, 2);
   private shadows: THREE.Mesh[] = [];
@@ -161,9 +163,13 @@ export class World {
     this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.002, -0.2, 0.65);
   }
   moveAxis(axis: { x: number; y: number }) {
+    const viewYaw = Math.atan2(
+      this.camera.position.x - this.aim.x,
+      this.camera.position.z - this.aim.z,
+    );
     return {
-      x: axis.x * Math.cos(this.yaw) + axis.y * Math.sin(this.yaw),
-      z: -axis.x * Math.sin(this.yaw) + axis.y * Math.cos(this.yaw),
+      x: axis.x * Math.cos(viewYaw) + axis.y * Math.sin(viewYaw),
+      z: -axis.x * Math.sin(viewYaw) + axis.y * Math.cos(viewYaw),
     };
   }
   resize() {
@@ -241,34 +247,30 @@ export class World {
       );
       this.playerFill.intensity = 7;
     } else this.playerFill.intensity = 2.2;
-    if (p.y > 4.9 && this.location === "chapel") {
-      this.desiredPosition.x = THREE.MathUtils.clamp(
-        this.desiredPosition.x,
-        3.7,
-        5.9, // The east window's 32 cm stone frame projects into the room.
-      );
-      this.desiredPosition.y = Math.min(this.desiredPosition.y, 8.6);
-    }
-    // Keep the camera in the playable corridor and under low crypt ceilings.
-    this.desiredPosition.x = THREE.MathUtils.clamp(
-      this.desiredPosition.x,
-      -7.1,
-      7.1,
-    );
-    if (this.location === "crypt")
-      this.desiredPosition.y = Math.min(this.desiredPosition.y, 6.35);
     const alpha = 1 - Math.exp(-dt * 8);
-    this.cameraFocus.set(p.x, p.y + 1.2, p.z);
+    // Cast from head height so a waist-high chest cannot pull the camera
+    // into the hero's shoulder while walking around it.
+    this.cameraFocus.set(p.x, p.y + 1.55, p.z);
     if (inspect) this.cameraFocus.copy(this.desiredAim);
-    this.desiredPosition.lerpVectors(
+    this.cameraBounds.minX =
+      p.y > 4.9 && this.location === "chapel" ? 3.7 : -7.1;
+    this.cameraBounds.maxX =
+      // The east window's 32 cm frame projects into the upper room.
+      p.y > 4.9 && this.location === "chapel" ? 5.9 : 7.1;
+    this.cameraBounds.maxY =
+      p.y > 4.9 && this.location === "chapel"
+        ? 8.6
+        : this.location === "crypt"
+          ? 6.35
+          : Infinity;
+    this.cameraSolver.resolve(
       this.cameraFocus,
       this.desiredPosition,
-      cameraClearance(
-        this.cameraFocus,
-        this.desiredPosition,
-        this.game.obstacles,
-        this.game.openDoors,
-      ),
+      this.desiredPosition,
+      this.game.obstacles,
+      this.game.openDoors,
+      this.cameraBounds,
+      this.position,
     );
     if (this.wasInspecting && !inspect && p.mode === "hit") {
       this.aim.copy(this.desiredAim);
@@ -287,6 +289,8 @@ export class World {
         this.game.openDoors,
       ),
     );
+    if (this.position.distanceTo(this.cameraFocus) < 1.6)
+      this.position.copy(this.desiredPosition);
     this.camera.position.copy(this.position);
     this.cameraKick *= Math.exp(-dt * 30);
     this.camera.position.x += Math.sin(this.elapsed * 67) * this.cameraKick;

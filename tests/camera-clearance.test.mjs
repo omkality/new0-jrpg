@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cameraClearance } from "../src/camera-clearance.ts";
+import {
+  cameraClearance,
+  FollowCameraClearance,
+} from "../src/camera-clearance.ts";
 import { OBSTACLES } from "../src/world-layout.ts";
 const wall = { x: 2, z: 0, hx: 0.2, hz: 4, minY: 0, maxY: 4 };
 test("the follow camera stays on the player side of a wide room wall", () => {
@@ -20,6 +23,49 @@ test("the follow camera stays on the player side of a wide room wall", () => {
       new Set(),
     ),
     1,
+  );
+});
+
+test("a blocked follow camera chooses a clear side instead of entering the character", () => {
+  const solver = new FollowCameraClearance(),
+    focus = { x: 0, y: 1.55, z: 0 },
+    desired = { x: 0, y: 2.65, z: 4 },
+    result = { ...desired };
+  const walls = [{ x: 0, z: 2, hx: 6, hz: 0.2, minY: 0, maxY: 4 }];
+  solver.resolve(
+    focus,
+    desired,
+    result,
+    walls,
+    new Set(),
+    { minX: -7, maxX: 7, maxY: 6 },
+    desired,
+  );
+  assert.ok(
+    Math.hypot(result.x - focus.x, result.y - focus.y, result.z - focus.z) > 2,
+  );
+  assert.equal(cameraClearance(focus, result, walls, new Set()), 1);
+  assert.ok(result.z < 1.8);
+});
+
+test("a camera facing the corridor edge retains its orbit distance after the horizontal clamp", () => {
+  const solver = new FollowCameraClearance(),
+    focus = { x: 6.5, y: 1.55, z: 0 },
+    desired = { x: 10.4, y: 2.65, z: 0 },
+    result = { ...desired };
+  solver.resolve(
+    focus,
+    desired,
+    result,
+    [],
+    new Set(),
+    { minX: -7.1, maxX: 7.1, maxY: 6 },
+    desired,
+  );
+  assert.ok(result.x <= 7.1);
+  assert.ok(
+    Math.hypot(result.x - focus.x, result.y - focus.y, result.z - focus.z) >
+      2.2,
   );
 });
 
