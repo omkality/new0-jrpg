@@ -28,6 +28,48 @@ def login(c,user_id=42):
     return {"Authorization":"Bearer "+r.json()["token"]}
 
 
+def device_payload():
+    return {"protocol":"device-check-1", "platform":"ios", "telegram_version":"9.2",
+            "viewport_width":390, "viewport_height":844, "touch_points":5,
+            "controls_fit":True, "errors":0, "context_losses":0, "interrupted":False,
+            "stages":[{"location":"chapel", "seconds":14.0, "frames":840, "fps":60.0,
+                       "p95_ms":16.7, "over_25_ms":0, "over_50_ms":0, "completed":True, "render_scale":1.0}]}
+
+
+def test_device_reports_require_identity_and_are_owner_only(client):
+    assert client.post('/api/diagnostics',json=device_payload()).status_code==401
+    h=login(client)
+    result=client.post('/api/diagnostics',headers=h,json=device_payload())
+    assert result.status_code==200
+    report_id=result.json()['id']
+    assert client.get('/api/diagnostics/'+report_id,headers=h).json()==device_payload()
+    assert client.get('/api/diagnostics/'+report_id,headers=login(client,43)).status_code==404
+    assert client.post('/api/diagnostics',headers=h,json=device_payload()).status_code==429
+    with client.app.state.db.connect() as c:
+        assert c.execute('SELECT COUNT(*) FROM runs').fetchone()[0]==0
+
+
+def test_device_reports_reject_unbounded_fields_and_expire(client,settings):
+    h=login(client)
+    bad={**device_payload(), 'score':999999}
+    assert client.post('/api/diagnostics',headers=h,json=bad).status_code==422
+    bad={**device_payload(), 'platform':'x'*100}
+    assert client.post('/api/diagnostics',headers=h,json=bad).status_code==422
+    r=client.post('/api/diagnostics',headers=h,json=device_payload())
+    report_id=r.json()['id']
+    with client.app.state.db.connect(write=True) as c:
+        c.execute('UPDATE device_reports SET created_at=?',(time.time()-settings.diagnostic_ttl-1,))
+    assert client.get('/api/diagnostics/'+report_id,headers=h).status_code==404
+
+
+def test_links_and_bot_are_runtime_configuration(client,settings):
+    with TestClient(create_app(replace(settings,shop_url='https://example.org/shop',drop_url='https://example.org/drop',bot_username='other_bot'))) as c:
+        config=c.get('/api/config').json()
+        assert config['shop_url']=='https://example.org/shop'
+        assert config['drop_url']=='https://example.org/drop'
+        assert config['bot_username']=='other_bot'
+
+
 def new_run(c,headers):
     r=c.post("/api/runs",json={},headers=headers)
     assert r.status_code==200,r.text

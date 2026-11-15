@@ -4,6 +4,8 @@ These animation-only GLB clips were authored for this prototype using bone poses
 world-axis forward kinematics, two-bone arm/leg inverse kinematics, planted-foot
 targets, smooth interpolation and weighted skinned-surface floor checks.
 They contain no external motion capture or animation extracted from another game.
+The current authoring revision is **v2**, with a continuous three-hit target curve,
+per-sample IK and separate standalone recovery branches.
 
 The source rig and reference Idle pose come from the CC0 Patch knight:
 https://patch.gg/create/toolbox/assets/anymove:knight
@@ -41,9 +43,9 @@ review in the application.
 
 | Clip | Duration | Motion |
 | --- | ---: | --- |
-| Attack1 | 0.58 s | Prepared diagonal cut from the right, hip/chest rotation, forward transfer |
-| Attack2 | 0.55 s | Reverse backhand cut, opposite hip/chest rotation and follow-through |
-| Attack3 | 0.85 s | Longer overhead preparation, committed finishing cut and recovery |
+| Attack1 | 0.74 s | Hip-led diagonal cut with anticipation, sharp contact and standalone recovery |
+| Attack2 | 0.70 s | Reverse cut beginning in Attack1 follow-through, opposite torso rotation |
+| Attack3 | 1.00 s | Overhead finisher beginning in Attack2 follow-through, longer recovery |
 | DodgeLeft | 0.52 s | Lateral crouch and weight shift to the left |
 | DodgeRight | 0.52 s | Opposite lateral crouch and weight shift |
 | DodgeBack | 0.52 s | Compact retreat with bent knees and protected torso |
@@ -55,22 +57,27 @@ review in the application.
 | BlockHit | 0.32 s | Short defensive recoil while retaining the guard |
 | Death | 1.60 s | Previously authored collapse, normal scale and held ground pose |
 
-Suggested active contact times are **0.235 s**, **0.220 s** and **0.340 s** for
-Attack1, Attack2 and Attack3. Gameplay decides hit windows, stamina and combo
-lockouts. The animation file does not impose or bypass gameplay rules.
+Active contact times are **0.300 s**, **0.270 s** and **0.420 s** for Attack1,
+Attack2 and Attack3. Combo transition times are **0.520 s** from Attack1 to
+Attack2, and **0.510 s** from Attack2 to Attack3. Attack2(0) matches Attack1(.52),
+and Attack3(0) matches Attack2(.51). These boundaries retain moving follow-through
+instead of resetting to Guard. Standalone recovery continues to the full duration.
+The exact contract is also stored in `contract.json`. Gameplay decides input
+windows, stamina, hit detection and block lockouts.
 
 Weapon attachment: `hand_R`, local grip `(0, 0.06, 0)`, blade along local `-Z`,
 crossguard along local `X`. A sword built along local `+Y` must rotate `X = -PI/2`.
 The dodge animations are in-place. Movement belongs to the game controller.
 
-Structural checks sample the original weighted skin at 60 Hz and raise the pelvis
-if needed to keep the deformed surface approximately 12 mm above the floor.
+The authored targets are solved with IK at the 60 Hz export grid and at exact
+contact/link landmarks. Ground alignment keeps the working poses approximately
+12 mm above the floor. The previously authored Death tracks are copied unchanged
+from the versioned seeds, including the source rig's approximately 3.6 mm initial
+rest-pose intersection. The prepared prisoner/gaoler profiles remain above ground.
 Retargeting to another mesh changes limb lengths and surface bounds, so the
 resulting silhouette, grip and ground contact must be reviewed in the game.
 These are authored prototype motion variants and still require visual polish.
 
-Reproducible authoring files are retained in the local work folder:
-`work/assets-v3/tools/author-combat-variants.mjs`, `combat-variants-body.mjs` and
-`work/assets-v3/combat-variants-report.json`. Character-specific preparation uses
-`work/assets-v3/tools/retarget-combat-cast.mjs`; its report is
-`work/assets-v3/cast-combat-retarget-report.json`.
+Reproducible authoring code and pinned development dependencies are versioned in
+`scripts/assets/`. Its README documents the commands, reference assets, Death
+seeds and numerical checks. Reports are written to `work/asset-authoring/`.

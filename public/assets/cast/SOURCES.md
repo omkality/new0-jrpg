@@ -21,9 +21,9 @@ The anymove software repository is Apache-2.0. This is separate from Patch's CC0
 
 | File | Bytes | Triangles | Vertices | Materials | Mesh primitives |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `prisoner.glb` | 1324980 | 18010 | 11908 | 5 | 7 |
+| `prisoner.glb` | 1289664 | 17093 | 11437 | 5 | 7 |
 | `gaoler.glb` | 1338752 | 18730 | 12522 | 1 | 1 |
-| `watcher.glb` | 1303028 | 17454 | 11568 | 2 | 4 |
+| `watcher.glb` | 1267704 | 16537 | 11097 | 2 | 4 |
 
 Every file contains one skin and the same 22 joint names as the earlier knight. Source PBR images were resized to **1024x1024**. The added cloth uses an original **64x64** woven-noise image. Images are embedded. No special geometry decoder is required.
 
@@ -59,5 +59,9 @@ Exact source/target joint translations and quaternions: `work/assets-v4/rest-com
 ## Preparation and verification
 
 Script: `work/assets-v3/tools/prepare-cast-v4.mjs`. Simplification uses glTF Transform/meshoptimizer. Added garments, masks, veil and cloth texture are original scripted geometry made with AI-assisted code in this workspace. No claim of human hand modelling is made.
+
+The shared source topknot was retained inside the original body primitive and protruded from the head cloth. It has now been removed from both prisoner and watcher rather than enlarging their head coverings. The targeted operation removed 917 rear upper-head hair triangles and compacted 471 unused body vertices from each model. The visible front face, separate mask/garment geometry, materials, textures, node hierarchy, 22-bone rest transforms, inverse-bind matrices and animation accessor data are preserved. The gaoler file was not changed.
+
+Portable reproducible fix, requiring only Node.js: `node scripts/assets/remove-hidden-hair.mjs`. Regression check: `node scripts/assets/remove-hidden-hair.mjs --check`. It is also invoked by the original preparation pipeline so regenerating these derivatives does not restore the hidden hair. The machine-independent helper contains no runtime geometry/image dependencies. The operation and preservation evidence are recorded in `work/assets-v4/hair-fix-report.json`; before-fix GLB backups are in the same working directory.
 
 Source previews were visually inspected and saved as `work/assets-v4/woman.webp` and `ogre.webp`. Derivative viewer: `work/assets-v4/preview.html`, served by `serve-preview.mjs` in the same directory. Structure, licenses, skin references, counts and native clips were inspected. All three enemy profiles were subsequently reviewed in the running game, including their different silhouettes. The full combat capture was inspected for the gaoler. Extreme garment intersections and the final animation quality still need further visual polish.

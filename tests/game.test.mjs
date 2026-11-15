@@ -1,9 +1,42 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { CombatGame, ATTACKS } from "../src/game.ts";
 import { Showcase } from "../src/showcase.ts";
 
 const still = { x: 0, z: 0, guard: false };
+test("gameplay contact and chain links match the authored animation contract", () => {
+  const contract = JSON.parse(
+    readFileSync(
+      new URL("../public/assets/motion/contract.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  for (let i = 0; i < 3; i++) {
+    const clip = contract.attacks["Attack" + (i + 1)];
+    assert.equal(ATTACKS[i].duration, clip.duration);
+    assert.equal(ATTACKS[i].contact, clip.contact);
+    if (clip.link !== null) assert.equal(ATTACKS[i].link, clip.link);
+  }
+});
+test("queued combo follows through before solo recovery ends, contact hold does not skip a hit", () => {
+  const g = new CombatGame();
+  g.start();
+  g.attack();
+  advance(g, 0.12);
+  g.attack();
+  advance(g, 0.42);
+  assert.equal(g.player.combo, 2);
+  assert.ok(g.player.time < 0.06);
+  const solo = new CombatGame();
+  solo.start();
+  solo.attack();
+  advance(solo, 0.54);
+  assert.equal(solo.player.combo, 1);
+  assert.equal(solo.player.mode, "attack");
+  advance(solo, 0.25);
+  assert.equal(solo.player.mode, "idle");
+});
 test("review input driver demonstrates all three attacks, a block, a dodge and wins normally", () => {
   const g = new CombatGame();
   g.start();
@@ -22,6 +55,8 @@ test("review input driver demonstrates all three attacks, a block, a dodge and w
   assert.ok(blocked);
   assert.ok(dodged);
   assert.equal(g.phase, "finished");
+  assert.equal(g.player.mode,"idle");
+  assert.equal(g.player.speed,0);
 });
 function advance(g, seconds, input = still) {
   for (let n = 0; n < Math.round(seconds * 120); n++) g.update(1 / 120, input);
@@ -145,7 +180,7 @@ test("dodge pressed during an attack is buffered until the early recovery window
   advance(g, 0.08);
   g.dodge({ x: 1, z: 0 });
   assert.equal(g.player.mode, "attack");
-  advance(g, 0.25);
+  advance(g, 0.42);
   assert.equal(g.player.mode, "dodge");
 });
 test("enemy telegraphs before an attack, death stays on the ground and retry resets", () => {

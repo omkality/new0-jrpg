@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import {
+  LocationStage,
+  LOCATIONS,
+  LOCATION_IDS,
+  type LocationId,
+} from "./locations";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Actor } from "./actor";
 import { CombatGame, ATTACKS, type GameEvent } from "./game";
@@ -7,23 +12,25 @@ import { CombatGame, ATTACKS, type GameEvent } from "./game";
 export class World {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(60, 1, 0.08, 60);
+  camera = new THREE.PerspectiveCamera(60, 1, 0.08, 110);
   player = new Actor();
   enemy = new Actor(true);
   yaw = 0;
   pitch = 0.08;
   resolution = 1;
   device = "";
-  private flickerLights: THREE.PointLight[] = [];
+  location: LocationId = "chapel";
+  private stages = new Map<LocationId, LocationStage>();
+  private get stage() {
+    return this.stages.get(this.location)!;
+  }
   private playerFill = new THREE.PointLight(0x8caaa8, 3.4, 5.2, 2);
-  private flames: THREE.Mesh[] = [];
-  private beamMaterials: THREE.MeshBasicMaterial[] = [];
-  private gate = new THREE.Group();
+
   private aim = new THREE.Vector3(0, 1.2, 4.4);
   private position = new THREE.Vector3(0.35, 2.3, 8.8);
   private desiredAim = new THREE.Vector3();
   private desiredPosition = new THREE.Vector3();
-  private batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
+
   private elapsed = 0;
   private readyTextures: Promise<void>;
   private warning: THREE.Mesh;
@@ -33,6 +40,7 @@ export class World {
   private trailStage = 0;
   private impact: THREE.Sprite;
   private impactLife = 0;
+  private cameraKick = 0;
   private blobs: THREE.Mesh[] = [];
   constructor(
     private canvas: HTMLCanvasElement,
@@ -55,152 +63,24 @@ export class World {
     this.renderer.toneMappingExposure = 1.0;
     // No real-time shadow maps. Static vertex shading + soft contact patches.
     this.renderer.shadowMap.enabled = false;
-    this.scene.background = new THREE.Color(0x111a20);
-    this.scene.fog = new THREE.FogExp2(0x111a20, 0.077);
-    this.scene.add(new THREE.HemisphereLight(0x8ca6b2, 0x191b1e, 0.32));
-    const sun = new THREE.DirectionalLight(0x9fbac6, 0.62);
-    sun.position.set(-4, 8, 2);
-    this.scene.add(sun);
-    const warm = new THREE.DirectionalLight(0xc5a581, 0.12);
-    warm.position.set(4, 3, -5);
-    this.scene.add(warm);
     this.scene.add(this.playerFill);
     const manager = new THREE.LoadingManager();
-    this.readyTextures = new Promise((resolve) => {
+    this.readyTextures = new Promise((resolve, reject) => {
       manager.onLoad = () => resolve();
+      manager.onError = (url) =>
+        reject(new Error(`Не удалось загрузить материал: ${url}`));
     });
     const loader = new THREE.TextureLoader(manager);
-    const material = (name: string, rx: number, ry: number, tint: number) => {
-      const map = loader.load(`/assets/dungeon/${name}.png`);
-      map.colorSpace = THREE.SRGBColorSpace;
-      map.wrapS = map.wrapT = THREE.RepeatWrapping;
-      map.repeat.set(rx, ry);
-      map.anisotropy = Math.min(
-        4,
+    for (const id of LOCATION_IDS) {
+      const stage = new LocationStage(
+        id,
+        loader,
         this.renderer.capabilities.getMaxAnisotropy(),
       );
-      return new THREE.MeshStandardMaterial({
-        map,
-        color: tint,
-        roughness: 1,
-        metalness: 0,
-        vertexColors: true,
-      });
-    };
-    const wall = material("TEX_Wall_03", 5, 3, 0xc2ccd2);
-    const side = material("TEX_Wall_03", 7, 3, 0xb5c1cd);
-    const stone = material("TEX_Arch_02", 1, 1, 0xe9e6da);
-    const column = material("TEX_Pillar_01", 1, 2, 0xe0e5df);
-    const floor = material("TEX_Ground_04", 12, 17, 0xc0c8cd);
-    floor.bumpMap = floor.map;
-    floor.bumpScale = 0.055;
-    const metal = new THREE.MeshStandardMaterial({
-      color: 0x6e7776,
-      roughness: 0.8,
-      metalness: 0.35,
-      vertexColors: true,
-    });
-    const dark = new THREE.MeshStandardMaterial({
-      color: 0x383c3c,
-      roughness: 1,
-      vertexColors: true,
-    });
-    const floorMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(12.8, 24, 40, 70),
-      floor,
-    );
-    floorMesh.rotation.x = -Math.PI / 2;
-    floorMesh.position.z = -1.6;
-    this.part(floorMesh);
-    this.box(3.9, 8.5, 0.5, -4.4, 4.25, -8.5, wall);
-    this.box(3.9, 8.5, 0.5, 4.4, 4.25, -8.5, wall);
-    this.box(4.9, 3.3, 0.5, 0, 6.85, -8.5, wall);
-    this.box(0.5, 8.5, 20, -6.25, 4.25, 0, side);
-    this.box(0.5, 8.5, 20, 6.25, 4.25, 0, side);
-    this.box(12.8, 8.5, 0.5, 0, 4.25, 9, wall);
-    this.box(12.8, 0.3, 20, 0, 8.3, 0, dark);
-    // Raised side aisles, rounded columns, capitals and double moulded arches.
-    for (const x of [-4.2, 4.2])
-      for (const z of [-7, 0, 6.7]) {
-        this.cylinder(0.31, 0.36, 3.8, 24, x, 1.9, z, column);
-        this.cylinder(0.52, 0.58, 0.22, 24, x, 0.11, z, stone);
-        this.cylinder(0.52, 0.42, 0.2, 24, x, 3.78, z, stone);
-        this.cylinder(0.45, 0.54, 0.13, 24, x, 0.28, z, stone);
-        this.game.obstacles.push({ x, z, hx: 0.38, hz: 0.38 });
-      }
-    for (const z of [-7, 0, 6.7]) {
-      this.arch(4.22, 3.85, 0.28, z, stone);
-      this.arch(4.32, 3.85, 0.08, z + 0.18, stone);
-      for (const x of [-5.3, 5.3]) this.box(2, 0.24, 0.85, x, 3.86, z, stone);
+      this.stages.set(id, stage);
+      this.scene.add(stage.group);
     }
-    for (const x of [-5.97, 5.97])
-      for (const z of [-5, 3.7]) {
-        this.box(0.12, 2.7, 2.45, x, 1.55, z, dark);
-        this.box(0.24, 0.19, 2.75, x, 2.97, z, stone);
-        this.box(0.25, 0.18, 2.75, x, 0.2, z, stone);
-      }
-    // Pale clerestory openings make the room readable, with dark recesses below.
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0x53666c });
-    for (const sideSign of [-1, 1])
-      for (const z of [-3.8, 4.7]) {
-        const window = new THREE.Mesh(
-          new THREE.PlaneGeometry(2, 2.6),
-          lightMat,
-        );
-        window.position.set(sideSign * 5.96, 4.35, z);
-        window.rotation.y = sideSign < 0 ? Math.PI / 2 : -Math.PI / 2;
-        this.scene.add(window);
-        for (const off of [-0.62, 0, 0.62])
-          this.box(0.14, 2.9, 0.1, sideSign * 5.86, 4.35, z + off, stone);
-        this.beam(sideSign, z);
-      }
-    this.arch(2.35, 2.6, 0.38, -8.35, stone);
-    this.box(0.3, 3, 0.4, -2.15, 1.5, -8.35, stone);
-    this.box(0.3, 3, 0.4, 2.15, 1.5, -8.35, stone);
-    this.box(4.3, 0.14, 7, 0, -0.12, -11.6, floor);
-    this.box(0.45, 5, 8, -2.55, 2.5, -12, wall);
-    this.box(0.45, 5, 8, 2.55, 2.5, -12, wall);
-    for (let x = -1.9; x < 2; x += 0.25) {
-      const bar = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.022, 0.022, 4, 6),
-        metal.clone(),
-      );
-      bar.position.set(x, 2, 0);
-      this.gate.add(bar);
-    }
-    for (const y of [0.45, 2.7, 3.6]) {
-      const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(4.1, 0.06, 0.07),
-        metal.clone(),
-      );
-      rail.position.y = y;
-      this.gate.add(rail);
-    }
-    this.gate.position.z = -8.2;
-    this.scene.add(this.gate);
-    this.box(1.5, 0.9, 0.85, -4.1, 0.45, 0.4, stone);
-    this.box(1.7, 0.14, 1, -4.1, 0.96, 0.4, stone);
-    this.box(0.9, 0.6, 0.9, 4.3, 0.3, -4.8, stone);
-    this.cylinder(0.23, 0.34, 0.55, 18, 4.3, 0.85, -4.8, metal);
-    this.game.obstacles.push(
-      { x: -4.1, z: 0.4, hx: 0.85, hz: 0.58 },
-      { x: 4.3, z: -4.8, hx: 0.5, hz: 0.5 },
-    );
-    for (const x of [-5.6, 5.6])
-      for (const z of [-5.9, 2]) this.torch(x, z, metal);
-    for (let i = 0; i < 22; i++) {
-      const x = (i % 2 ? 1 : -1) * (4.9 + Math.sin(i * 9) * 0.45),
-        z = -7 + ((i * 13) % 150) / 10;
-      const rock = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.11 + (i % 3) * 0.06),
-        stone,
-      );
-      rock.position.set(x, 0.09, z);
-      rock.scale.y = 0.6;
-      rock.rotation.set(0.1, i, 0.2);
-      this.part(rock);
-    }
-    this.flush();
+    this.selectLocation("chapel");
     const shadow = new THREE.CanvasTexture(this.radial("#000000", 0.7));
     for (let i = 0; i < 2; i++) {
       const blob = new THREE.Mesh(
@@ -280,110 +160,26 @@ export class World {
     pmrem.dispose();
     this.player.update(0.01, this.game.player);
     this.enemy.update(0.01, this.game.enemy);
-    await this.renderer.compileAsync(this.scene, this.camera);
-  }
-  private part(mesh: THREE.Mesh) {
-    mesh.updateMatrix();
-    let g = mesh.geometry.clone();
-    if (g.index) g = g.toNonIndexed();
-    g.applyMatrix4(mesh.matrix);
-    const pos = g.getAttribute("position"),
-      norm = g.getAttribute("normal"),
-      colors = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i),
-        x = pos.getX(i),
-        z = pos.getZ(i);
-      let shade = Math.max(
-        0.42,
-        0.83 +
-          norm.getY(i) * 0.09 +
-          norm.getX(i) * 0.05 -
-          Math.exp(-Math.max(0, y) * 1.8) * 0.15,
-      );
-      if (y < 0.03 && norm.getY(i) > 0.9) {
-        shade = 0.7 - 0.33 * Math.pow(Math.min(1, Math.abs(x) / 6.2), 3);
-        for (const cx of [-4.2, 4.2])
-          for (const cz of [-7, 0, 6.7])
-            shade -= 0.2 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) * 1.5);
-        shade += 0.2 * Math.exp(-((x + 1.6) ** 2 + (z - 3.7) ** 2) / 8);
-      }
-      colors[i * 3] = shade;
-      colors[i * 3 + 1] = shade;
-      colors[i * 3 + 2] = shade;
+    const selected = this.location;
+    for (const id of LOCATION_IDS) {
+      this.selectLocation(id);
+      await this.renderer.compileAsync(this.scene, this.camera);
     }
-    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    const m = mesh.material as THREE.Material;
-    const list = this.batches.get(m) ?? [];
-    list.push(g);
-    this.batches.set(m, list);
+    this.selectLocation(selected);
   }
-  private flush() {
-    for (const [mat, geos] of this.batches) {
-      const g = mergeGeometries(geos);
-      if (g) this.scene.add(new THREE.Mesh(g, mat));
-      for (const old of geos) old.dispose();
-    }
-    this.batches.clear();
-  }
-  private box(
-    w: number,
-    h: number,
-    d: number,
-    x: number,
-    y: number,
-    z: number,
-    m: THREE.Material,
-  ) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-    mesh.position.set(x, y, z);
-    this.part(mesh);
-  }
-  private cylinder(
-    rt: number,
-    rb: number,
-    h: number,
-    n: number,
-    x: number,
-    y: number,
-    z: number,
-    m: THREE.Material,
-  ) {
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, n), m);
-    mesh.position.set(x, y, z);
-    this.part(mesh);
-  }
-  private arch(
-    r: number,
-    stem: number,
-    width: number,
-    z: number,
-    m: THREE.Material,
-  ) {
-    const s = new THREE.Shape(),
-      inner = r - width;
-    s.moveTo(-r, 0);
-    s.lineTo(-r, stem);
-    s.absarc(0, stem, r, Math.PI, 0, true);
-    s.lineTo(r, 0);
-    s.lineTo(inner, 0);
-    s.lineTo(inner, stem);
-    s.absarc(0, stem, inner, 0, Math.PI, false);
-    s.lineTo(-inner, 0);
-    s.closePath();
-    const mesh = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(s, {
-        depth: 0.35,
-        bevelEnabled: true,
-        bevelSize: 0.035,
-        bevelThickness: 0.035,
-        bevelSegments: 2,
-        curveSegments: 28,
-      }),
-      m,
-    );
-    mesh.position.z = z;
-    this.part(mesh);
+  selectLocation(id: LocationId) {
+    this.location = id;
+    for (const [key, stage] of this.stages) stage.group.visible = key === id;
+    const spec = LOCATIONS[id];
+    this.scene.background = this.stage.background;
+    this.scene.fog = new THREE.FogExp2(spec.fog, spec.density);
+    this.playerFill.color.set(spec.fill);
+    this.game.obstacles = this.stage.obstacles;
+    this.stage.gate.position.y = 0;
+    this.aim.set(0, 1.2, 4.4);
+    this.position.set(0.35, 2.3, 8.8);
+    this.trailPoints = [];
+    this.trailStage = 0;
   }
   private radial(color: string, alpha: number) {
     const c = document.createElement("canvas");
@@ -396,180 +192,6 @@ export class World {
     x.fillStyle = g;
     x.fillRect(0, 0, 64, 64);
     return c;
-  }
-  private beam(sign: number, z: number) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(
-        [
-          sign * 5.8,
-          5.6,
-          z - 1,
-          sign * 5.8,
-          3.2,
-          z + 1,
-          sign * 0.4,
-          0.05,
-          z + 3.8,
-          sign * 5.8,
-          5.6,
-          z - 1,
-          sign * 0.4,
-          0.05,
-          z + 3.8,
-          sign * 2,
-          0.05,
-          z + 1.5,
-        ],
-        3,
-      ),
-    );
-    g.computeVertexNormals();
-    g.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0], 2),
-    );
-    const canvas = document.createElement("canvas");
-    canvas.width = 64;
-    canvas.height = 128;
-    const ctx = canvas.getContext("2d")!,
-      pixels = ctx.createImageData(64, 128);
-    for (let y = 0; y < 128; y++)
-      for (let x = 0; x < 64; x++) {
-        const u = (x + 0.5) / 64,
-          v = 1 - y / 128,
-          a =
-            Math.pow(Math.sin(u * Math.PI), 2) *
-            Math.sin(v * Math.PI * 0.9) *
-            0.85;
-        pixels.data.set([255, 255, 255, Math.round(a * 255)], (y * 64 + x) * 4);
-      }
-    ctx.putImageData(pixels, 0, 0);
-    const material = new THREE.MeshBasicMaterial({
-      map: new THREE.CanvasTexture(canvas),
-      color: 0x91a9b0,
-      transparent: true,
-      opacity: 0.065,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    this.beamMaterials.push(material);
-    this.scene.add(new THREE.Mesh(g, material));
-  }
-  private torch(x: number, z: number, m: THREE.Material) {
-    const sign = Math.sign(x),
-      wallX = sign * 5.98,
-      tipX = sign * 5.42;
-    const iron = new THREE.MeshStandardMaterial({
-      color: 0x282d2e,
-      roughness: 0.94,
-      metalness: 0.3,
-      vertexColors: true,
-    });
-    const wood = new THREE.MeshStandardMaterial({
-      color: 0x48382c,
-      roughness: 1,
-      vertexColors: true,
-    });
-    const rod = (
-      a: THREE.Vector3,
-      b: THREE.Vector3,
-      r: number,
-      mat: THREE.Material,
-    ) => {
-      const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(r, r, a.distanceTo(b), 10),
-        mat,
-      );
-      mesh.position.copy(a).add(b).multiplyScalar(0.5);
-      mesh.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        b.clone().sub(a).normalize(),
-      );
-      this.part(mesh);
-    };
-    const plate = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.17, 0.17, 0.035, 16),
-      iron,
-    );
-    plate.position.set(wallX, 1.85, z);
-    plate.rotation.z = Math.PI / 2;
-    plate.scale.z = 1.45;
-    this.part(plate);
-    rod(
-      new THREE.Vector3(wallX, 1.87, z),
-      new THREE.Vector3(sign * 5.57, 1.8, z),
-      0.035,
-      iron,
-    );
-    rod(
-      new THREE.Vector3(wallX, 1.58, z),
-      new THREE.Vector3(sign * 5.57, 1.8, z),
-      0.023,
-      iron,
-    );
-    rod(
-      new THREE.Vector3(sign * 5.64, 1.55, z),
-      new THREE.Vector3(tipX, 2.23, z),
-      0.049,
-      wood,
-    );
-    this.cylinder(0.13, 0.085, 0.18, 14, tipX, 2.23, z, iron);
-    for (const dy of [-0.07, 0.07]) {
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.124, 0.018, 5, 16),
-        iron,
-      );
-      band.position.set(tipX, 2.23 + dy, z);
-      band.rotation.x = Math.PI / 2;
-      this.part(band);
-    }
-    for (const side of [-1, 1])
-      rod(
-        new THREE.Vector3(tipX + side * 0.09, 2.17, z),
-        new THREE.Vector3(tipX + side * 0.14, 2.43, z),
-        0.015,
-        iron,
-      );
-    const flame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.075, 0.38, 12),
-      new THREE.MeshBasicMaterial({
-        color: 0xf2a056,
-        transparent: true,
-        opacity: 0.9,
-        toneMapped: false,
-        depthWrite: false,
-      }),
-    );
-    flame.position.set(tipX, 2.47, z);
-    this.scene.add(flame);
-    this.flames.push(flame);
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffdba1, toneMapped: false }),
-    );
-    core.position.set(tipX, 2.35, z);
-    core.scale.y = 2;
-    this.scene.add(core);
-    const glow = new THREE.Sprite(
-      new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(this.radial("#ffd59f", 0.7)),
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    glow.position.copy(flame.position);
-    glow.scale.setScalar(1.1);
-    this.scene.add(glow);
-    {
-      const light = new THREE.PointLight(0xf6b57b, 8, 5.6, 2);
-      light.position.set(tipX * 0.96, 2.46, z);
-      this.scene.add(light);
-      this.flickerLights.push(light);
-    }
   }
   orbit(dx: number, dy: number) {
     this.yaw -= dx * 0.004;
@@ -592,6 +214,12 @@ export class World {
   }
   event(e: GameEvent) {
     if (e.type === "hit" || e.type === "block" || e.type === "hurt") {
+      this.cameraKick =
+        e.type === "block"
+          ? 0.018
+          : this.game.player.combo === 3
+            ? 0.055
+            : 0.03;
       this.impact.position.set(
         e.x,
         e.type === "hit" && this.game.enemy.kind === "gaoler" ? 1.7 : 1.15,
@@ -603,22 +231,7 @@ export class World {
   }
   render(dt: number) {
     this.elapsed += dt;
-    for (let i = 0; i < this.beamMaterials.length; i++)
-      this.beamMaterials[i].opacity =
-        0.065 + Math.sin(this.elapsed * 0.7 + i) * 0.009;
-    for (let i = 0; i < this.flickerLights.length; i++)
-      this.flickerLights[i].intensity =
-        8 +
-        Math.sin(this.elapsed * 12 + i * 3) * 0.45 +
-        Math.sin(this.elapsed * 19 + i) * 0.2;
-    for (let i = 0; i < this.flames.length; i++) {
-      this.flames[i].scale.set(
-        1 + Math.sin(this.elapsed * 14 + i) * 0.07,
-        1 + Math.sin(this.elapsed * 11 + i * 4) * 0.12,
-        1,
-      );
-      this.flames[i].rotation.z = Math.sin(this.elapsed * 7 + i) * 0.07;
-    }
+    this.stage.update(this.elapsed, dt, this.game.enemy.hp <= 0);
     const p = this.game.player,
       e = this.game.enemy;
     this.playerFill.position.set(p.x - 0.3, 2.5, p.z + 0.5);
@@ -677,12 +290,6 @@ export class World {
         this.impactLife / 0.18,
       );
     } else this.impact.visible = false;
-    this.gate.position.y = THREE.MathUtils.damp(
-      this.gate.position.y,
-      e.hp <= 0 ? 4.4 : 0,
-      2,
-      dt,
-    );
     const d = this.camera.aspect < 0.85 ? 4.7 : 3.9;
     this.desiredAim.set(
       p.x - Math.sin(this.yaw) * 0.65,
@@ -708,6 +315,10 @@ export class World {
     this.aim.lerp(this.desiredAim, alpha);
     this.position.lerp(this.desiredPosition, alpha);
     this.camera.position.copy(this.position);
+    this.cameraKick *= Math.exp(-dt * 32);
+    this.camera.position.x += Math.sin(this.elapsed * 73) * this.cameraKick;
+    this.camera.position.y +=
+      Math.cos(this.elapsed * 57) * this.cameraKick * 0.55;
     this.camera.lookAt(this.aim);
     this.renderer.render(this.scene, this.camera);
   }

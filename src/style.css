@@ -95,6 +95,17 @@ a {
 .hidden {
   display: none !important;
 }
+.intro-card .secondary { display:block; margin:18px 0 8px; padding:9px 12px; background:#20332ac0; border:1px solid #aebd9c66; font-size:11px; }
+.check-note { display:block; max-width:300px; line-height:1.5; opacity:.65; }
+#check-progress { position:absolute; z-index:15; top:calc(133px + var(--safe-top)); left:50%; transform:translateX(-50%); width:min(340px,88%); padding:10px 15px; text-align:center; background:#142420e8; border:1px solid #99aa8866; font-size:11px; pointer-events:none; }
+#check-progress strong, #check-progress output, #check-progress span {display:block; margin:4px 0;}
+#check-progress span {font-size:9px;opacity:.7;}
+#check-progress button {pointer-events:auto; font-size:10px; padding:5px 8px; margin:5px 0 0;}
+#check-result {z-index:30;}
+#check-stages {font-size:12px;line-height:1.8;}
+#check-upload {overflow-wrap:anywhere;}
+#check-result .panel {max-height:90dvh;overflow:auto;}
+.intro-card {max-height:100dvh;overflow-y:auto;}
 header {
   position: absolute;
   top: calc(22px + var(--safe-top));

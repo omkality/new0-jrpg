@@ -684,16 +684,20 @@
   },
   "clips": [
     {
+      "name": "Death",
+      "duration": 1.6
+    },
+    {
       "name": "Attack1",
-      "duration": 0.58
+      "duration": 0.74
     },
     {
       "name": "Attack2",
-      "duration": 0.55
+      "duration": 0.7
     },
     {
       "name": "Attack3",
-      "duration": 0.85
+      "duration": 1
     },
     {
       "name": "DodgeLeft",
@@ -733,9 +737,13 @@
     }
   ],
   "contactTimes": {
-    "Attack1": 0.235,
-    "Attack2": 0.22,
-    "Attack3": 0.34
+    "Attack1": 0.3,
+    "Attack2": 0.27,
+    "Attack3": 0.42
   },
-  "retarget": "For identical local joint axes: destinationRestQ * inverse(sourceRestQ) * animatedQ; destinationRestP + (animatedP-sourceRestP)*heightRatio. Validate silhouettes and grip after retargeting."
+  "comboLinkTimes": {
+    "Attack1": 0.52,
+    "Attack2": 0.51
+  },
+  "retarget": "Asset-time native Idle world delta with destination arm/leg IK and weighted skin floor alignment."
 }
