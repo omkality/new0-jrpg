@@ -12,13 +12,20 @@ const tour = new CampaignShowcase(g, "chapel");
 let changes = 0,
   prior = "",
   maxWeight = 0,
-  minWeight = 1;
+  minWeight = 1,
+  priorYaw = 0,
+  chapelTurnTravel = 0;
 for (let frame = 0; frame < 35 * 60; frame++) {
   for (let k = 0; k < 2; k++) {
     g.update(1 / 120, tour.update(1 / 120));
     g.events.length = 0;
   }
   actor.update(1 / 60, g.player);
+  if (frame > 26 * 60 && frame < 31 * 60) {
+    const delta = g.player.yaw - priorYaw;
+    chapelTurnTravel += Math.abs(Math.atan2(Math.sin(delta), Math.cos(delta)));
+  }
+  priorYaw = g.player.yaw;
   const sum = [...s.actions.values()]
     .filter((a) => a.isScheduled() && a.enabled)
     .reduce((n, a) => n + a.getEffectiveWeight(), 0);
@@ -34,6 +41,10 @@ for (let frame = 0; frame < 35 * 60; frame++) {
   }
 }
 assert.ok(changes <= 5, `Chapel locomotion restarts ${changes} times in 2s`);
+assert.ok(
+  chapelTurnTravel < Math.PI * 2,
+  `Chapel retreat spins through ${chapelTurnTravel} radians in 5s`,
+);
 const vertices = [];
 rig.traverse((o) => {
   if (!(o instanceof T.SkinnedMesh) || !o.visible) return;
@@ -107,6 +118,7 @@ await mkdir("work/fixes3", { recursive: true });
 const report = {
   passed: true,
   chapelClipChangesOverTwoSeconds: changes,
+  chapelFacingTravelOverFiveSecondsDegrees: (chapelTurnTravel * 180) / Math.PI,
   actionWeightRange: [minWeight, maxWeight],
   groundedEmptyHandEvades: results,
   usesActualActorAndMixer: true,
