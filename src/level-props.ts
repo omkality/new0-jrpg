@@ -96,9 +96,12 @@ export class LevelProps {
     }
     for (const k of KEYS) {
       const object = prop("key");
-      object.position.set(k.x, k.y + 1.08, k.z);
+      object.position.set(k.x, 0, k.z);
       object.rotation.set(Math.PI / 2, 0, 0.35);
       object.scale.setScalar(1.7);
+      object.updateMatrixWorld(true);
+      object.position.y +=
+        k.surfaceY + 0.004 - new THREE.Box3().setFromObject(object).min.y;
       this.root.add(object);
       this.keys.push({ object, id: k.id });
     }

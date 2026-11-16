@@ -1,14 +1,25 @@
 import * as THREE from "three";
 
 import { clone } from "three/addons/utils/SkeletonUtils.js";
-import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
+import { type Fighter, type EnemyKind } from "./game";
 import { assetUrl } from "./assets";
 import { heldWeapon, attachWeapon } from "./level-props";
 import { loadModel as load } from "./asset-store";
 import type { WeaponId } from "./world-layout";
-import { armourModel, flaskModel } from "./gear-visuals";
+import { armourModel, flaskModel, setFlaskFill } from "./gear-visuals";
+import { FootContact } from "./foot-contact";
+import { SkeletonContinuity } from "./skeleton-continuity";
 import { GearPose } from "./gear-pose";
-import { GearCollision } from "./gear-collision";
+import {
+  applyCharacterAppearance,
+  setArmourCoverage,
+  disposeCharacterAppearance,
+} from "./character-appearance";
+import {
+  motionName,
+  semanticAttackTime,
+  sourceAttackTime,
+} from "./motion-policy";
 import { WEAPON_RELEASE_TIME } from "./weapon-spec";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
@@ -27,7 +38,8 @@ interface RigState {
   armour?: THREE.Group;
   flask?: THREE.Group;
   gear: GearPose;
-  collision?: GearCollision;
+  continuity: SkeletonContinuity;
+  feet: FootContact;
 }
 interface FloorClip {
   duration: number;
@@ -45,6 +57,18 @@ function loadFloor() {
     })
     .then((data) => {
       floorTable = data;
+      return fetch(assetUrl("/assets/motion/fixes1-floor.json"))
+        .then((r) => {
+          if (!r.ok) throw new Error("Motion contact data failed");
+          return r.json();
+        })
+        .then((extra) => {
+          for (const [profile, value] of Object.entries(extra.profiles) as [
+            string,
+            { clips: Record<string, FloorClip> },
+          ][])
+            Object.assign(floorTable.profiles[profile].clips, value.clips);
+        });
     }));
 }
 function contactOffset(profile: string, clip: string, time: number) {
@@ -83,9 +107,10 @@ export class Actor {
       kinds.map(async (kind) => {
         const model = MODELS[kind],
           motion = model === "gaoler" ? "gaoler" : "prisoner";
-        const [gltf, combat] = await Promise.all([
+        const [gltf, combat, fixes] = await Promise.all([
           load(`/assets/cast/${model}.glb`),
           load(`/assets/motion/${motion}-combat.glb`),
+          load(`/assets/motion/${motion}-fixes1.glb`),
         ]);
         const rig = clone(gltf.scene);
         rig.visible = false;
@@ -99,7 +124,7 @@ export class Actor {
             m.envMapIntensity = 0.2;
             m.color.set(
               kind === "pilgrim"
-                ? 0xd5d9d6
+                ? 0x9eaaa5
                 : kind === "effigy"
                   ? 0xb5c3b9
                   : kind === "gaoler"
@@ -110,10 +135,10 @@ export class Actor {
               m.color.set(
                 /trousers/.test(o.name)
                   ? kind === "pilgrim"
-                    ? 0x818b85
+                    ? 0x555e58
                     : 0x515c57
                   : kind === "pilgrim"
-                    ? 0xe4e6dc
+                    ? 0xc3c5b7
                     : 0x7c8980,
               );
             else if (/hood/.test(o.name))
@@ -121,27 +146,33 @@ export class Actor {
             else if (/collar/.test(o.name))
               m.color.set(kind === "pilgrim" ? 0x929e8f : 0x59675b);
             o.material = m;
-            if (/linen|headwrap/.test(m.name)) {
+            if (/new0_v8_fitted_(linen|observer)/.test(o.name)) {
+              m.color.set(kind === "pilgrim" ? 0xb6b7aa : 0x707a71);
               m.onBeforeCompile = (shader) => {
                 shader.fragmentShader = shader.fragmentShader.replace(
                   "#include <map_fragment>",
                   `#ifdef USE_MAP
- vec4 clothTexel=texture2D(map,vMapUv);
- float weave=pow(clamp(dot(clothTexel.rgb,vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.42);
- diffuseColor.rgb*=mix(vec3(0.38),vec3(0.97),weave);
- diffuseColor.a*=clothTexel.a;
- #endif`,
+                  vec4 clothTexel=texture2D(map,vMapUv);
+                  float weave=dot(clothTexel.rgb,vec3(.2126,.7152,.0722));
+                  diffuseColor.rgb*=vec3(.43+.75*weave);
+                  diffuseColor.a*=clothTexel.a;
+                #endif`,
                 );
               };
-              m.customProgramCacheKey = () => "new0-bleached-cloth-v8";
+              m.customProgramCacheKey = () => "fixes1-grey-linen";
             }
             o.frustumCulled = false;
           }
         });
-        if (kind === "effigy") rig.scale.set(0.84, 1.06, 0.84);
+        applyCharacterAppearance(rig, kind);
+        if (kind === "effigy") rig.scale.setScalar(1.03);
         const mixer = new THREE.AnimationMixer(rig),
           actions = new Map<string, THREE.AnimationAction>();
-        for (const clip of [...gltf.animations, ...combat.animations])
+        for (const clip of [
+          ...gltf.animations,
+          ...combat.animations,
+          ...fixes.animations,
+        ])
           actions.set(clip.name, mixer.clipAction(clip));
         const hand = rig.getObjectByName("hand_R"),
           weapon = heldWeapon(
@@ -160,7 +191,7 @@ export class Actor {
         for (const item of new Set(weapons.values())) hand?.add(item);
         let armour: THREE.Group | undefined, flask: THREE.Group | undefined;
         if (kind === "pilgrim") {
-          armour = armourModel();
+          armour = armourModel(rig);
           armour.position.set(0, 1.16, 0.01);
           armour.visible = false;
           rig.add(armour);
@@ -187,10 +218,8 @@ export class Actor {
           armour,
           flask,
           gear: new GearPose(rig, kind === "gaoler"),
-          collision:
-            hand && kind !== "effigy"
-              ? new GearCollision(rig, hand, weapons, kind === "gaoler")
-              : undefined,
+          continuity: new SkeletonContinuity(rig, kind === "gaoler"),
+          feet: new FootContact(rig),
         });
       }),
     );
@@ -208,7 +237,7 @@ export class Actor {
     );
     action.clampWhenFinished = once;
     action.play();
-    const linked = s.current.startsWith("Attack") && name.startsWith("Attack");
+    const linked = /Attack/.test(s.current) && /Attack/.test(name);
     const fade = linked
       ? 0.09
       : name.startsWith("Hit")
@@ -254,60 +283,30 @@ export class Actor {
     this.root.rotation.set(0, f.yaw, 0);
     const mode = f.mode;
     if (s.armour) s.armour.visible = f.armour > 0;
+    setArmourCoverage(s.rig, f.armour > 0);
     if (s.flask) {
       s.flask.visible = mode === "heal";
-      const stopper = s.flask.getObjectByName("FlaskStopper"),
-        liquid = s.flask.getObjectByName("FlaskLiquid");
+      const stopper = s.flask.getObjectByName("FlaskStopper");
       if (stopper) stopper.visible = false;
-      if (liquid)
-        liquid.scale.y =
-          mode === "heal" ? Math.max(0.1, 0.92 - f.time * 0.6) : 0.92;
+      setFlaskFill(
+        s.flask,
+        mode === "heal" ? Math.max(0.06, 0.92 - f.time * 0.6) : 0.92,
+      );
     }
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
-    const name =
-      mode === "dead"
-        ? `Death${f.death}`
-        : mode === "attack" || mode === "windup"
-          ? `Attack${attackIndex}`
-          : mode === "dodge"
-            ? `Dodge${f.dodgeSide}`
-            : mode === "guard"
-              ? f.recoil > 0
-                ? "BlockHit"
-                : "Guard"
-              : mode === "hit"
-                ? ["HitFront", "HitLeft", "HitRight"][f.reaction]
-                : f.speed > 1.65
-                  ? "Run"
-                  : f.speed > 0.1
-                    ? "Walk"
-                    : "Idle";
+    const name = motionName(f);
+    const semanticTime =
+      mode === "windup" || mode === "attack"
+        ? semanticAttackTime(f, this.enemy)
+        : f.time;
     const once = !["Idle", "Walk", "Run", "Guard"].includes(name);
     this.change(s, name, once);
     const action = s.action!;
     action.paused = false;
-    if (mode === "windup") {
-      const progress = THREE.MathUtils.clamp(
-        f.time / (ENEMIES[f.kind as EnemyKind].windup * 0.9),
-        0,
-        1,
-      );
-      const ease = progress * progress * (3 - 2 * progress);
-      action.time = ATTACKS[attackIndex - 1].contact * 0.72 * ease;
-      action.paused = true;
-    } else if (
-      mode === "attack" ||
-      mode === "dodge" ||
-      mode === "dead" ||
-      mode === "hit"
-    ) {
+    if (["windup", "attack", "dodge", "dead", "hit"].includes(mode)) {
       const time =
-        mode === "attack" && this.enemy
-          ? ATTACKS[attackIndex - 1].contact * 0.72 +
-            (f.time *
-              (action.getClip().duration -
-                ATTACKS[attackIndex - 1].contact * 0.72)) /
-              0.68
+        mode === "attack" || mode === "windup"
+          ? sourceAttackTime(name, semanticTime, attackIndex - 1)
           : f.time;
       action.time = Math.min(action.getClip().duration - 0.001, time);
       action.paused = true;
@@ -323,6 +322,7 @@ export class Actor {
             : 1,
       );
     s.mixer.update(dt);
+    s.continuity.apply(dt);
     const loop = ["Idle", "Walk", "Run", "Guard"].includes(name);
     const offset =
       contactOffset(
@@ -330,10 +330,13 @@ export class Actor {
         name,
         loop ? action.time % action.getClip().duration : action.time,
       ) * s.rig.scale.y;
+    this.root.updateMatrixWorld(true);
+    const grounded = mode !== "dead" && !name.startsWith("Dodge");
+    const actualOffset = grounded ? s.feet.offset(f.y) : offset;
     s.floorOffset =
-      offset > s.floorOffset
-        ? offset
-        : THREE.MathUtils.damp(s.floorOffset, offset, 28, dt);
+      actualOffset > s.floorOffset
+        ? actualOffset
+        : THREE.MathUtils.damp(s.floorOffset, actualOffset, 28, dt);
     this.root.position.y = f.y + s.floorOffset;
     if (!(mode === "dead" && f.time > WEAPON_RELEASE_TIME)) {
       this.root.updateMatrixWorld(true);
@@ -343,24 +346,14 @@ export class Actor {
         item,
         mode === "heal" ? "Drink" : name,
         f.y,
-        s.collision
-          ? (matrix, correction) => {
-              s.collision!.update();
-              return s.collision!.penalty(
-                kind === "gaoler" ? "sword" : item,
-                matrix,
-                f.y,
-                correction,
-              );
-            }
-          : undefined,
-        action.time,
+        undefined,
+        semanticTime,
+        dt,
       );
-    }
-    if (mode === "heal") s.gear.drink(f.time);
+    } else s.gear.release(dt, f.y, f.death === "Side");
+    if (mode === "heal") s.gear.drink(f.time, dt);
 
     if (mode === "dead" && f.time > WEAPON_RELEASE_TIME) {
-      s.gear.setGrip(0, 0);
       if (!s.dropped) {
         this.root.updateMatrixWorld(true);
         this.root.attach(s.weapon);
@@ -400,6 +393,8 @@ export class Actor {
     for (const s of this.states.values()) {
       s.mixer.stopAllAction();
       s.current = "";
+      s.gear.reset();
+      s.continuity.reset();
       s.action = undefined;
       s.floorOffset = 0;
       if (s.dropped) {
@@ -411,7 +406,7 @@ export class Actor {
   }
   dispose() {
     for (const s of this.states.values()) {
-      s.collision?.dispose();
+      disposeCharacterAppearance(s.rig);
       s.mixer.stopAllAction();
       s.mixer.uncacheRoot(s.rig);
       s.rig.traverse((o) => {

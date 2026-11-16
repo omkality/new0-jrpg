@@ -90,6 +90,7 @@ export const KEYS = [
     x: -3.8,
     z: 1.3,
     y: 0,
+    surfaceY: 0.91,
     name: "Ключ Чёрных ворот",
   },
   {
@@ -98,6 +99,7 @@ export const KEYS = [
     x: -4.5,
     z: -46,
     y: 2.4,
+    surfaceY: 3.42,
     name: "Ключ ризницы",
   },
 ] as const;
@@ -325,10 +327,105 @@ export const DRESSING = [
 export const COURT_COLUMNS = [-1, 1].flatMap((side) =>
   [-24, -34, -40].map((z) => ({ x: side * 6.6, z })),
 );
+export const CHAPEL_COLUMNS = [-6.5, 2.85].flatMap((x) =>
+  [-43, -51, -58, -67].map((z) => ({ x, z })),
+);
+export const ARCH_PORTALS = [
+  {
+    area: "chapel",
+    z: -42.3,
+    base: 2.4,
+    radius: 2.3,
+    stem: 2.6,
+    wingX: 5,
+    wingWidth: 5.7,
+    wallHeight: 8.4,
+    depth: 0.5,
+  },
+  {
+    area: "chapel",
+    z: -69.4,
+    base: 2.4,
+    radius: 2.3,
+    stem: 2.6,
+    wingX: 5,
+    wingWidth: 5.7,
+    wallHeight: 8.4,
+    depth: 0.5,
+  },
+  {
+    area: "crypt",
+    z: -77.6,
+    base: 2.4,
+    radius: 2.5,
+    stem: 1.7,
+    wingX: 5.1,
+    wingWidth: 5.6,
+    wallHeight: 4.4,
+    depth: 0.5,
+  },
+  {
+    area: "crypt",
+    z: -103,
+    base: 2.4,
+    radius: 2.5,
+    stem: 1.7,
+    wingX: 5.1,
+    wingWidth: 5.6,
+    wallHeight: 4.4,
+    depth: 0.5,
+  },
+] as const;
 export const CRYPT_BAYS = [-1, 1].flatMap((side) =>
   [-80, -86, -92, -98].map((z) => ({ x: side * 5.8, z })),
 );
+export const CRYPT_CEILING_Y = 6.625;
+export const CRYPT_COLUMNS = [-1, 1].flatMap((side) =>
+  [-83, -89, -95, -101].map((z) => ({ x: side * 6.9, z })),
+);
 export const OBSTACLES: Obstacle[] = [
+  ...ARCH_PORTALS.flatMap((p) =>
+    [-1, 1].flatMap((s) => [
+      {
+        x: s * p.wingX,
+        z: p.z,
+        hx: p.wingWidth / 2,
+        hz: p.depth / 2,
+        minY: p.base - 0.1,
+        maxY: p.base + p.wallHeight,
+      },
+      {
+        x: s * (p.radius - 0.11),
+        z: p.z,
+        hx: 0.11,
+        hz: 0.18,
+        minY: p.base - 0.1,
+        maxY: p.base + p.stem,
+      },
+    ]),
+  ),
+  ...CHAPEL_COLUMNS.map((p) => ({
+    ...p,
+    hx: 0.55,
+    hz: 0.55,
+    minY: 2.3,
+    maxY: 10.8,
+  })),
+  ...[-1, 1].map((s) => ({
+    x: s * 7.7,
+    z: -89.5,
+    hx: 0.25,
+    hz: 13,
+    minY: 2.3,
+    maxY: 6.8,
+  })),
+  ...CRYPT_COLUMNS.map((p) => ({
+    ...p,
+    hx: 0.4,
+    hz: 0.4,
+    minY: 2.3,
+    maxY: CRYPT_CEILING_Y,
+  })),
   ...COURT_COLUMNS.map((p) => ({
     ...p,
     hx: 0.43,
@@ -408,31 +505,11 @@ export const OBSTACLES: Obstacle[] = [
   { x: 3.35, z: -56, hx: 0.13, hz: 6.7, minY: 2.3, maxY: 6.45 },
   { x: 6.65, z: -58.5, hx: 0.13, hz: 10.5, minY: 2.3, maxY: 6.45 },
   // Real portal wings and the lectern alcove.
-  ...[-42.3, -69.4].flatMap((z) =>
-    [-1, 1].map((s) => ({
-      x: s * 5,
-      z,
-      hx: 2.85,
-      hz: 0.25,
-      minY: 2.3,
-      maxY: 10.8,
-    })),
-  ),
   { x: -3.3, z: -43.9, hx: 0.15, hz: 0.9, minY: 2.3, maxY: 5.2 },
   { x: -3.3, z: -47.3, hx: 0.15, hz: 0.8, minY: 2.3, maxY: 5.2 },
   { x: -5.4, z: -48.1, hx: 1.4, hz: 0.15, minY: 2.3, maxY: 5.2 },
-  ...[-45, -51, -58, -65].flatMap((z) =>
-    [-6.5, 2.85].map((x) => ({
-      x,
-      z,
-      hx: 0.55,
-      hz: 0.55,
-      minY: 2.3,
-      maxY: 6.1,
-    })),
-  ),
   { x: -4.5, z: -46, hx: 0.675, hz: 0.55, minY: 2.3, maxY: 3.42 },
-  { x: -3.8, z: 1.3, hx: 0.75, hz: 0.55, minY: -0.1, maxY: 0.97 },
+  { x: -3.8, z: 1.3, hx: 0.75, hz: 0.55, minY: -0.1, maxY: 0.91 },
 ];
 export const TREES: Point[] = [];
 for (let i = 0; i < 66; i++) {
@@ -445,4 +522,17 @@ for (let i = 0; i < 66; i++) {
   TREES.push({ x, z });
   if (Math.abs(x) < 8)
     OBSTACLES.push({ x, z, hx: 0.45, hz: 0.45, minY: -0.3, maxY: 12 });
+}
+for (const [x, z] of [
+  [-5.8, 9.6],
+  [5.8, 9.8],
+  [-2.3, 5.5],
+  [5.9, -0.5],
+  [-5.3, -2.4],
+  [5.4, -4.2],
+  [-4.8, -10.8],
+  [5.5, -11.2],
+]) {
+  TREES.push({ x, z });
+  OBSTACLES.push({ x, z, hx: 0.42, hz: 0.42, minY: -0.3, maxY: 12 });
 }

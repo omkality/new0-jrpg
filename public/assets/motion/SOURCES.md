@@ -120,3 +120,27 @@ require engine playback and on-device review.
 Reproducible authoring code and pinned development dependencies are versioned in
 `scripts/assets/`. Its README documents the commands, reference assets, Death
 seeds and numerical checks. Reports are written to `work/asset-authoring/`.
+
+
+## fixes1, separate runtime clips
+
+The retained combat GLB and contract.json above are unchanged baselines.
+Current gameplay chooses clips and semantic timings from fixes1-contract.json.
+SwordAttack1/2/3 derive from Quaternius Universal Animation Library 2 Standard,
+Sword_Regular_A/B/C and A/B recoveries, under CC0:
+https://quaternius.com/packs/universalanimationlibrary2.html
+https://quaternius.itch.io/universal-animation-library-2
+The same CC0 notice is retained in QUATERNIUS-LICENSE.txt.
+
+WeaponStepForward/Back/Left/Right are original directional, crouched adaptations
+of UAL1 Walk_Loop. Neither free library contains a dedicated spear attack or
+these evasions. Spear grips and thrust goals are original runtime IK, not a
+claimed downloaded spear motion. No paid pack or PRISON OF HUSKS asset is bundled.
+
+prisoner-fixes1.glb serves prisoner and watcher, gaoler-fixes1.glb serves the
+heavy rig. fixes1-floor.json contains signed contact offsets at semantic times.
+The source clock and separate legacy phase maps are in fixes1-contract.json.
+Rebuild with scripts/assets/retarget-ual2-fixes1.mjs after obtaining the official
+CC0 UAL1/UAL2 source files at its documented work paths. The generator rejects
+changes to the protected baseline combat files. Runtime continuity and geometry
+are verified separately after the native animation blend and weapon controller.

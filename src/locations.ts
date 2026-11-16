@@ -7,15 +7,25 @@ import {
   WALLS,
   DRESSING,
   COURT_COLUMNS,
+  CHAPEL_COLUMNS,
+  ARCH_PORTALS,
   CRYPT_BAYS,
+  CRYPT_COLUMNS,
+  CRYPT_CEILING_Y,
+  OBSTACLES,
   type AreaId,
 } from "./world-layout";
+import { createForest } from "./forest";
+import {
+  environmentTexture,
+  type EnvironmentPattern,
+} from "./environment-materials";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0xb8bebc, density: 0.027 },
-  roofs: { name: "Воротный двор", fog: 0xaeb7b7, density: 0.028 },
-  chapel: { name: "Собор и верхняя галерея", fog: 0x879392, density: 0.037 },
-  crypt: { name: "Зал погребённых", fog: 0x626d6d, density: 0.046 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xa6b0aa, density: 0.037 },
+  roofs: { name: "Воротный двор", fog: 0x8e9694, density: 0.026 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0x6e7776, density: 0.032 },
+  crypt: { name: "Зал погребённых", fog: 0x56615e, density: 0.04 },
   courtyard: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
@@ -35,6 +45,7 @@ type WarmAnchor = {
   z: number;
   power: number;
   range: number;
+  area: Sector;
 };
 type BeamAnchor = {
   x: number;
@@ -66,11 +77,18 @@ export class ConnectedEnvironment {
   private metal: THREE.MeshStandardMaterial;
   private dark: THREE.MeshStandardMaterial;
   private bark: THREE.MeshStandardMaterial;
+  private earth: THREE.MeshStandardMaterial;
+  private torchCloth: THREE.MeshStandardMaterial;
+  private skyLight = new THREE.HemisphereLight(0xb9c5c6, 0x20251e, 0.42);
+  private moonLight = new THREE.DirectionalLight(0xd9e4df, 0.8);
+  private bounceLight = new THREE.DirectionalLight(0x788b88, 0.1);
+  private lastTime = 0;
   private warm: WarmAnchor[] = [];
   private cool: BeamAnchor[] = [];
   private warmPool: THREE.PointLight[] = [];
   private coolPool: THREE.SpotLight[] = [];
   private chosen = new Int16Array(4);
+  private assignedWarm = new Int16Array(4).fill(-1);
   private chosenCool = new Int16Array(2);
   private beams: {
     material: THREE.MeshBasicMaterial;
@@ -79,8 +97,9 @@ export class ConnectedEnvironment {
   }[] = [];
   private flames: { x: number; y: number; z: number; scale: number }[] = [];
   private flameOuter?: THREE.InstancedMesh;
-  private flameCore?: THREE.InstancedMesh;
+  private flameClock = { value: 0 };
   private fireMatrix = new THREE.Matrix4();
+  private fireScale = new THREE.Vector3();
   private patterns = new Map<string, THREE.CanvasTexture>();
   constructor(loader: THREE.TextureLoader) {
     for (const sector of [
@@ -107,23 +126,16 @@ export class ConnectedEnvironment {
         roughness: 1,
         vertexColors: true,
       });
-      material.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace(
-          "#include <map_fragment>",
-          `#ifdef USE_MAP
- vec4 stoneTexel = texture2D(map, vMapUv);
- float chalk = pow(clamp(dot(stoneTexel.rgb, vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.45);
- diffuseColor.rgb *= mix(vec3(0.34,0.35,0.33),vec3(0.96,0.98,0.94),chalk);
- diffuseColor.a *= stoneTexel.a;
- #endif`,
-        );
-      };
-      material.customProgramCacheKey = () => "new0-chalk-stone-v8";
       return material;
     };
-    this.wall = tiled("TEX_Wall_03", 0xebeee8);
-    this.stone = tiled("TEX_Arch_02", 0xf1f2ed);
-    this.floor = tiled("TEX_Ground_04", 0xd9ddd6);
+    this.wall = new THREE.MeshStandardMaterial({
+      map: this.pattern("brick"),
+      color: 0xc0bcb1,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.stone = tiled("TEX_Arch_02", 0xb5b8ac);
+    this.floor = tiled("TEX_Ground_04", 0xbbbeb5);
     this.metal = new THREE.MeshStandardMaterial({
       color: 0x353e48,
       roughness: 0.87,
@@ -131,25 +143,33 @@ export class ConnectedEnvironment {
       vertexColors: true,
     });
     this.dark = new THREE.MeshStandardMaterial({
-      color: 0x343840,
+      color: 0x393e39,
       roughness: 1,
       vertexColors: true,
     });
     this.bark = new THREE.MeshStandardMaterial({
       map: this.pattern("bark"),
-      color: 0x89958d,
+      color: 0x9b9a87,
       roughness: 1,
       vertexColors: true,
     });
-    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.58));
-    const moon = new THREE.DirectionalLight(0xe8eef3, 1.05);
-    moon.position.set(-9, 18, 8);
-    this.root.add(moon);
-    const bounce = new THREE.DirectionalLight(0x8d9faa, 0.15);
-    bounce.position.set(8, 4, -40);
-    this.root.add(bounce);
+    this.earth = new THREE.MeshStandardMaterial({
+      map: this.pattern("earth"),
+      color: 0xb3b29d,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.torchCloth = new THREE.MeshStandardMaterial({
+      map: this.pattern("torch-wrap"),
+      color: 0xb6a482,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.moonLight.position.set(-9, 18, 8);
+    this.bounceLight.position.set(8, 4, -40);
+    this.root.add(this.skyLight, this.moonLight, this.bounceLight);
     for (let i = 0; i < 4; i++) {
-      const light = new THREE.PointLight(0xffe8d1, 0, 7, 2);
+      const light = new THREE.PointLight(0xffbc78, 0, 7, 2);
       this.warmPool.push(light);
       this.root.add(light);
     }
@@ -164,6 +184,20 @@ export class ConnectedEnvironment {
     this.court();
     this.cathedral();
     this.crypt();
+    for (const p of ARCH_PORTALS) {
+      for (const side of [-1, 1])
+        this.box(
+          p.wingWidth,
+          p.wallHeight,
+          p.depth,
+          side * p.wingX,
+          p.base + p.wallHeight / 2,
+          p.z,
+          this.wall,
+          p.area,
+        );
+      this.arch(0, p.base, p.z, p.radius, p.stem, this.stone, p.area);
+    }
     for (const w of WALLS)
       this.box(
         w.hx * 2,
@@ -191,17 +225,19 @@ export class ConnectedEnvironment {
       inside =
         (area === "chapel" && z < -43 && z > -69) ||
         (area === "crypt" && z < -78);
-    let value = inside ? 0.28 : 0.68;
-    value += Math.max(0, ny) * 0.13 + nx * 0.05;
+    // Material colour stays earthy. Cold distance fog and actual openings,
+    // rather than a white albedo remap, provide the pale atmospheric range.
+    let value = inside ? 0.46 : 0.76;
+    value += Math.max(0, ny) * 0.1 + nx * 0.035;
     if (inside) {
       for (const w of [-47, -54, -62, -89]) {
         const band = z - (w + 1.8 + x * 0.43);
         value +=
-          0.68 *
+          0.48 *
           Math.exp((-band * band) / 0.75) *
           Math.exp(-((x + 2) ** 2) / 35);
       }
-      value += 0.12 * Math.exp(-((x + 2) ** 2 + (z + 54) ** 2) / 7);
+      value += 0.08 * Math.exp(-((x + 2) ** 2 + (z + 54) ** 2) / 7);
     }
     if (y < 3 && ny > 0.7)
       value -= 0.16 * Math.pow(Math.min(1, Math.abs(x) / 8), 3);
@@ -382,7 +418,7 @@ export class ConnectedEnvironment {
     geometry.computeVertexNormals();
     const terrain = new THREE.MeshStandardMaterial({
       map: this.pattern("earth"),
-      color: 0x828f82,
+      color: 0xa1a48e,
       roughness: 1,
       vertexColors: true,
     });
@@ -450,52 +486,77 @@ export class ConnectedEnvironment {
       this.window(x, 3.5, -107.3, 1.3, 2.6, "world", 0, false);
   }
   private forest() {
-    this.ground(16, 29, 0, 0.01, -1, "forest");
-    const leafMat = new THREE.MeshStandardMaterial({
-      map: this.pattern("leaves"),
-      color: 0x7c9485,
+    this.ground(18, 31, 0, 0.01, -1.5, "forest", this.earth);
+    this.group("forest").add(
+      createForest(
+        TREES,
+        this.bark,
+        this.pattern("leaves"),
+        this.pattern("fern"),
+        OBSTACLES,
+      ),
+    );
+    // An irregular dirt track is only a surface treatment. Roots and leaf litter
+    // sit on the same y=0 traversable ground as the shared physics map.
+    const mud = new THREE.MeshStandardMaterial({
+      map: this.pattern("mud"),
+      color: 0xa4a58c,
       roughness: 1,
-      alphaTest: 0.44,
-      side: THREE.DoubleSide,
+      vertexColors: true,
     });
-    const trunkGeo = new THREE.CylinderGeometry(0.23, 0.49, 9, 9);
-    trunkGeo.translate(0, 4.5, 0);
-    const trunks = new THREE.InstancedMesh(trunkGeo, this.bark, TREES.length),
-      leafGeo = new THREE.PlaneGeometry(4.8, 3.7),
-      leaves = new THREE.InstancedMesh(leafGeo, leafMat, TREES.length * 9);
-    const matrix = new THREE.Matrix4(),
-      rotation = new THREE.Quaternion(),
-      scale = new THREE.Vector3(),
-      position = new THREE.Vector3();
-    for (let i = 0; i < TREES.length; i++) {
-      const t = TREES[i],
-        height = 0.8 + rand(i + 100) * 0.6;
-      position.set(t.x, -0.2, t.z);
-      rotation.setFromEuler(new THREE.Euler(0.02, rand(i) * 6, 0.03));
-      scale.set(1, height, 1);
-      matrix.compose(position, rotation, scale);
-      trunks.setMatrixAt(i, matrix);
-      for (let j = 0; j < 9; j++) {
-        const a = rand(i * 12 + j) * Math.PI * 2,
-          r = 0.9 + rand(i * 3 + j) * 1.5;
-        position.set(
-          t.x + Math.sin(a) * r,
-          5.5 * height + (j % 3) * 1.3,
-          t.z + Math.cos(a) * r,
-        );
-        rotation.setFromEuler(
-          new THREE.Euler(-0.3 + rand(j + 2) * 1.2, a, rand(j) * 0.6 - 0.3),
-        );
-        scale.setScalar(0.8 + rand(i + j) * 0.6);
-        matrix.compose(position, rotation, scale);
-        leaves.setMatrixAt(i * 9 + j, matrix);
-      }
+    const path = new THREE.BufferGeometry();
+    const positions: number[] = [],
+      uvs: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const z1 = 13 - i * 0.9,
+        z2 = z1 - 0.9;
+      const center1 = Math.sin(z1 * 0.22) * 0.5,
+        center2 = Math.sin(z2 * 0.22) * 0.5;
+      const w1 = 1.05 + Math.sin(i * 1.8) * 0.18,
+        w2 = 1.05 + Math.sin((i + 1) * 1.8) * 0.18;
+      positions.push(
+        center1 - w1,
+        0.017,
+        z1,
+        center1 + w1,
+        0.017,
+        z1,
+        center2 + w2,
+        0.017,
+        z2,
+        center1 - w1,
+        0.017,
+        z1,
+        center2 + w2,
+        0.017,
+        z2,
+        center2 - w2,
+        0.017,
+        z2,
+      );
+      uvs.push(0, i, 1, i, 1, i + 1, 0, i, 1, i + 1, 0, i + 1);
     }
-    trunks.computeBoundingSphere();
-    leaves.computeBoundingSphere();
-    this.group("forest").add(trunks, leaves);
+    path.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    path.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    path.computeVertexNormals();
+    this.part(new THREE.Mesh(path, mud), "forest", 0);
     for (const side of [-1, 1]) {
-      this.arch(side * 5.8, 0, -4, 1.2, 1.1, this.stone, "forest");
+      // Only the grounded remnants of the forest ruin survive. Their bounds
+      // match the existing shared low piers instead of adding a freestanding arch.
+      for (const leg of [-1, 1])
+        this.box(
+          0.26,
+          1.1,
+          0.4,
+          side * 5.8 + leg * 1.09,
+          0.55,
+          -3.84,
+          this.stone,
+          "forest",
+        );
       for (let i = 0; i < 3; i++)
         this.box(
           0.7,
@@ -616,39 +677,23 @@ export class ConnectedEnvironment {
           });
       }
     }
-    for (const z of [-43, -51, -58, -67]) {
-      this.arch(-1.825, base, z, 4.675, 3.7, this.stone, sector);
-      for (const x of [-6.5, 2.85]) {
-        this.cylinder(
-          0.26,
-          0.41,
-          3.7,
-          16,
-          x,
-          base + 1.85,
-          z,
-          this.stone,
-          sector,
-        );
-        this.cylinder(
-          0.49,
-          0.55,
-          0.2,
-          16,
-          x,
-          base + 0.1,
-          z,
-          this.stone,
-          sector,
-        );
-      }
+    const left = Math.min(...CHAPEL_COLUMNS.map((p) => p.x));
+    const right = Math.max(...CHAPEL_COLUMNS.map((p) => p.x));
+    for (const z of new Set(CHAPEL_COLUMNS.map((p) => p.z)))
+      this.arch(
+        (left + right) / 2,
+        base,
+        z,
+        (right - left) / 2,
+        3.7,
+        this.stone,
+        sector,
+      );
+    for (const { x, z } of CHAPEL_COLUMNS) {
+      this.cylinder(0.26, 0.41, 3.7, 16, x, base + 1.85, z, this.stone, sector);
+      this.cylinder(0.49, 0.55, 0.2, 16, x, base + 0.1, z, this.stone, sector);
     }
     this.box(15.6, 0.35, 29, 0, base + 8.4, -55.5, this.dark, sector);
-    for (const z of [-42.3, -69.4]) {
-      for (const side of [-1, 1])
-        this.box(5.7, 8.4, 0.5, side * 5, base + 4.2, z, this.wall, sector);
-      this.arch(0, base, z, 2.3, 2.6, this.stone, sector);
-    }
     const rug = new THREE.MeshStandardMaterial({
       map: this.pattern("cloth"),
       color: 0x59323e,
@@ -695,27 +740,71 @@ export class ConnectedEnvironment {
     for (const side of [-1, 1]) {
       this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
     }
-    for (const { x, z } of CRYPT_BAYS) {
+    // Roof supports stand between cell bays. Their capitals meet the shared
+    // underside of the ceiling, and never pass through a cell's iron bars.
+    for (const { x, z } of CRYPT_COLUMNS) {
+      const shaft = CRYPT_CEILING_Y - b - 0.34;
       this.cylinder(
-        0.28,
-        0.38,
-        3.6,
-        12,
-        x + Math.sign(x) * 0.1,
-        b + 1.8,
+        0.29,
+        0.34,
+        shaft,
+        14,
+        x,
+        b + 0.16 + shaft / 2,
         z,
         this.stone,
         s,
       );
+      this.cylinder(0.39, 0.39, 0.16, 14, x, b + 0.08, z, this.stone, s);
+      this.cylinder(
+        0.39,
+        0.34,
+        0.18,
+        14,
+        x,
+        CRYPT_CEILING_Y - 0.09,
+        z,
+        this.stone,
+        s,
+      );
+    }
+    for (const { x, z } of CRYPT_BAYS) {
       this.arch(x, b + 0.2, z, 1.05, 1.5, this.stone, s);
       this.box(1.6, 0.26, 1.1, x, b + 0.28, z, this.stone, s);
       this.ironFence(x, z + 0.3, 1.6, 0, s, b + 0.4);
     }
     // Four slabs leave a real break in the ceiling above the encounter.
-    this.box(5.3, 0.35, 27, -5.15, b + 4.4, -89.5, this.dark, s);
-    this.box(8.6, 0.35, 27, 3.5, b + 4.4, -89.5, this.dark, s);
-    this.box(1.7, 0.35, 7.4, -1.65, b + 4.4, -79.7, this.dark, s);
-    this.box(1.7, 0.35, 16.4, -1.65, b + 4.4, -94.8, this.dark, s);
+    this.box(
+      5.3,
+      0.35,
+      27,
+      -5.15,
+      CRYPT_CEILING_Y + 0.175,
+      -89.5,
+      this.dark,
+      s,
+    );
+    this.box(8.6, 0.35, 27, 3.5, CRYPT_CEILING_Y + 0.175, -89.5, this.dark, s);
+    this.box(
+      1.7,
+      0.35,
+      7.4,
+      -1.65,
+      CRYPT_CEILING_Y + 0.175,
+      -79.7,
+      this.dark,
+      s,
+    );
+    this.box(
+      1.7,
+      0.35,
+      16.4,
+      -1.65,
+      CRYPT_CEILING_Y + 0.175,
+      -94.8,
+      this.dark,
+      s,
+    );
     const opening = new THREE.Mesh(
       new THREE.PlaneGeometry(1.65, 3),
       new THREE.MeshBasicMaterial({
@@ -729,11 +818,6 @@ export class ConnectedEnvironment {
     this.part(opening, s, 0);
     for (const z of [-83.6, -84.5, -85.4, -86.3])
       this.box(2, 0.09, 0.065, -1.65, b + 4.65, z, this.metal, s);
-    for (const z of [-77.6, -103]) {
-      for (const side of [-1, 1])
-        this.box(5.6, 4.4, 0.5, side * 5.1, b + 2.2, z, this.wall, s);
-      this.arch(0, b, z, 2.5, 1.7, this.stone, s);
-    }
     for (const z of [-80.4, -88, -96]) {
       this.torch(-7.3, b + 1.9, z, s);
       this.torch(7.3, b + 1.9, z + 1, s);
@@ -947,13 +1031,21 @@ export class ConnectedEnvironment {
       this.metal,
       sector,
     );
+    const wrapping = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.065, 0.26, 12),
+      this.torchCloth,
+    );
+    wrapping.position.set(x - sign * 0.46, y + 0.51, z);
+    wrapping.rotation.z = sign * 0.08;
+    this.part(wrapping, sector, 0);
     this.fire(x - sign * 0.46, y + 0.68, z, sector);
     this.warm.push({
       x: x - sign * 0.64,
       y: y + 0.68,
       z,
-      power: 32,
-      range: 6.5,
+      power: 46,
+      range: 7,
+      area: sector,
     });
   }
   private chandelier(x: number, y: number, z: number, sector: Sector) {
@@ -970,43 +1062,76 @@ export class ConnectedEnvironment {
         px = x + Math.sin(a) * 0.63,
         pz = z + Math.cos(a) * 0.63;
       this.cylinder(0.045, 0.05, 0.28, 8, px, y + 0.1, pz, this.stone, sector);
-      this.fire(px, y + 0.32, pz, sector, 0.65);
+      this.fire(px, y + 0.32, pz, sector, 0.42);
     }
-    this.warm.push({ x, y: y + 0.3, z, power: 46, range: 8 });
+    this.warm.push({ x, y: y + 0.3, z, power: 54, range: 8, area: sector });
   }
   private fire(x: number, y: number, z: number, sector: Sector, scale = 1) {
     this.flames.push({ x, y, z, scale });
   }
   private buildFlames() {
+    const material = new THREE.MeshBasicMaterial({
+      map: this.pattern("fire"),
+      transparent: true,
+      alphaTest: 0.018,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uFireTime = this.flameClock;
+      shader.vertexShader = "varying float vFirePhase;\n" + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        "#include <begin_vertex>\nvFirePhase=instanceMatrix[3].x*0.37+instanceMatrix[3].z*0.21;",
+      );
+      shader.fragmentShader =
+        "uniform float uFireTime;\nvarying float vFirePhase;\n" +
+        shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        `
+ #ifdef USE_MAP
+ float tick=uFireTime*9.0+vFirePhase;
+ float frame=mod(floor(tick),8.0);
+ vec2 uv1=vec2((vMapUv.x+frame)/8.0,vMapUv.y);
+ vec2 uv2=vec2((vMapUv.x+mod(frame+1.0,8.0))/8.0,vMapUv.y);
+ diffuseColor*=mix(texture2D(map,uv1),texture2D(map,uv2),fract(tick));
+ #endif`,
+      );
+    };
+    material.customProgramCacheKey = () =>
+      "new0-continuous-textured-fire-fixes1";
+    const geometry = new THREE.PlaneGeometry(0.31, 0.55);
+    geometry.translate(0, 0.21, 0);
     this.flameOuter = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(0.065, 0.32, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd79f, toneMapped: false }),
-      this.flames.length,
+      geometry,
+      material,
+      this.flames.length * 2,
     );
-    this.flameCore = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(0.035, 0.2, 7),
-      new THREE.MeshBasicMaterial({ color: 0xfffaf0, toneMapped: false }),
-      this.flames.length,
-    );
-    this.root.add(this.flameOuter, this.flameCore);
+    this.flameOuter.name = "AlwaysBurningTexturedFlames";
+    this.root.add(this.flameOuter);
     this.updateFlames(0);
     this.flameOuter.computeBoundingSphere();
-    this.flameCore.computeBoundingSphere();
   }
   private updateFlames(time: number) {
-    if (!this.flameOuter || !this.flameCore) return;
+    if (!this.flameOuter) return;
+    this.flameClock.value = time;
     for (let i = 0; i < this.flames.length; i++) {
       const f = this.flames[i],
         sy = f.scale * (0.94 + Math.sin(time * 12 + f.z) * 0.06);
-      this.fireMatrix
-        .makeScale(f.scale, sy, f.scale)
-        .setPosition(f.x, f.y + 0.08 * sy, f.z);
-      this.flameOuter.setMatrixAt(i, this.fireMatrix);
-      this.fireMatrix.setPosition(f.x, f.y + 0.015 * sy, f.z);
-      this.flameCore.setMatrixAt(i, this.fireMatrix);
+      for (let side = 0; side < 2; side++) {
+        this.fireMatrix.makeRotationY(Math.PI * 0.25 + side * Math.PI * 0.5);
+        this.fireMatrix.scale(this.fireScale.set(f.scale, sy, f.scale));
+        this.fireMatrix.setPosition(
+          f.x + Math.sin(time * 8 + f.z) * 0.008,
+          f.y,
+          f.z,
+        );
+        this.flameOuter.setMatrixAt(i * 2 + side, this.fireMatrix);
+      }
     }
-    this.flameOuter.instanceMatrix.needsUpdate =
-      this.flameCore.instanceMatrix.needsUpdate = true;
+    this.flameOuter.instanceMatrix.needsUpdate = true;
   }
   private beam(anchor: BeamAnchor) {
     this.cool.push(anchor);
@@ -1061,6 +1186,22 @@ export class ConnectedEnvironment {
   private pattern(kind: string) {
     const cached = this.patterns.get(kind);
     if (cached) return cached;
+    if (
+      [
+        "brick",
+        "earth",
+        "mud",
+        "bark",
+        "leaves",
+        "fern",
+        "fire",
+        "torch-wrap",
+      ].includes(kind)
+    ) {
+      const texture = environmentTexture(kind as EnvironmentPattern);
+      this.patterns.set(kind, texture);
+      return texture;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 256;
     const ctx = canvas.getContext("2d")!;
@@ -1151,6 +1292,25 @@ export class ConnectedEnvironment {
     player: { x: number; y: number; z: number },
     area: AreaId,
   ) {
+    const dt = Math.max(0, Math.min(0.1, time - this.lastTime));
+    this.lastTime = time;
+    const indoors = area === "chapel" || area === "crypt";
+    const blend = 1 - Math.exp(-dt * 4);
+    this.skyLight.intensity = THREE.MathUtils.lerp(
+      this.skyLight.intensity,
+      indoors ? 0.18 : 0.65,
+      blend,
+    );
+    this.moonLight.intensity = THREE.MathUtils.lerp(
+      this.moonLight.intensity,
+      indoors ? 0.16 : 0.8,
+      blend,
+    );
+    this.bounceLight.intensity = THREE.MathUtils.lerp(
+      this.bounceLight.intensity,
+      indoors ? 0.045 : 0.14,
+      blend,
+    );
     for (const [id, group] of this.sectors)
       group.visible =
         id === "world" || Math.abs(CENTERS[id as AreaId] - player.z) < 42;
@@ -1165,19 +1325,38 @@ export class ConnectedEnvironment {
             (a.x - player.x) ** 2 +
             (a.z - player.z) ** 2 +
             (a.y - player.y - 1) ** 2;
+        if (a.area !== area && a.area !== "world") continue;
         if (d < distance) {
           best = i;
           distance = d;
         }
       }
+      const previous = this.assignedWarm[slot],
+        old = this.warm[previous];
+      if (
+        old &&
+        (old.area === area || old.area === "world") &&
+        !this.chosen.includes(previous)
+      ) {
+        const oldDistance =
+          (old.x - player.x) ** 2 +
+          (old.z - player.z) ** 2 +
+          (old.y - player.y - 1) ** 2;
+        if (oldDistance < distance * 1.18 + 0.7) best = previous;
+      }
       this.chosen[slot] = best;
+      this.assignedWarm[slot] = best;
       const light = this.warmPool[slot],
         a = this.warm[best];
+      if (!a) {
+        light.intensity = 0;
+        continue;
+      }
       light.position.set(a.x, a.y, a.z);
       light.distance = a.range;
       light.intensity =
         a.power *
-        0.3 *
+        0.72 *
         (0.96 +
           Math.sin(time * 11 + best) * 0.025 +
           Math.sin(time * 17 + best) * 0.015);

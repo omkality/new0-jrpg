@@ -1,3 +1,4 @@
+import { ASSET_REVISION } from "./assets";
 import "./style.css";
 import { ENEMIES, type EnemyKind } from "./game";
 import { Campaign, SCENARIOS, type ScenarioId } from "./campaign";
@@ -88,6 +89,25 @@ let toastUntil = 0,
   toastValue = "";
 let capture: FrameCapture | null = null,
   recording = false;
+let captureMarks: {
+  seconds: number;
+  label: string;
+  area: string;
+  phase: string;
+  weapon: string;
+  armour: number;
+  hp: number;
+  doors: number;
+  chests: number;
+  frame: number;
+  player_action: string;
+  combo: number;
+  enemy_action: string;
+  enemy_kind: string;
+  enemy_hp: number;
+  dodge_side: string;
+}[] = [];
+let captureMarkKey = "";
 let recordCanvas: HTMLCanvasElement | null = null,
   recordCtx: CanvasRenderingContext2D | null = null;
 let lastCapture = 0,
@@ -444,8 +464,32 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-v8.2-${selected}-60fps.mp4`;
+    a.download = `new0-fixes1-${selected}-60fps.mp4`;
     visible("#download", true);
+    const timeline = $<HTMLAnchorElement>("#record-timeline");
+    if (timeline.href.startsWith("blob:")) URL.revokeObjectURL(timeline.href);
+    timeline.href = URL.createObjectURL(
+      new Blob(
+        [
+          JSON.stringify(
+            {
+              protocol: "fixes1-capture-1",
+              scenario: selected,
+              asset_revision: ASSET_REVISION,
+              accepted_frames: current.frames,
+              simulation_hz: 60,
+              real_time_fps_benchmark: false,
+              marks: captureMarks,
+            },
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json" },
+      ),
+    );
+    timeline.download = `new0-fixes1-${selected}-timeline.json`;
+    visible("#record-timeline", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
   }
@@ -468,10 +512,13 @@ async function beginRecording() {
     capture = new FrameCapture(recordCanvas);
     await capture.start();
     startScenario(selected);
+    captureMarks = [];
+    captureMarkKey = "";
     recording = true;
     lastCapture = performance.now();
     document.body.classList.add("recording");
     visible("#download", false);
+    visible("#record-timeline", false);
   } catch (error) {
     capture = null;
     recording = false;
@@ -599,6 +646,29 @@ function frame(now: number) {
     recordCtx.globalCompositeOperation = "source-over";
     recordCtx.drawImage(hud, 0, 0, recordCanvas.width, recordCanvas.height);
     const current = capture;
+    const mark = {
+      seconds: current.frames / 60,
+      label: demonstration?.label ?? "",
+      area: game.location,
+      phase: game.phase,
+      weapon: game.player.weapon,
+      armour: game.player.armour,
+      hp: game.player.hp,
+      doors: game.openDoors.size,
+      chests: game.lootedChests.size,
+      frame: current.frames,
+      player_action: game.player.mode,
+      combo: game.player.combo,
+      enemy_action: game.enemy.mode,
+      enemy_kind: game.enemy.kind,
+      enemy_hp: game.enemy.hp,
+      dodge_side: game.player.mode === "dodge" ? game.player.dodgeSide : "",
+    };
+    const key = JSON.stringify({ ...mark, seconds: 0, frame: 0 });
+    if (key !== captureMarkKey) {
+      captureMarks.push(mark);
+      captureMarkKey = key;
+    }
     void current
       .add()
       .then(() => {

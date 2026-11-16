@@ -1,0 +1,1150 @@
+{
+  "version": "fixes1",
+  "timeDomain": "semantic-seconds",
+  "nativeBaseline": "contract.json",
+  "nativeBaselineUnmodified": true,
+  "attacks": {
+    "Attack1": {
+      "name": "Attack1",
+      "clip": "SwordAttack1",
+      "duration": 0.85,
+      "contact": 0.3,
+      "link": 0.52,
+      "cancel": 0.57,
+      "damage": 16,
+      "cost": 16,
+      "lunge": 1.5,
+      "chain": true
+    },
+    "Attack2": {
+      "name": "Attack2",
+      "clip": "SwordAttack2",
+      "duration": 0.77,
+      "contact": 0.27,
+      "link": 0.51,
+      "cancel": 0.56,
+      "damage": 18,
+      "cost": 18,
+      "lunge": 1.8,
+      "chain": true
+    },
+    "Attack3": {
+      "name": "Attack3",
+      "clip": "SwordAttack3",
+      "duration": 1.15,
+      "contact": 0.62,
+      "link": 1.15,
+      "cancel": 0.96,
+      "damage": 28,
+      "cost": 24,
+      "lunge": 2.3,
+      "chain": false
+    }
+  },
+  "selectedNewClips": {
+    "prisoner": {
+      "file": "prisoner-fixes1.glb",
+      "sword": [
+        "SwordAttack1",
+        "SwordAttack2",
+        "SwordAttack3"
+      ],
+      "armedDodge": [
+        "WeaponStepForward",
+        "WeaponStepBack",
+        "WeaponStepLeft",
+        "WeaponStepRight"
+      ]
+    },
+    "watcher": {
+      "file": "prisoner-fixes1.glb",
+      "sword": [
+        "SwordAttack1",
+        "SwordAttack2",
+        "SwordAttack3"
+      ],
+      "armedDodge": [
+        "WeaponStepForward",
+        "WeaponStepBack",
+        "WeaponStepLeft",
+        "WeaponStepRight"
+      ]
+    },
+    "gaoler": {
+      "file": "gaoler-fixes1.glb",
+      "armedDodge": [
+        "WeaponStepForward",
+        "WeaponStepBack",
+        "WeaponStepLeft",
+        "WeaponStepRight"
+      ]
+    }
+  },
+  "newClipTimeMapping": "Identity. SwordAttack and WeaponStep clip seconds are semantic runtime seconds. Never apply the legacy phase map to these clips or their new floor curves.",
+  "legacyBodyTimeMapping": {
+    "method": "Piecewise linear interpolation from semantic time to approved legacy clip time, clamped to each endpoint. Apply this same mapped time to the approved legacy floor table.",
+    "scope": "Legacy axe/spear/enemy Attack1/2/3 body clips only. New sword clips are already retimed.",
+    "attacks": {
+      "Attack1": {
+        "legacyClip": "Attack1",
+        "anchors": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            0.3
+          ],
+          [
+            0.52,
+            0.52
+          ],
+          [
+            0.85,
+            0.74
+          ]
+        ]
+      },
+      "Attack2": {
+        "legacyClip": "Attack2",
+        "anchors": [
+          [
+            0,
+            0
+          ],
+          [
+            0.27,
+            0.27
+          ],
+          [
+            0.51,
+            0.51
+          ],
+          [
+            0.77,
+            0.7
+          ]
+        ]
+      },
+      "Attack3": {
+        "legacyClip": "Attack3",
+        "anchors": [
+          [
+            0,
+            0
+          ],
+          [
+            0.62,
+            0.42
+          ],
+          [
+            1.15,
+            1
+          ]
+        ]
+      }
+    }
+  },
+  "dodge": {
+    "duration": 0.82,
+    "semanticTime": true,
+    "travelStart": 0.14,
+    "travelEnd": 0.65,
+    "controllerOwnsHorizontalTravel": true,
+    "horizontalTravelAdvisory": "Authored as short low steps. Try 1.35 metres for long weapons during visual QA. This advisory does not change the existing runtime DODGE distance."
+  },
+  "floor": {
+    "file": "fixes1-floor.json",
+    "timeDomain": "semantic-seconds",
+    "sampleRate": 60,
+    "signedOffsets": true,
+    "clearance": 0.008,
+    "application": "Interpolate indexed skin-surface offsets on the selected character profile. Add signed offset to ground root height after pose evaluation. Preserve negative offsets. GearPose remains responsible for equipped weapon/body collision."
+  },
+  "phaseMappings": {
+    "prisoner": {
+      "SwordAttack1": {
+        "method": "Monotone PCHIP source-to-semantic arc clock, inverse sampled during baking. Semantic time is runtime clip time.",
+        "sourceClips": [
+          "Sword_Regular_A",
+          "Sword_Regular_A_Rec"
+        ],
+        "sourceClockLandmarks": [
+          [
+            0,
+            0
+          ],
+          [
+            0.2375,
+            0.3
+          ],
+          [
+            0.4333333373069763,
+            0.52
+          ],
+          [
+            1.399999976158142,
+            0.85
+          ]
+        ],
+        "postureAdaptation": {
+          "minimumGroundedPelvisMetres": 0.7,
+          "maximumPelvisTiltDegrees": 20,
+          "maximumPelvisToNeckTiltDegrees": 40,
+          "pelvisTiltSoftBandDegrees": 5,
+          "torsoTiltSoftBandDegrees": 6,
+          "ankleHeightAndWorldOrientationPreserved": true,
+          "recoveryExportOffsetCompensated": true,
+          "nativeIdleEndpointTRS": true,
+          "footHorizontalPolicy": "Only reduce source reach when the raised pelvis makes the target physically unreachable. Bone lengths and scales remain unchanged."
+        },
+        "semanticToConcatenatedSource": [
+          [
+            0,
+            0
+          ],
+          [
+            0.016666666666666666,
+            0.02141930380506229
+          ],
+          [
+            0.03333333333333333,
+            0.041725616817262286
+          ],
+          [
+            0.05,
+            0.06063689094207819
+          ],
+          [
+            0.06666666666666667,
+            0.0780297505273905
+          ],
+          [
+            0.08333333333333333,
+            0.09471184952650327
+          ],
+          [
+            0.1,
+            0.1143889142714366
+          ],
+          [
+            0.11666666666666667,
+            0.13492465887538269
+          ],
+          [
+            0.13333333333333333,
+            0.1495413071882495
+          ],
+          [
+            0.15,
+            0.16428584040169697
+          ],
+          [
+            0.16666666666666666,
+            0.1778781405363661
+          ],
+          [
+            0.18333333333333332,
+            0.1909126450595454
+          ],
+          [
+            0.2,
+            0.20196051460586736
+          ],
+          [
+            0.21666666666666667,
+            0.20788468939885954
+          ],
+          [
+            0.23333333333333334,
+            0.21401359940854217
+          ],
+          [
+            0.25,
+            0.22009904650361897
+          ],
+          [
+            0.26666666666666666,
+            0.22608481137454758
+          ],
+          [
+            0.2833333333333333,
+            0.23189287622836235
+          ],
+          [
+            0.3,
+            0.2374999999921003
+          ],
+          [
+            0.31666666666666665,
+            0.24182619078774964
+          ],
+          [
+            0.3333333333333333,
+            0.24609773239637922
+          ],
+          [
+            0.35,
+            0.2503546077119765
+          ],
+          [
+            0.36666666666666664,
+            0.2546140437920813
+          ],
+          [
+            0.38333333333333336,
+            0.25889359190507855
+          ],
+          [
+            0.4,
+            0.26317529377716287
+          ],
+          [
+            0.4166666666666667,
+            0.26861461893195726
+          ],
+          [
+            0.43333333333333335,
+            0.27928824880732206
+          ],
+          [
+            0.45,
+            0.28989752252436396
+          ],
+          [
+            0.4666666666666667,
+            0.30284526481095975
+          ],
+          [
+            0.48333333333333334,
+            0.3466642808824507
+          ],
+          [
+            0.5,
+            0.38732447984686136
+          ],
+          [
+            0.5166666666666667,
+            0.4258273256165609
+          ],
+          [
+            0.5333333333333333,
+            0.4800439401531392
+          ],
+          [
+            0.55,
+            0.5279985392392096
+          ],
+          [
+            0.5666666666666667,
+            0.5797450937815677
+          ],
+          [
+            0.5833333333333334,
+            0.6141981347320351
+          ],
+          [
+            0.6,
+            0.6380224429992294
+          ],
+          [
+            0.6166666666666667,
+            0.66422363008123
+          ],
+          [
+            0.6333333333333333,
+            0.693906726858853
+          ],
+          [
+            0.65,
+            0.7203842900161477
+          ],
+          [
+            0.6666666666666666,
+            0.7452359690339796
+          ],
+          [
+            0.6833333333333333,
+            0.7694886464113139
+          ],
+          [
+            0.7,
+            0.794794341666617
+          ],
+          [
+            0.7166666666666667,
+            0.8211093087865082
+          ],
+          [
+            0.7333333333333333,
+            0.8540705528385794
+          ],
+          [
+            0.75,
+            0.8987714451036387
+          ],
+          [
+            0.7666666666666667,
+            0.9491472253958134
+          ],
+          [
+            0.7833333333333333,
+            0.9996555293665353
+          ],
+          [
+            0.8,
+            1.0576861915353937
+          ],
+          [
+            0.8166666666666667,
+            1.140652893101072
+          ],
+          [
+            0.8333333333333334,
+            1.2616746878204883
+          ],
+          [
+            0.85,
+            1.399999976158142
+          ]
+        ]
+      },
+      "SwordAttack2": {
+        "method": "Monotone PCHIP source-to-semantic arc clock, inverse sampled during baking. Semantic time is runtime clip time.",
+        "sourceClips": [
+          "Sword_Regular_B",
+          "Sword_Regular_B_Rec"
+        ],
+        "sourceClockLandmarks": [
+          [
+            0,
+            0
+          ],
+          [
+            0.24583333333333332,
+            0.27
+          ],
+          [
+            0.5333333611488342,
+            0.51
+          ],
+          [
+            1.5666666626930237,
+            0.77
+          ]
+        ],
+        "postureAdaptation": {
+          "minimumGroundedPelvisMetres": 0.7,
+          "maximumPelvisTiltDegrees": 20,
+          "maximumPelvisToNeckTiltDegrees": 40,
+          "pelvisTiltSoftBandDegrees": 5,
+          "torsoTiltSoftBandDegrees": 6,
+          "ankleHeightAndWorldOrientationPreserved": true,
+          "recoveryExportOffsetCompensated": true,
+          "nativeIdleEndpointTRS": true,
+          "footHorizontalPolicy": "Only reduce source reach when the raised pelvis makes the target physically unreachable. Bone lengths and scales remain unchanged."
+        },
+        "semanticToConcatenatedSource": [
+          [
+            0,
+            0
+          ],
+          [
+            0.016666666666666666,
+            0.04685657480828133
+          ],
+          [
+            0.03333333333333333,
+            0.07861154858350115
+          ],
+          [
+            0.05,
+            0.11057962229086658
+          ],
+          [
+            0.06666666666666667,
+            0.13737735557402025
+          ],
+          [
+            0.08333333333333333,
+            0.1585799821069403
+          ],
+          [
+            0.1,
+            0.17578055977445656
+          ],
+          [
+            0.11666666666666667,
+            0.19050121932857111
+          ],
+          [
+            0.13333333333333333,
+            0.20217289892212081
+          ],
+          [
+            0.15,
+            0.20815379699273862
+          ],
+          [
+            0.16666666666666666,
+            0.21407730966922994
+          ],
+          [
+            0.18333333333333332,
+            0.21973554654493968
+          ],
+          [
+            0.2,
+            0.22512737606391275
+          ],
+          [
+            0.21666666666666667,
+            0.23036565817719512
+          ],
+          [
+            0.23333333333333334,
+            0.23559958072004028
+          ],
+          [
+            0.25,
+            0.24033250220154717
+          ],
+          [
+            0.26666666666666666,
+            0.24498836343214087
+          ],
+          [
+            0.2833333333333333,
+            0.24872850371583605
+          ],
+          [
+            0.3,
+            0.2522156183851284
+          ],
+          [
+            0.31666666666666665,
+            0.2556678364742786
+          ],
+          [
+            0.3333333333333333,
+            0.2590655165939645
+          ],
+          [
+            0.35,
+            0.26241778715476494
+          ],
+          [
+            0.36666666666666664,
+            0.2655439839885063
+          ],
+          [
+            0.38333333333333336,
+            0.2712175518811859
+          ],
+          [
+            0.4,
+            0.27754331256910214
+          ],
+          [
+            0.4166666666666667,
+            0.2838781177709555
+          ],
+          [
+            0.43333333333333335,
+            0.29025440078853393
+          ],
+          [
+            0.45,
+            0.29663858066870585
+          ],
+          [
+            0.4666666666666667,
+            0.3116720985055079
+          ],
+          [
+            0.48333333333333334,
+            0.33839934771217495
+          ],
+          [
+            0.5,
+            0.43283196916636335
+          ],
+          [
+            0.5166666666666667,
+            0.633647394595366
+          ],
+          [
+            0.5333333333333333,
+            0.8146584405928554
+          ],
+          [
+            0.55,
+            0.9125366780176429
+          ],
+          [
+            0.5666666666666667,
+            0.9399559035334728
+          ],
+          [
+            0.5833333333333334,
+            0.9670644086719073
+          ],
+          [
+            0.6,
+            0.9991988265306053
+          ],
+          [
+            0.6166666666666667,
+            1.0325261515875594
+          ],
+          [
+            0.6333333333333333,
+            1.0656510215547454
+          ],
+          [
+            0.65,
+            1.1062943084477144
+          ],
+          [
+            0.6666666666666666,
+            1.1516102126912562
+          ],
+          [
+            0.6833333333333333,
+            1.1833089380998245
+          ],
+          [
+            0.7,
+            1.2127862029521776
+          ],
+          [
+            0.7166666666666667,
+            1.2484667207923714
+          ],
+          [
+            0.7333333333333333,
+            1.3079847410144823
+          ],
+          [
+            0.75,
+            1.3819787228755118
+          ],
+          [
+            0.7666666666666667,
+            1.508347972527042
+          ],
+          [
+            0.77,
+            1.5666666626930237
+          ]
+        ]
+      },
+      "SwordAttack3": {
+        "method": "Monotone PCHIP source-to-semantic arc clock, inverse sampled during baking. Semantic time is runtime clip time.",
+        "sourceClips": [
+          "Sword_Regular_C"
+        ],
+        "sourceClockLandmarks": [
+          [
+            0,
+            0
+          ],
+          [
+            0.6625,
+            0.62
+          ],
+          [
+            2,
+            1.15
+          ]
+        ],
+        "postureAdaptation": {
+          "minimumGroundedPelvisMetres": 0.7,
+          "maximumPelvisTiltDegrees": 20,
+          "maximumPelvisToNeckTiltDegrees": 40,
+          "pelvisTiltSoftBandDegrees": 5,
+          "torsoTiltSoftBandDegrees": 6,
+          "ankleHeightAndWorldOrientationPreserved": true,
+          "recoveryExportOffsetCompensated": true,
+          "nativeIdleEndpointTRS": true,
+          "footHorizontalPolicy": "Only reduce source reach when the raised pelvis makes the target physically unreachable. Bone lengths and scales remain unchanged."
+        },
+        "semanticToConcatenatedSource": [
+          [
+            0,
+            0
+          ],
+          [
+            0.016666666666666666,
+            0.047321151912910864
+          ],
+          [
+            0.03333333333333333,
+            0.06947500663227402
+          ],
+          [
+            0.05,
+            0.08562612163950689
+          ],
+          [
+            0.06666666666666667,
+            0.10243457995238714
+          ],
+          [
+            0.08333333333333333,
+            0.11800486597348936
+          ],
+          [
+            0.1,
+            0.13585607559070922
+          ],
+          [
+            0.11666666666666667,
+            0.15767400627373718
+          ],
+          [
+            0.13333333333333333,
+            0.1771256750507746
+          ],
+          [
+            0.15,
+            0.19456192987854593
+          ],
+          [
+            0.16666666666666666,
+            0.20953965754597448
+          ],
+          [
+            0.18333333333333332,
+            0.22335191545425914
+          ],
+          [
+            0.2,
+            0.23759816089295782
+          ],
+          [
+            0.21666666666666667,
+            0.2529280748858582
+          ],
+          [
+            0.23333333333333334,
+            0.2689430560276378
+          ],
+          [
+            0.25,
+            0.2932821727881674
+          ],
+          [
+            0.26666666666666666,
+            0.3235780725663062
+          ],
+          [
+            0.2833333333333333,
+            0.36081264514359646
+          ],
+          [
+            0.3,
+            0.3979615891294088
+          ],
+          [
+            0.31666666666666665,
+            0.43805205324315466
+          ],
+          [
+            0.3333333333333333,
+            0.478685248963302
+          ],
+          [
+            0.35,
+            0.5095811074425001
+          ],
+          [
+            0.36666666666666664,
+            0.5329838145698886
+          ],
+          [
+            0.38333333333333336,
+            0.5464973955822643
+          ],
+          [
+            0.4,
+            0.5600479780987371
+          ],
+          [
+            0.4166666666666667,
+            0.5766807387408335
+          ],
+          [
+            0.43333333333333335,
+            0.595944283209974
+          ],
+          [
+            0.45,
+            0.6051006084599067
+          ],
+          [
+            0.4666666666666667,
+            0.6114111726346891
+          ],
+          [
+            0.48333333333333334,
+            0.6176313524774741
+          ],
+          [
+            0.5,
+            0.6238428011129145
+          ],
+          [
+            0.5166666666666667,
+            0.6301504629373085
+          ],
+          [
+            0.5333333333333333,
+            0.6358203645504545
+          ],
+          [
+            0.55,
+            0.640703256445704
+          ],
+          [
+            0.5666666666666667,
+            0.6457144411688205
+          ],
+          [
+            0.5833333333333334,
+            0.6508207141014282
+          ],
+          [
+            0.6,
+            0.6560427180666011
+          ],
+          [
+            0.6166666666666667,
+            0.6615605503611732
+          ],
+          [
+            0.6333333333333333,
+            0.6649489939736668
+          ],
+          [
+            0.65,
+            0.6699572531797457
+          ],
+          [
+            0.6666666666666666,
+            0.6766849596460816
+          ],
+          [
+            0.6833333333333333,
+            0.6832789959444199
+          ],
+          [
+            0.7,
+            0.6898245841439348
+          ],
+          [
+            0.7166666666666667,
+            0.6963342827220913
+          ],
+          [
+            0.7333333333333333,
+            0.7052627650264185
+          ],
+          [
+            0.75,
+            0.7169911046221387
+          ],
+          [
+            0.7666666666666667,
+            0.7284611169889104
+          ],
+          [
+            0.7833333333333333,
+            0.7450482053973246
+          ],
+          [
+            0.8,
+            0.7654348549840506
+          ],
+          [
+            0.8166666666666667,
+            0.8053459460206795
+          ],
+          [
+            0.8333333333333334,
+            0.916909465653589
+          ],
+          [
+            0.85,
+            1.0565738936129492
+          ],
+          [
+            0.8666666666666667,
+            1.1090946357871871
+          ],
+          [
+            0.8833333333333333,
+            1.1320573459088337
+          ],
+          [
+            0.9,
+            1.1513546934293117
+          ],
+          [
+            0.9166666666666666,
+            1.171155948046362
+          ],
+          [
+            0.9333333333333333,
+            1.1924766310548875
+          ],
+          [
+            0.95,
+            1.2179043499927502
+          ],
+          [
+            0.9666666666666667,
+            1.2518211207643617
+          ],
+          [
+            0.9833333333333333,
+            1.2980111412762199
+          ],
+          [
+            1,
+            1.344795791519573
+          ],
+          [
+            1.0166666666666666,
+            1.388778380554868
+          ],
+          [
+            1.0333333333333334,
+            1.4309528930753004
+          ],
+          [
+            1.05,
+            1.4732462988758925
+          ],
+          [
+            1.0666666666666667,
+            1.5188857367902528
+          ],
+          [
+            1.0833333333333333,
+            1.574220715177944
+          ],
+          [
+            1.1,
+            1.645263717713533
+          ],
+          [
+            1.1166666666666667,
+            1.7647703525435645
+          ],
+          [
+            1.1333333333333333,
+            1.873778351029614
+          ],
+          [
+            1.15,
+            2
+          ]
+        ]
+      },
+      "WeaponStepForward": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepBack": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": true,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepLeft": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepRight": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      }
+    },
+    "gaoler": {
+      "WeaponStepForward": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepBack": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": true,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepLeft": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      },
+      "WeaponStepRight": {
+        "method": "Original low-body directional adaptation of UAL1 Walk_Loop. Runtime clip time is semantic time.",
+        "sourceClip": "Walk_Loop",
+        "sourceDuration": 1.3333333730697632,
+        "sourceCycleWindow": [
+          0.1,
+          0.7
+        ],
+        "reverseSource": false,
+        "fadeInEnd": 0.14,
+        "fadeOutStart": 0.65,
+        "horizontalFootAmplitude": 0.65,
+        "rootLoweringMetres": 0.1,
+        "controllerOwnsHorizontalTravel": true
+      }
+    }
+  },
+  "assetQA": {
+    "localJointDegreesPer60HzLimit": 18.5,
+    "fullBodySourceRetargeted": true,
+    "swordPostureAdapted": true,
+    "swordPostureConstraints": {
+      "minimumGroundedPelvisMetres": 0.7,
+      "maximumPelvisTiltDegrees": 20,
+      "maximumPelvisToNeckTiltDegrees": 40,
+      "pelvisTiltSoftBandDegrees": 5,
+      "torsoTiltSoftBandDegrees": 6,
+      "ankleHeightAndWorldOrientationPreserved": true,
+      "recoveryExportOffsetCompensated": true,
+      "nativeIdleEndpointTRS": true,
+      "footHorizontalPolicy": "Only reduce source reach when the raised pelvis makes the target physically unreachable. Bone lengths and scales remain unchanged."
+    },
+    "previousStepKeyframesPreserved": true,
+    "baseTRSPreserved": true,
+    "boneLengthsPreserved": true,
+    "sourceContactCriterion": {
+      "Sword_Regular_A": {
+        "sourceTime": 0.2375,
+        "sourceHandPosition": [
+          0.039150923218614506,
+          0.8014986959060845,
+          0.7971373066167665
+        ],
+        "criterion": "Maximum actual wrist forward reach relative to pelvis during the first strike; measured at 240 Hz. This measures the actual wrist, not a guessed virtual blade."
+      },
+      "Sword_Regular_B": {
+        "sourceTime": 0.24583333333333332,
+        "sourceHandPosition": [
+          -0.2615204184055871,
+          0.7665722310333315,
+          0.906733382668629
+        ],
+        "criterion": "Maximum actual wrist forward reach relative to pelvis during the first strike; measured at 240 Hz. This measures the actual wrist, not a guessed virtual blade."
+      },
+      "Sword_Regular_C": {
+        "sourceTime": 0.6625,
+        "sourceHandPosition": [
+          -0.33056886237692895,
+          0.7597171139725436,
+          0.9062844435768295
+        ],
+        "criterion": "Maximum actual wrist forward reach relative to pelvis during the first strike; measured at 240 Hz. This measures the actual wrist, not a guessed virtual blade."
+      }
+    },
+    "report": "work/fixes1/references/fixes1-motion-report.json",
+    "remainingValidation": "Runtime GearPose and equipped weapon continuity plus visual gameplay review belong to the parent integration."
+  },
+  "assets": [
+    {
+      "file": "prisoner-fixes1.glb",
+      "sha256": "19b9cbc651d469f540a7dcb301a012b2a2a373e18915e755d51fc5a8e75938cf",
+      "bytes": 325212
+    },
+    {
+      "file": "gaoler-fixes1.glb",
+      "sha256": "8c273c7c8625f7d098026d60187f928b8b9d14e9fe911ae5809984e26ae4fd52",
+      "bytes": 175356
+    }
+  ],
+  "provenance": {
+    "author": "Quaternius",
+    "license": "CC0-1.0",
+    "source1": "https://quaternius.itch.io/universal-animation-library",
+    "source2": "https://quaternius.itch.io/universal-animation-library-2",
+    "adaptation": "Original new0 proportion retargeting, grounded moderate sword lunge, semantic retime and directional heavy-weapon step adaptation.",
+    "noPaidSource": true
+  }
+}

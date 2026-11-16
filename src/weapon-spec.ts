@@ -69,7 +69,7 @@ export const HAND_GRIP = {
 export const WEAPON_GRIP_SHIFT = {
   sword: 0,
   axe: 0.12,
-  spear: 0.34,
+  spear: 0.39,
   relic: 0,
   unarmed: 0,
 } as const;

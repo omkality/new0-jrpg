@@ -1,4 +1,5 @@
 // Local movement/combat vertical slice. Never submitted to the prize leaderboard.
+import { bodyRadius, bodyPenetration } from "./body-collision.ts";
 import { WEAPONS } from "./weapon-spec.ts";
 import type { Obstacle, WeaponId } from "./world-layout.ts";
 export type Motion =
@@ -98,31 +99,31 @@ export const ENEMIES = {
 } as const;
 export const ATTACKS = [
   {
-    duration: 0.74,
+    duration: 0.85,
     contact: 0.3,
     link: 0.52,
     damage: 16,
     cost: 16,
     lunge: 1.5,
-    cancel: 0.46,
+    cancel: 0.57,
   },
   {
-    duration: 0.7,
+    duration: 0.77,
     contact: 0.27,
     link: 0.51,
     damage: 18,
     cost: 18,
     lunge: 1.8,
-    cancel: 0.47,
+    cancel: 0.56,
   },
   {
-    duration: 1.0,
-    contact: 0.42,
-    link: 1.0,
+    duration: 1.15,
+    contact: 0.62,
+    link: 1.15,
     damage: 28,
     cost: 24,
     lunge: 2.3,
-    cancel: 0.82,
+    cancel: 0.96,
   },
 ] as const;
 export interface MoveInput {
@@ -195,6 +196,10 @@ export class CombatGame {
   private dodgeTravel = 0;
   private swingHit = false;
   private enemyHit = new WeakSet<Fighter>();
+  private evasions = new WeakMap<
+    Fighter,
+    { next: number; x: number; z: number; travel: number }
+  >();
   private dodgeRequest: { x: number; z: number; remaining: number } | null =
     null;
   private staminaDelay = 0;
@@ -524,6 +529,11 @@ export class CombatGame {
           );
           if (
             e.hp > 0 &&
+            !(
+              e.mode === "dodge" &&
+              e.time >= DODGE.invulnerableStart &&
+              e.time <= DODGE.invulnerableEnd
+            ) &&
             length(e.x - p.x, e.z - p.z) < WEAPONS[p.weapon].reach &&
             Math.abs(p.y - e.y) < 1.1 &&
             Math.abs(angle) < 1.1 &&
@@ -628,6 +638,48 @@ export class CombatGame {
   private enemyUpdate(dt: number, e: Fighter) {
     const p = this.player,
       d = length(e.x - p.x, e.z - p.z);
+    const evasion = this.evasions.get(e);
+    if (e.mode === "dodge" && evasion) {
+      const u = clamp(
+        (e.time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
+        0,
+        1,
+      );
+      const travel = 1.45 * (0.5 - 0.5 * Math.cos(Math.PI * u)),
+        step = travel - evasion.travel;
+      evasion.travel = travel;
+      this.move(e, evasion.x * step, evasion.z * step);
+      if (e.time >= DODGE.duration) this.set(e, "recover");
+      return;
+    }
+    e.stamina = Math.min(100, e.stamina + dt * 13);
+    if (
+      e.kind !== "mimic" &&
+      ["idle", "move", "recover"].includes(e.mode) &&
+      p.mode === "attack" &&
+      p.time > 0.1 &&
+      p.time < ATTACKS[Math.max(0, p.combo - 1)].contact - 0.045 &&
+      d < WEAPONS[p.weapon].reach + 0.25 &&
+      e.stamina >= 28 &&
+      this.elapsed >= (evasion?.next ?? 3)
+    ) {
+      const facing = Math.atan2(p.x - e.x, p.z - e.z);
+      for (const [side, offset] of [
+        ["Left", -Math.PI / 2],
+        ["Right", Math.PI / 2],
+        ["Back", Math.PI],
+      ] as const) {
+        const x = Math.sin(facing + offset),
+          z = Math.cos(facing + offset);
+        if (this.walkable(e.x + x * 1.45, e.z + z * 1.45, e.x, e.z, true)) {
+          e.dodgeSide = side;
+          e.stamina -= 28;
+          this.evasions.set(e, { next: this.elapsed + 6.5, x, z, travel: 0 });
+          this.set(e, "dodge");
+          return;
+        }
+      }
+    }
     if (!this.clearLine(e, p)) {
       e.speed = 0;
       this.set(e, "idle");
@@ -713,49 +765,88 @@ export class CombatGame {
       );
     } else this.set(e, "idle");
   }
+  private staticPenetration(f: Fighter, x: number, z: number, o: Obstacle) {
+    if (
+      !this.isObstacleActive(o) ||
+      (o.minY !== undefined && f.y < o.minY) ||
+      (o.maxY !== undefined && f.y >= o.maxY)
+    )
+      return 0;
+    const ax = Math.abs(x - o.x) - o.hx,
+      az = Math.abs(z - o.z) - o.hz;
+    return (
+      bodyRadius(f) -
+      (Math.hypot(Math.max(0, ax), Math.max(0, az)) +
+        Math.min(0, Math.max(ax, az)))
+    );
+  }
+  // Used by the ordinary-input route planner, with the same walls and corpses.
+  walkable(
+    x: number,
+    z: number,
+    fromX = this.player.x,
+    fromZ = this.player.z,
+    avoidLiving = false,
+  ) {
+    const f = {
+      ...this.player,
+      x: fromX,
+      z: fromZ,
+      y: this.heightAt(fromX, fromZ),
+    };
+    if (
+      x < this.bounds.minX ||
+      x > this.bounds.maxX ||
+      z < this.bounds.minZ ||
+      z > this.bounds.maxZ ||
+      this.heightAt(x, z) > f.y + 0.3
+    )
+      return false;
+    if (
+      this.obstacles.some((o) => {
+        const next = this.staticPenetration(f, x, z, o);
+        return (
+          next > 1e-6 &&
+          next >= this.staticPenetration(f, fromX, fromZ, o) - 1e-7
+        );
+      })
+    )
+      return false;
+    return !this.opponents.some((o) => {
+      if (o === this.player || (!avoidLiving && o.hp > 0)) return false;
+      const next = bodyPenetration(f, x, z, o);
+      return next > 1e-6 && next >= bodyPenetration(f, fromX, fromZ, o) - 1e-7;
+    });
+  }
   private move(f: Fighter, dx: number, dz: number) {
-    const can = (x: number, z: number) =>
-      !this.obstacles.some(
-        (o) =>
-          this.isObstacleActive(o) &&
-          (o.minY === undefined || f.y >= o.minY) &&
-          (o.maxY === undefined || f.y < o.maxY) &&
-          Math.abs(x - o.x) < o.hx + 0.28 &&
-          Math.abs(z - o.z) < o.hz + 0.28,
-      ) && this.heightAt(x, z) < f.y + 0.3;
-    const x = clamp(f.x + dx, this.bounds.minX, this.bounds.maxX),
-      z = clamp(f.z + dz, this.bounds.minZ, this.bounds.maxZ);
-    if (can(x, f.z)) f.x = x;
-    if (can(f.x, z)) f.z = z;
-    f.y = this.heightAt(f.x, f.z);
     const others =
       f === this.player
         ? this.opponents
         : [this.player, ...this.opponents.filter((e) => e !== f)];
-    for (const other of others)
-      if (other.hp > 0 && f.hp > 0 && Math.abs(other.y - f.y) < 1) {
-        const ox = f.x - other.x,
-          oz = f.z - other.z,
-          d = length(ox, oz);
-        const separation =
-          f.kind === "gaoler" || other.kind === "gaoler" ? 1.1 : 0.82;
-        if (d > 0 && d < separation) {
-          const sx = clamp(
-            other.x + (ox / d) * separation,
-            this.bounds.minX,
-            this.bounds.maxX,
-          );
-          const sz = clamp(
-            other.z + (oz / d) * separation,
-            this.bounds.minZ,
-            this.bounds.maxZ,
-          );
-          if (can(sx, sz)) {
-            f.x = sx;
-            f.z = sz;
-            f.y = this.heightAt(sx, sz);
-          }
-        }
+    const can = (x: number, z: number) => {
+      if (this.heightAt(x, z) > f.y + 0.3) return false;
+      for (const o of this.obstacles) {
+        const next = this.staticPenetration(f, x, z, o);
+        if (
+          next > 1e-6 &&
+          next >= this.staticPenetration(f, f.x, f.z, o) - 1e-7
+        )
+          return false;
       }
+      for (const o of others) {
+        const next = bodyPenetration(f, x, z, o);
+        if (next > 1e-6 && next >= bodyPenetration(f, f.x, f.z, o) - 1e-7)
+          return false;
+      }
+      return true;
+    };
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.1));
+    for (let i = 0; i < steps; i++) {
+      const x = clamp(f.x + dx / steps, this.bounds.minX, this.bounds.maxX),
+        z = clamp(f.z + dz / steps, this.bounds.minZ, this.bounds.maxZ);
+      if (can(x, f.z)) f.x = x;
+      if (can(f.x, z)) f.z = z;
+      f.y = this.heightAt(f.x, f.z);
+    }
   }
 }
