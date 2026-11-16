@@ -1,4 +1,5 @@
 import { AREA_ORDER, type AreaId } from "./world-layout.ts";
+import type { FrameCostReport } from "./frame-cost.ts";
 
 export interface ResourceMetrics {
   geometries: number;
@@ -34,6 +35,7 @@ export interface DeviceReport {
   context_losses: number;
   interrupted: boolean;
   stages: StageMetrics[];
+  frame_cost?: FrameCostReport;
 }
 
 // Wall-clock RAF intervals, independent of simulation time and review recording.

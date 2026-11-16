@@ -57,6 +57,42 @@ class StageMetrics(Body):
     resources: ResourceMetrics | None = None
 
 
+CostKey = Literal[
+    "raf_ms", "callback_cpu_ms", "simulation_cpu_ms", "world_cpu_ms",
+    "environment_cpu_ms", "player_cpu_ms", "props_cpu_ms", "camera_cpu_ms",
+    "npc_cpu_ms", "render_submit_cpu_ms", "hud_cpu_ms", "grain_cpu_ms",
+]
+
+
+class CostMetric(Body):
+    samples: int = Field(ge=1, le=100000)
+    mean_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    p95_upper_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    max_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+
+
+class CostRow(Body):
+    phase: Literal["route", "probe"]
+    area: Literal["forest", "roofs", "chapel", "crypt"]
+    mode: Literal["normal", "no-grain", "no-hud", "world-only"]
+    block: int = Field(ge=0, le=7)
+    resolution: float = Field(ge=0.1, le=1, allow_inf_nan=False)
+    frames: int = Field(ge=1, le=100000)
+    fps: float = Field(ge=0, le=1000, allow_inf_nan=False)
+    calls_mean: float = Field(ge=0, le=100000, allow_inf_nan=False)
+    triangles_mean: float = Field(ge=0, le=100000000, allow_inf_nan=False)
+    metrics: dict[CostKey, CostMetric] = Field(min_length=1, max_length=12)
+
+
+class FrameCostReport(Body):
+    protocol: Literal["frame-cost-1"]
+    cpu_bin_ms: float = Field(ge=0.01, le=1, allow_inf_nan=False)
+    probe_block_ms: int = Field(ge=1000, le=10000)
+    probe_settle_ms: int = Field(ge=0, le=1000)
+    probe_complete: bool
+    rows: list[CostRow] = Field(max_length=12)
+
+
 class DeviceReport(Body):
     protocol: Literal["device-check-1", "device-check-2", "device-check-3"]
     asset_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{16}$")
@@ -71,6 +107,7 @@ class DeviceReport(Body):
     context_losses: int = Field(ge=0, le=100000)
     interrupted: bool
     stages: list[StageMetrics] = Field(min_length=1, max_length=4)
+    frame_cost: FrameCostReport | None = None
 
 
 def create_app(settings=None):
