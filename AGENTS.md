@@ -18,9 +18,11 @@
   Validate the final posed sleeves as well as the torso, including both support hands.
 - All visible text uses the local Ebbe Black face, including canvas HUD. Keep its OFL
   notice and test Cyrillic coverage and small-screen readability. Use SVG for action icons.
-- Latest art direction: gloomy pale stone and cloth, readable cool midtones, localized shimmering light
-  through dark depth fog, subtle monochrome grain and clean UI. Avoid uniform bright
-  lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.
+- Latest art direction: gray-white mist, pale air and readable cool midtones around
+  dark natural materials. Do not bleach all locations white. Keep an actual forest
+  with soil and foliage, and a darker brick castle lit locally by textured torches
+  and bright window shafts. Humanoids have modeled faces, not blank white masks.
+  Fitted cloth and curved rigid armour remain distinct layers.
 - Walls, doors, stairs and visible supports must describe the same traversable world.
   Locked rooms cannot be bypassed from a flank or rear stair. Key names match their doors.
   Taking damage interrupts chest inspection and drinking. Torches burn at every distance.
@@ -29,7 +31,8 @@
   Full rolls have planted compression and landing. Choose a skinned front/back/side
   fall from the last impact direction, never ragdoll. Do not restore floor attack cones
   or broad solid sword ribbons. Autoplay explores, collects and fights via normal input.
-- Keep gameplay timings aligned with public/assets/motion/contract.json. Linked attacks
+- Keep gameplay timings aligned with public/assets/motion/fixes1-contract.json.
+  The older contract.json protects retained baseline clips and their phase mapping. Linked attacks
   continue at the authored follow-through timestamps instead of resetting to Guard.
 - Player documentation describes phone/touch controls only.
 - README badges show only technologies actually used and useful, verifiable project
@@ -49,6 +52,9 @@
   Validate garment contact curves and real held-weapon geometry with the asset checks.
 - Iterate on the playable demo first. Provide a short real gameplay GIF/video with a
   focused visual/interaction change, then incorporate feedback before adding more systems.
+- Never refit posed clothing BVHs or search candidate arm poses in the rendering loop.
+  Keep actor-space skeletal transitions continuous, including interruptions, healing,
+  enemy evasions and weapon release. Corpses retain physical footprints.
 - Target at least 60 FPS on phones. Never hard-cap touch rendering at 30 FPS.
   Measure actual frame times. Do not present viewport resizing as a physical-phone benchmark.
 - Keep stone, floor and character silhouettes readable. Retro art comes from materials,

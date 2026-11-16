@@ -36,8 +36,10 @@ export class World {
   private cameraSolver = new FollowCameraClearance();
   private cameraBounds = { minX: -7.1, maxX: 7.1, maxY: Infinity };
   private fogColor = new THREE.Color();
-  private playerFill = new THREE.PointLight(0xcdd8e4, 2.2, 4.2, 2);
+  private playerFill = new THREE.PointLight(0xcdd8e4, 0.42, 4.2, 2);
   private shadows: THREE.Mesh[] = [];
+  private settledCorpses = new WeakSet<object>();
+  private corpsePoseTime = new WeakMap<object, number>();
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
@@ -141,6 +143,8 @@ export class World {
     this.props.reset();
     this.player.reset();
     for (const actor of this.actors.values()) actor.reset();
+    this.settledCorpses = new WeakSet<object>();
+    this.corpsePoseTime = new WeakMap<object, number>();
   }
   selectLocation(id: LocationId) {
     this.location = id === "courtyard" ? "forest" : id;
@@ -215,7 +219,14 @@ export class World {
       const actor = this.actors.get(id);
       if (actor) {
         actor.root.visible = visible;
-        if (visible) actor.update(dt, e);
+        if (visible && !this.settledCorpses.has(e)) {
+          actor.update(dt, e);
+          if (e.hp <= 0) {
+            const posed = (this.corpsePoseTime.get(e) ?? 0) + dt;
+            this.corpsePoseTime.set(e, posed);
+            if (e.time > 3.5 && posed > 0.5) this.settledCorpses.add(e);
+          }
+        }
       }
     }
     this.props.update(dt, this.elapsed);
@@ -245,8 +256,8 @@ export class World {
         inspect.y + 1.4,
         inspect.z + 0.7,
       );
-      this.playerFill.intensity = 7;
-    } else this.playerFill.intensity = 2.2;
+      this.playerFill.intensity = 1.5;
+    } else this.playerFill.intensity = this.location === "forest" ? 0.7 : 0.42;
     const alpha = 1 - Math.exp(-dt * 8);
     // Cast from head height so a waist-high chest cannot pull the camera
     // into the hero's shoulder while walking around it.

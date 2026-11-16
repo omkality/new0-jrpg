@@ -138,6 +138,12 @@ export class Campaign extends CombatGame {
         z: spec.z,
         yaw: 0,
         kind: spec.kind,
+        weapon:
+          spec.kind === "gaoler"
+            ? "axe"
+            : spec.kind === "effigy"
+              ? "unarmed"
+              : "sword",
         id: spec.id,
         area: spec.area,
         hp: ENEMIES[spec.kind].hp,

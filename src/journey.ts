@@ -1,6 +1,7 @@
 import { AREAS, AREA_ORDER, type AreaId, type Point } from "./world-layout.ts";
 import { Campaign, type ScenarioId } from "./campaign.ts";
 import { ENEMIES, type MoveInput } from "./game.ts";
+import { RouteNavigation } from "./route-navigation.ts";
 import { WEAPONS } from "./weapon-spec.ts";
 
 const rest: MoveInput = { x: 0, z: 0, guard: false };
@@ -154,8 +155,11 @@ export class CampaignShowcase {
   private g: Campaign;
   private target?: object;
   private healthAtStep = 100;
+  private navigation: RouteNavigation;
+  private frameDt = 1 / 60;
   constructor(game: Campaign, scenario: ScenarioId) {
     this.g = game;
+    this.navigation = new RouteNavigation(game);
     this.steps =
       scenario === "journey"
         ? AREA_ORDER.flatMap((a, i) => [
@@ -267,12 +271,19 @@ export class CampaignShowcase {
     this.attackBegan = false;
     this.dodged = false;
   }
-  private towards(point: Point, tolerance = 0.25): MoveInput {
+  private towards(
+    point: Point,
+    tolerance = 0.25,
+    avoidLiving = false,
+  ): MoveInput {
     const p = this.g.player,
-      dx = point.x - p.x,
-      dz = point.z - p.z,
+      waypoint = this.navigation.next(point, this.frameDt, avoidLiving),
+      dx = waypoint.x - p.x,
+      dz = waypoint.z - p.z,
       d = Math.hypot(dx, dz);
-    return d < tolerance ? rest : { x: dx / d, z: dz / d, guard: false };
+    return d < 0.001 || Math.hypot(point.x - p.x, point.z - p.z) < tolerance
+      ? rest
+      : { x: dx / d, z: dz / d, guard: false };
   }
   private fight(near = false): MoveInput {
     const g = this.g,
@@ -370,6 +381,7 @@ export class CampaignShowcase {
     return rest;
   }
   update(dt: number): MoveInput {
+    this.frameDt = dt;
     if (this.done) return rest;
     this.stepTime += dt;
     const g = this.g,
@@ -405,7 +417,7 @@ export class CampaignShowcase {
         this.next();
         return rest;
       }
-      const move = this.towards(step);
+      const move = this.towards(step, 0.25, true);
       if (g.scenario === "escape") {
         const threat = g.foes.find(
           (e) =>

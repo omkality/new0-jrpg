@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node author-combat.mjs && node retarget-combat.mjs && node validate-combat.mjs",
-    "check": "node validate-combat.mjs && node fit-cast-v8.mjs && node fix-garment-v7.mjs --check --poses --verify-floor && node props-v7-validate.mjs && node validate-gear-v8.mjs --fit --full --strict && node validate-gear-v8.mjs --character watcher --fit --full --strict && node validate-gear-v8.mjs --character gaoler --fit --full --strict",
+    "check": "node validate-combat.mjs && node fit-cast-v8.mjs && node fix-garment-v7.mjs --check --poses --verify-floor && node props-v7-validate.mjs && node validate-sword-posture-fixes1.mjs && node validate-motion-continuity.mjs && node validate-gear-fixes1.mjs && node validate-appearance-fixes1.mjs && node validate-environment-fixes1.mjs",
     "build:props": "node props-v7-fetch.mjs && node props-v7-prepare.mjs && node props-v7-validate.mjs"
   },
   "dependencies": {

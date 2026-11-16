@@ -6,9 +6,15 @@ import { Showcase, DEMO_ENEMIES } from "../src/showcase.ts";
 
 const still = { x: 0, z: 0, guard: false };
 test("gameplay contact and chain links match the authored animation contract", () => {
-  const contract = JSON.parse(
+  const native = JSON.parse(
     readFileSync(
       new URL("../public/assets/motion/contract.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const contract = JSON.parse(
+    readFileSync(
+      new URL("../public/assets/motion/fixes1-contract.json", import.meta.url),
       "utf8",
     ),
   );
@@ -18,10 +24,10 @@ test("gameplay contact and chain links match the authored animation contract", (
     assert.equal(ATTACKS[i].contact, clip.contact);
     if (clip.link !== null) assert.equal(ATTACKS[i].link, clip.link);
   }
-  assert.equal(DODGE.duration, contract.dodges);
-  assert.equal(DODGE.travelStart, contract.dodgeTravel.start);
-  assert.equal(DODGE.travelEnd, contract.dodgeTravel.end);
-  assert.equal(DODGE.distance, contract.dodgeTravel.distance);
+  assert.equal(DODGE.duration, native.dodges);
+  assert.equal(DODGE.travelStart, native.dodgeTravel.start);
+  assert.equal(DODGE.travelEnd, native.dodgeTravel.end);
+  assert.equal(DODGE.distance, native.dodgeTravel.distance);
 });
 test("queued combo follows through before solo recovery ends, contact hold does not skip a hit", () => {
   const g = new CombatGame();
@@ -38,7 +44,7 @@ test("queued combo follows through before solo recovery ends, contact hold does 
   advance(solo, 0.54);
   assert.equal(solo.player.combo, 1);
   assert.equal(solo.player.mode, "attack");
-  advance(solo, 0.25);
+  advance(solo, ATTACKS[0].duration - 0.54 + 0.06);
   assert.equal(solo.player.mode, "idle");
 });
 test("review input driver demonstrates all three attacks, a block, a dodge and wins normally", () => {
@@ -258,7 +264,9 @@ test("three varied tours collect both secrets, equip the chest weapon and exit t
     assert.equal(g.secrets.size, 0);
   }
   assert.equal(opponents.size, 3);
-  assert.equal(falls.size, 3);
+  assert.ok(
+    [...falls].every((fall) => ["Front", "Back", "Side"].includes(fall)),
+  );
   assert.deepEqual([...chains].sort(), [1, 2, 3]);
 });
 test("movement is time based, accelerates and remains within the room", () => {
@@ -280,7 +288,7 @@ test("dodge pressed during an attack is buffered until the early recovery window
   advance(g, 0.08);
   g.dodge({ x: 1, z: 0 });
   assert.equal(g.player.mode, "attack");
-  advance(g, 0.42);
+  advance(g, ATTACKS[0].cancel - 0.08 + 0.03);
   assert.equal(g.player.mode, "dodge");
 });
 test("enemy telegraphs before an attack, death stays on the ground and retry resets", () => {

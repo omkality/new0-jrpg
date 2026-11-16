@@ -62,9 +62,11 @@ export class GearCollision {
     rig.traverse((o) => {
       if (
         !(o instanceof THREE.SkinnedMesh) ||
+        !o.visible ||
         !(
           /^new0_v[78]_/.test(o.name) ||
-          (includeBody && o.name.startsWith("tripo_mesh_"))
+          (includeBody &&
+            (o.name.startsWith("tripo_mesh_") || o.name === "body"))
         )
       )
         return;
@@ -73,7 +75,7 @@ export class GearCollision {
       const index = o.geometry.index;
       for (let i = 0; i < (index?.count ?? count); i += 3) {
         const tri = [0, 1, 2].map((k) => (index ? index.getX(i + k) : i + k));
-        if (o.name.startsWith("tripo_mesh_")) {
+        if (o.name.startsWith("tripo_mesh_") || o.name === "body") {
           const j = o.geometry.getAttribute("skinIndex"),
             w = o.geometry.getAttribute("skinWeight");
           if (
