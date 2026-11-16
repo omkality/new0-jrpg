@@ -22,6 +22,7 @@ import {
 } from "./motion-policy";
 import { WEAPON_RELEASE_TIME } from "./weapon-spec";
 import { MixerPose } from "./mixer-pose";
+import { ActionBlend, locomotionName } from "./action-blend";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
@@ -42,6 +43,8 @@ interface RigState {
   continuity: SkeletonContinuity;
   feet: FootContact;
   mixerPose: MixerPose;
+  blend: ActionBlend;
+  locomotionSpeed: number;
 }
 interface FloorClip {
   duration: number;
@@ -229,6 +232,8 @@ export class Actor {
           continuity: new SkeletonContinuity(rig, kind === "gaoler"),
           feet: new FootContact(rig),
           mixerPose: new MixerPose(rig),
+          blend: new ActionBlend(),
+          locomotionSpeed: 0,
         });
       }),
     );
@@ -236,10 +241,17 @@ export class Actor {
   private change(s: RigState, name: string, once: boolean) {
     if (s.current === name) return;
     const action = s.actions.get(name) ?? s.actions.get("Idle")!;
-    action.reset();
+    const loop = ["Idle", "Walk", "Run", "Guard"].includes(name);
+    const resume = loop && action.isScheduled();
+    const phase =
+      /^(Walk|Run)$/.test(name) && /^(Walk|Run)$/.test(s.current) && s.action
+        ? (s.action.time % s.action.getClip().duration) /
+          s.action.getClip().duration
+        : 0;
+    if (!resume) action.reset();
+    if (!resume && loop) action.time = phase * action.getClip().duration;
     action.enabled = true;
     action.setEffectiveTimeScale(1);
-    action.setEffectiveWeight(1);
     action.setLoop(
       once ? THREE.LoopOnce : THREE.LoopRepeat,
       once ? 1 : Infinity,
@@ -256,8 +268,7 @@ export class Actor {
           : once
             ? 0.09
             : 0.18;
-    s.action?.fadeOut(fade);
-    action.fadeIn(fade);
+    s.blend.select(action, fade);
     s.action = action;
     s.current = name;
   }
@@ -303,7 +314,15 @@ export class Actor {
       );
     }
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
-    const name = motionName(f);
+    s.locomotionSpeed = THREE.MathUtils.damp(
+      s.locomotionSpeed,
+      f.speed,
+      12,
+      dt,
+    );
+    const name = ["idle", "move", "recover"].includes(mode)
+      ? locomotionName(s.locomotionSpeed, s.current)
+      : motionName(f);
     const semanticTime =
       mode === "windup" || mode === "attack"
         ? semanticAttackTime(f, this.enemy)
@@ -331,6 +350,7 @@ export class Actor {
             ? Math.max(0.55, f.speed / 1.05)
             : 1,
       );
+    s.blend.update(dt);
     s.mixer.update(dt);
     s.mixerPose.capture();
     s.continuity.apply(dt);
@@ -403,12 +423,14 @@ export class Actor {
   reset() {
     for (const s of this.states.values()) {
       s.mixer.stopAllAction();
+      s.blend.reset();
       s.mixerPose.reset();
       s.current = "";
       s.gear.reset();
       s.continuity.reset();
       s.action = undefined;
       s.floorOffset = 0;
+      s.locomotionSpeed = 0;
       if (s.dropped) {
         s.hand?.add(s.weapon);
         attachWeapon(s.weapon, s.profile === "gaoler");

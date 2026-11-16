@@ -7,6 +7,7 @@ import { Input } from "./input";
 import { World } from "./world";
 import { Sound } from "./audio";
 import { API } from "./api";
+import { HUDTextCache } from "./hud-text";
 import { CampaignShowcase } from "./journey";
 import { LOCATIONS } from "./locations";
 import {
@@ -48,22 +49,7 @@ const game = new Campaign(),
 const world = new World($<HTMLCanvasElement>("#world"), game);
 const hud = $<HTMLCanvasElement>("#hud"),
   h = hud.getContext("2d")!;
-const atmosphere = $<HTMLCanvasElement>("#atmosphere"),
-  noiseCtx = atmosphere.getContext("2d", { alpha: false })!;
-const noiseTile = document.createElement("canvas");
-noiseTile.width = noiseTile.height = 128;
-const noiseTileCtx = noiseTile.getContext("2d")!,
-  noisePixels = noiseTileCtx.createImageData(128, 128);
-let noiseSeed = 913;
-for (let i = 0; i < noisePixels.data.length; i += 4) {
-  noiseSeed ^= noiseSeed << 13;
-  noiseSeed ^= noiseSeed >>> 17;
-  noiseSeed ^= noiseSeed << 5;
-  const v = (noiseSeed >>> 24) & 255;
-  noisePixels.data.set([v, v, v, 255], i);
-}
-noiseTileCtx.putImageData(noisePixels, 0, 0);
-const noisePattern = noiseCtx.createPattern(noiseTile, "repeat")!;
+const hudText = new HUDTextCache();
 const params = new URLSearchParams(location.search),
   review = params.get("review") === "1";
 const frameCostRequested = params.get("profile") === "1";
@@ -72,8 +58,7 @@ let layerMode: LayerMode = "normal";
 function profileLayers(mode: LayerMode) {
   if (mode === layerMode) return;
   layerMode = mode;
-  atmosphere.style.visibility =
-    mode === "no-grain" || mode === "world-only" ? "hidden" : "";
+  world.setGrainEnabled(mode !== "no-grain" && mode !== "world-only");
   hud.style.visibility =
     mode === "no-hud" || mode === "world-only" ? "hidden" : "";
 }
@@ -87,8 +72,7 @@ let loaded = false,
   autoplay = false;
 let last = performance.now(),
   accumulator = 0,
-  uiTick = 0,
-  lastNoise = 0;
+  uiTick = 0;
 let demonstration: CampaignShowcase | null = null,
   deviceCheck: DeviceCheck | null = null;
 let lastDeviceReport: DeviceReport | null = null;
@@ -236,26 +220,11 @@ window.addEventListener("game-context-lost", () => {
   fatal("Графика приостановлена. Перезагрузи демку.");
 });
 function resizeHUD() {
-  hud.width = atmosphere.width = innerWidth;
-  hud.height = atmosphere.height = innerHeight;
-  lastNoise = 0;
+  hud.width = innerWidth;
+  hud.height = innerHeight;
 }
 window.addEventListener("resize", resizeHUD);
 resizeHUD();
-function drawNoise(now: number) {
-  if (now - lastNoise < 125) return;
-  lastNoise = now;
-  const step = Math.floor(now / 125);
-  noiseCtx.setTransform(1, 0, 0, 1, (step * 29) % 128, (step * 47) % 128);
-  noiseCtx.fillStyle = noisePattern;
-  noiseCtx.fillRect(
-    -128,
-    -128,
-    atmosphere.width + 256,
-    atmosphere.height + 256,
-  );
-  noiseCtx.setTransform(1, 0, 0, 1, 0, 0);
-}
 function text(
   t: string,
   x: number,
@@ -264,16 +233,7 @@ function text(
   color = "#e4eaf3",
   align: CanvasTextAlign = "left",
 ) {
-  h.font = `${Math.max(12, size * 1.2)}px "Ebbe Black"`;
-  h.textAlign = align;
-  h.fillStyle = color;
-  h.shadowColor = "#132232";
-  h.shadowBlur = 5;
-  h.lineWidth = 2;
-  h.strokeStyle = "rgba(12,16,17,0.8)";
-  h.strokeText(t, x, y);
-  h.fillText(t, x, y);
-  h.shadowBlur = 0;
+  hudText.draw(h, t, x, y, Math.max(12, size * 1.2), color, align);
 }
 function bar(
   x: number,
@@ -494,7 +454,7 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-fixes2-${selected}-60fps.mp4`;
+    a.download = `new0-fixes3-${selected}-60fps.mp4`;
     visible("#download", true);
     const timeline = $<HTMLAnchorElement>("#record-timeline");
     if (timeline.href.startsWith("blob:")) URL.revokeObjectURL(timeline.href);
@@ -503,7 +463,7 @@ async function stopRecording() {
         [
           JSON.stringify(
             {
-              protocol: "fixes2-capture-1",
+              protocol: "fixes3-capture-1",
               scenario: selected,
               asset_revision: ASSET_REVISION,
               client_revision: CLIENT_REVISION,
@@ -519,7 +479,7 @@ async function stopRecording() {
         { type: "application/json" },
       ),
     );
-    timeline.download = `new0-fixes2-${selected}-timeline.json`;
+    timeline.download = `new0-fixes3-${selected}-timeline.json`;
     visible("#record-timeline", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
@@ -680,10 +640,9 @@ function frame(now: number) {
     }
   }
   if (costs) stamp = performance.now();
-  if (layerMode !== "no-grain" && layerMode !== "world-only")
-    drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
   if (costs) {
-    costs.grain_cpu_ms = performance.now() - stamp;
+    // Grain now runs inside the existing WebGL draws, with no 2D/CSS layer.
+    costs.grain_cpu_ms = 0;
     stamp = performance.now();
   }
   if (layerMode !== "no-hud" && layerMode !== "world-only") drawHUD();
@@ -707,17 +666,6 @@ function frame(now: number) {
       recordCanvas.width,
       recordCanvas.height,
     );
-    recordCtx.globalCompositeOperation = "soft-light";
-    recordCtx.globalAlpha = 0.16;
-    recordCtx.drawImage(
-      atmosphere,
-      0,
-      0,
-      recordCanvas.width,
-      recordCanvas.height,
-    );
-    recordCtx.globalAlpha = 1;
-    recordCtx.globalCompositeOperation = "source-over";
     recordCtx.drawImage(hud, 0, 0, recordCanvas.width, recordCanvas.height);
     const current = capture;
     const mark = {
@@ -880,6 +828,7 @@ async function boot() {
     ]);
     if (!faces.length) throw new Error("Не удалось загрузить шрифт игры");
     world.resetView();
+    hudText.clear();
     loaded = true;
     $("#performance").title = world.device;
     $<HTMLButtonElement>("#autoplay").disabled = false;

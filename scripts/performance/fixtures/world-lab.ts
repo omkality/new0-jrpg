@@ -245,7 +245,7 @@ function report() {
     physical_iphone_benchmark: false,
     mode: targetRuns > 1 ? "restart-resource-test" : "normal-input-tour",
     limits:
-      "World and Campaign only, excludes main.ts HUD, noise soft-light compositing and audio. Accelerated modes are not realtime FPS benchmarks. CPU component values are sums per rendered frame and include probe overhead. GPU timing optional.",
+      "World and Campaign only, includes fixes3 shader grain and static lighting, excludes main.ts HUD and audio. Accelerated modes are not realtime FPS benchmarks. CPU component values are sums per rendered frame and include probe overhead. GPU timing optional.",
     flags: flags(),
     gpu_timer_available: !!ext,
     heap_api_available: !!(performance as any).memory,

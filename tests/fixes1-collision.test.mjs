@@ -154,7 +154,7 @@ test("weapon policy selects available enemy clips and preserves retimed contacts
   g.player.armour = 1;
   assert.equal(motionName(g.player), "EvadeBack");
   g.player.armour = 0;
-  assert.equal(motionName(g.player), "DodgeBack");
+  assert.equal(motionName(g.player), "EvadeBack");
   const contacts = [0.3, 0.27, 0.42];
   for (let i = 0; i < 3; i++) {
     assert(

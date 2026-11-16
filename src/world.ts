@@ -5,6 +5,7 @@ import { Campaign } from "./campaign";
 import { ENCOUNTERS, type AreaId } from "./world-layout";
 import type { GameEvent } from "./game";
 import type { FrameCosts } from "./frame-cost";
+import { Atmosphere } from "./atmosphere";
 import { LevelProps } from "./level-props";
 import { cameraClearance, FollowCameraClearance } from "./camera-clearance";
 import {
@@ -22,6 +23,7 @@ export class World {
   private actors = new Map<string, Actor>();
   private props: LevelProps;
   private environment: ConnectedEnvironment;
+  private atmosphere: Atmosphere;
   private readyTextures: Promise<void>;
   yaw = 0;
   pitch = 0.08;
@@ -60,7 +62,9 @@ export class World {
   ) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      // Native low-resolution edges fit the retro presentation and avoid an
+      // extra multisample surface/resolve on mobile tile-based GPUs.
+      antialias: false,
       powerPreference: "high-performance",
       alpha: false,
     });
@@ -74,8 +78,11 @@ export class World {
     this.device = debug
       ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))
       : "WebGL2";
-    this.scene.background = new THREE.Color(0x7e8b94);
-    this.scene.fog = new THREE.FogExp2(0x526166, 0.018);
+    this.scene.background = new THREE.Color(LOCATIONS.forest.fog);
+    this.scene.fog = new THREE.FogExp2(
+      LOCATIONS.forest.fog,
+      LOCATIONS.forest.density,
+    );
     const manager = new THREE.LoadingManager();
     this.readyTextures = new Promise((resolve, reject) => {
       manager.onLoad = () => resolve();
@@ -84,6 +91,7 @@ export class World {
     this.environment = new ConnectedEnvironment(
       new THREE.TextureLoader(manager),
     );
+    this.atmosphere = new Atmosphere(this.environment.localLighting);
     this.scene.add(this.environment.root, this.playerFill, this.player.root);
     for (const spec of ENCOUNTERS)
       if (spec.kind !== "mimic") {
@@ -134,6 +142,7 @@ export class World {
       ...[...this.actors.values()].map((a) => a.load()),
     ]);
     this.props.build();
+    this.atmosphere.apply(this.scene);
     this.resetView();
     this.render(0.01);
     // Warm every area's material/light variants before the input tour begins.
@@ -206,6 +215,8 @@ export class World {
     const costs = this.frameCosts;
     let stamp = costs ? performance.now() : 0;
     this.elapsed += dt;
+    this.atmosphere.time.value = this.elapsed;
+    this.atmosphere.veil.value = this.location === "forest" ? 0.1 : 0.075;
     const p = this.game.player;
     this.location = this.game.location;
     this.environment.update(
@@ -382,12 +393,16 @@ export class World {
         : null,
     };
   }
+  setGrainEnabled(enabled: boolean) {
+    this.atmosphere.grain.value = enabled ? 0.022 : 0;
+  }
   async dispose() {
     window.removeEventListener("resize", this.resizeHandler);
     this.canvas.removeEventListener("webglcontextlost", this.contextHandler);
     this.player.dispose();
     for (const actor of this.actors.values()) actor.dispose();
     this.props.dispose();
+    this.environment.localLighting.dispose();
     const geometries = new Set<THREE.BufferGeometry>(),
       materials = new Set<THREE.Material>(),
       textures = new Set<THREE.Texture>();

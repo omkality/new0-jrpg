@@ -12,8 +12,7 @@ export function motionName(f: Fighter) {
   if (f.mode === "dead") return `Death${f.death}`;
   if (f.mode === "attack" || f.mode === "windup")
     return `${weapon === "sword" || weapon === "relic" ? "Sword" : weapon === "spear" ? "Spear" : weapon === "unarmed" ? "Fist" : ""}Attack${Math.max(1, Math.min(3, f.combo || 1))}`;
-  if (f.mode === "dodge")
-    return `${weapon === "unarmed" && f.kind === "pilgrim" && f.armour === 0 ? "Dodge" : "Evade"}${f.dodgeSide}`;
+  if (f.mode === "dodge") return `Evade${f.dodgeSide}`;
   if (f.mode === "guard") return f.recoil > 0 ? "BlockHit" : "Guard";
   if (f.mode === "hit") return ["HitFront", "HitLeft", "HitRight"][f.reaction];
   return f.speed > 1.65 ? "Run" : f.speed > 0.1 ? "Walk" : "Idle";

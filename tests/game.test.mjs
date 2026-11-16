@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { CombatGame, ATTACKS, DODGE, CHEST } from "../src/game.ts";
+import {
+  CombatGame,
+  ATTACKS,
+  DODGE,
+  CHEST,
+  dodgeTravelAt,
+} from "../src/game.ts";
 import { Showcase, DEMO_ENEMIES } from "../src/showcase.ts";
 
 const still = { x: 0, z: 0, guard: false };
@@ -174,20 +180,21 @@ test("early dodge has an invulnerable window and costs stamina", () => {
   assert.equal(g.damagePlayer(15), true);
   assert.equal(g.player.hp, 85);
 });
-test("roll compression and landing are planted, attacks cannot truncate the rotation", () => {
+test("empty hands use a short planted evade and an attack cannot truncate its recovery", () => {
   const g = new CombatGame();
   g.start();
   g.player.weapon = "unarmed";
   const x = g.player.x;
   g.dodge({ x: 1, z: 0 });
-  advance(g, DODGE.travelStart - 0.02);
+  advance(g, 0.05);
   assert.equal(g.player.x, x);
   advance(g, 0.3);
   g.attack();
   assert.equal(g.player.mode, "dodge");
-  advance(g, 0.25);
+  advance(g, 0.3);
   const landed = g.player.x;
-  assert.ok(Math.abs(landed - x - DODGE.distance) < 0.001);
+  const expected = dodgeTravelAt(g.player, DODGE.duration);
+  assert.ok(expected < 1.1 && Math.abs(landed - x - expected) < 0.001);
   advance(g, 0.12);
   assert.equal(g.player.x, landed);
   advance(g, 0.1);
