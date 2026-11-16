@@ -4,6 +4,7 @@ import { Actor } from "./actor";
 import { Campaign } from "./campaign";
 import { ENCOUNTERS, type AreaId } from "./world-layout";
 import type { GameEvent } from "./game";
+import type { FrameCosts } from "./frame-cost";
 import { LevelProps } from "./level-props";
 import { cameraClearance, FollowCameraClearance } from "./camera-clearance";
 import {
@@ -27,6 +28,7 @@ export class World {
   resolution = 1;
   device = "";
   location: AreaId = "forest";
+  frameCosts: FrameCosts | null = null;
   private elapsed = 0;
   private aim = new THREE.Vector3(0, 1.2, 3);
   private position = new THREE.Vector3(0.7, 2.5, 9);
@@ -201,6 +203,8 @@ export class World {
     this.impactLife = 0.13;
   }
   render(dt: number) {
+    const costs = this.frameCosts;
+    let stamp = costs ? performance.now() : 0;
     this.elapsed += dt;
     const p = this.game.player;
     this.location = this.game.location;
@@ -218,9 +222,21 @@ export class World {
     fog.color.lerp(this.fogColor.set(spec.fog), blend);
     (this.scene.background as THREE.Color).lerp(this.fogColor, blend);
     fog.density = THREE.MathUtils.lerp(fog.density, spec.density, blend);
+    if (costs) {
+      costs.environment_cpu_ms = performance.now() - stamp;
+      stamp = performance.now();
+    }
     this.player.update(dt, p);
+    if (costs) {
+      costs.player_cpu_ms = performance.now() - stamp;
+      stamp = performance.now();
+    }
     this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
     this.props.update(dt, this.elapsed);
+    if (costs) {
+      costs.props_cpu_ms = performance.now() - stamp;
+      stamp = performance.now();
+    }
     const d = this.camera.aspect < 0.85 ? 4.5 : 3.9;
     this.desiredAim.set(
       p.x - Math.sin(this.yaw) * 0.7,
@@ -316,6 +332,10 @@ export class World {
       this.camera.matrixWorldInverse,
     );
     this.actorFrustum.setFromProjectionMatrix(this.actorProjection);
+    if (costs) {
+      costs.camera_cpu_ms = performance.now() - stamp;
+      stamp = performance.now();
+    }
     let shadowIndex = 1;
     for (const [id, e] of this.game.enemies) {
       const heavy = e.kind === "gaoler";
@@ -341,7 +361,12 @@ export class World {
         }
       }
     }
+    if (costs) {
+      costs.npc_cpu_ms = performance.now() - stamp;
+      stamp = performance.now();
+    }
     this.renderer.render(this.scene, this.camera);
+    if (costs) costs.render_submit_cpu_ms = performance.now() - stamp;
   }
   resources() {
     const memory = (

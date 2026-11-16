@@ -36,6 +36,30 @@ def device_payload():
                        "p95_ms":16.7, "over_25_ms":0, "over_50_ms":0, "completed":True, "render_scale":1.0}]}
 
 
+def test_frame_cost_profiles_are_bounded_and_remain_owner_only(client):
+    from copy import deepcopy
+    metric={"samples":100,"mean_ms":2.1,"p95_upper_ms":2.25,"max_ms":3.0}
+    row={"phase":"probe","area":"crypt","mode":"no-grain","block":1,
+         "resolution":0.6561,"frames":100,"fps":60.0,"calls_mean":180.0,
+         "triangles_mean":120000.0,"metrics":{"callback_cpu_ms":metric}}
+    body={**device_payload(),"protocol":"device-check-3",
+          "frame_cost":{"protocol":"frame-cost-1","cpu_bin_ms":0.25,
+                        "probe_block_ms":6000,"probe_settle_ms":500,
+                        "probe_complete":False,"rows":[row]}}
+    headers=login(client)
+    bad=deepcopy(body); bad["frame_cost"]["rows"]=[row]*13
+    assert client.post('/api/diagnostics',headers=headers,json=bad).status_code==422
+    bad=deepcopy(body); bad["frame_cost"]["rows"][0]["metrics"]["arbitrary_field"]=metric
+    assert client.post('/api/diagnostics',headers=headers,json=bad).status_code==422
+    bad=deepcopy(body); bad["frame_cost"]["rows"][0]["metrics"]["callback_cpu_ms"]["max_ms"]=180001.0
+    assert client.post('/api/diagnostics',headers=headers,json=bad).status_code==422
+    result=client.post('/api/diagnostics',headers=headers,json=body)
+    assert result.status_code==200,result.text
+    report_id=result.json()['id']
+    assert client.get('/api/diagnostics/'+report_id,headers=headers).json()==body
+    assert client.get('/api/diagnostics/'+report_id,headers=login(client,43)).status_code==404
+
+
 def test_device_reports_require_identity_and_are_owner_only(client):
     assert client.post('/api/diagnostics',json=device_payload()).status_code==401
     h=login(client)

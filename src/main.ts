@@ -15,6 +15,11 @@ import {
   type ResourceMetrics,
 } from "./device-check";
 import type { FrameCapture } from "./recording";
+import {
+  FrameCostProfile,
+  type FrameCosts,
+  type LayerMode,
+} from "./frame-cost";
 
 declare global {
   interface Window {
@@ -61,6 +66,17 @@ noiseTileCtx.putImageData(noisePixels, 0, 0);
 const noisePattern = noiseCtx.createPattern(noiseTile, "repeat")!;
 const params = new URLSearchParams(location.search),
   review = params.get("review") === "1";
+const frameCostRequested = params.get("profile") === "1";
+let frameCost: FrameCostProfile | null = null;
+let layerMode: LayerMode = "normal";
+function profileLayers(mode: LayerMode) {
+  if (mode === layerMode) return;
+  layerMode = mode;
+  atmosphere.style.visibility =
+    mode === "no-grain" || mode === "world-only" ? "hidden" : "";
+  hud.style.visibility =
+    mode === "no-hud" || mode === "world-only" ? "hidden" : "";
+}
 const requestedScenario = params.get("scenario");
 let selected: ScenarioId =
   requestedScenario && Object.hasOwn(SCENARIOS, requestedScenario)
@@ -388,6 +404,9 @@ function beginDeviceCheck() {
   visible("#check-result", false);
   startScenario("journey");
   deviceCheck = new DeviceCheck();
+  frameCost = frameCostRequested ? new FrameCostProfile() : null;
+  world.frameCosts = frameCost ? {} : null;
+  profileLayers("normal");
 }
 $("#autoplay").onclick = beginDeviceCheck;
 async function finishDeviceCheck(interrupted: boolean) {
@@ -423,7 +442,10 @@ async function finishDeviceCheck(interrupted: boolean) {
     context_losses: contextLosses - contextBaseline,
     interrupted,
     stages: current.stages,
+    ...(frameCost ? { frame_cost: frameCost.summary() } : {}),
   };
+  profileLayers("normal");
+  world.frameCosts = null;
   const all =
     current.stages.length === 4 && current.stages.every((s) => s.completed);
   const summary = [
@@ -536,6 +558,12 @@ async function beginRecording() {
 }
 $("#record").onclick = () => void beginRecording();
 function frame(now: number) {
+  const profile = deviceCheck ? frameCost : null;
+  const cpuStart = profile ? performance.now() : 0;
+  const profileArea = game.location;
+  if (profile) profileLayers(profile.mode(now));
+  let stamp = cpuStart;
+  const costs: FrameCosts | null = profile ? {} : null;
   raf = requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
   const dt = recording
@@ -582,7 +610,16 @@ function frame(now: number) {
     frameNumber++;
     if (demonstration?.done) finishedTail += dt;
   }
+  if (costs) {
+    costs.simulation_cpu_ms = performance.now() - stamp;
+    stamp = performance.now();
+  }
   world.render(paused ? 0 : dt);
+  if (costs) {
+    Object.assign(costs, world.frameCosts);
+    costs.world_cpu_ms = performance.now() - stamp;
+    stamp = performance.now();
+  }
   if (deviceCheck && !paused) {
     deviceCheck.update(
       raw * 1000,
@@ -592,7 +629,17 @@ function frame(now: number) {
       world.resolution,
       world.resources(),
     );
-    if (deviceCheck.done) void finishDeviceCheck(game.phase !== "finished");
+    if (deviceCheck.done) {
+      if (profile && game.phase === "finished") {
+        if (!profile.inProbe) {
+          profile.beginProbe(now);
+          toast("Диагностика слоёв / ещё 48 секунд на том же ракурсе");
+        } else if (profile.isDone(now)) {
+          profile.finish();
+          void finishDeviceCheck(false);
+        }
+      } else void finishDeviceCheck(game.phase !== "finished");
+    }
   }
   if (soak && !paused && demonstration?.done && finishedTail > 1) {
     soak.snapshots.push(world.resources());
@@ -630,8 +677,18 @@ function frame(now: number) {
       visible("#check-result", true);
     }
   }
-  drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
-  drawHUD();
+  if (costs) stamp = performance.now();
+  if (layerMode !== "no-grain" && layerMode !== "world-only")
+    drawNoise(recording && capture ? (capture.frames / 60) * 1000 + 1000 : now);
+  if (costs) {
+    costs.grain_cpu_ms = performance.now() - stamp;
+    stamp = performance.now();
+  }
+  if (layerMode !== "no-hud" && layerMode !== "world-only") drawHUD();
+  if (costs) {
+    costs.hud_cpu_ms = performance.now() - stamp;
+    stamp = performance.now();
+  }
   if (
     recording &&
     recordCanvas &&
@@ -770,6 +827,7 @@ function frame(now: number) {
       }
       if (
         !recording &&
+        !profile?.inProbe &&
         frameNumber > 180 &&
         now - lastQualityChange > 2500 &&
         avg > 19 &&
@@ -780,6 +838,18 @@ function frame(now: number) {
         lastQualityChange = now;
       }
     }
+  }
+  if (profile && costs && !paused) {
+    costs.raf_ms = raw * 1000;
+    costs.callback_cpu_ms = performance.now() - cpuStart;
+    profile.record(
+      profileArea,
+      now,
+      costs,
+      world.resolution,
+      world.renderer.info.render.calls,
+      world.renderer.info.render.triangles,
+    );
   }
 }
 async function boot() {
