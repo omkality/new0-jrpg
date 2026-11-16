@@ -6,15 +6,24 @@
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
 - Current scope is a one-week prototype: a connected Three.js route through forest,
   gate court, cathedral/gallery and crypt, mobile-first Telegram play, casual combat,
-  keys/coins, one held weapon with swap/drop, hollow chests and a mimic, Compose.
+  keys/coins, one held weapon with swap/drop, hollow chests and a mimic, a visible
+  armour upgrade, hidden consumable healing potions without HP regeneration, Compose.
   The current public demo exposes one autoplay button. Keep developer review tools
   guest-only and off the normal Mini App screen.
   The user explicitly rejected turn-based combat and action-selection menus.
 - The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
-- Latest art direction: dim dark fantasy, readable cool midtones, localized shimmering light
+- Cloth must follow the body surface and skin weights. Rigid metal plates are separate.
+  Use weapon-specific stances and closed hand grips, with anatomical wrist limits.
+  Validate the final posed sleeves as well as the torso, including both support hands.
+- All visible text uses the local Ebbe Black face, including canvas HUD. Keep its OFL
+  notice and test Cyrillic coverage and small-screen readability. Use SVG for action icons.
+- Latest art direction: gloomy pale stone and cloth, readable cool midtones, localized shimmering light
   through dark depth fog, subtle monochrome grain and clean UI. Avoid uniform bright
   lighting. Use varied cloth/mask/monster silhouettes instead of an all-armoured cast.
+- Walls, doors, stairs and visible supports must describe the same traversable world.
+  Locked rooms cannot be bypassed from a flank or rear stair. Key names match their doors.
+  Taking damage interrupts chest inspection and drinking. Torches burn at every distance.
 - One, two and three consecutive attacks use distinct clips. Block cannot cancel an
   active chain or recovery. Preserve varied dodge/hit reactions and grounded death.
   Full rolls have planted compression and landing. Choose a skinned front/back/side

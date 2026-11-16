@@ -10,7 +10,7 @@ import { Matrix4, Quaternion, Vector3 } from "three";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { structure, sample, world, position } from "./pose-sampling.mjs";
 import { animationDigest } from "./animation-io.mjs";
@@ -860,7 +860,10 @@ async function floorProfile(doc, character, geometryHash) {
   const info = structure(doc),
     root = doc.getRoot();
   const motion = await io.read(
-    resolve(project, "public/assets/motion/prisoner-combat.glb"),
+    resolve(
+      project,
+      `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-combat.glb`,
+    ),
   );
   const clips = [
     ...root
@@ -922,201 +925,221 @@ async function floorProfile(doc, character, geometryHash) {
     for (let i = 0; i <= Math.ceil(duration * 60); i++) {
       const y = minimumY(sample(info, animation, Math.min(duration, i / 60)));
       assert(Number.isFinite(y));
-      offsets.push(Math.ceil(Math.max(0, 0.008 - y) * 1e6) / 1e6);
+      offsets.push(
+        Math.ceil(
+          (animation.getName().startsWith("Death")
+            ? 0.008 - y
+            : Math.max(0, 0.008 - y)) * 1e6,
+        ) / 1e6,
+      );
     }
     output.clips[animation.getName()] = { duration, offsets };
   }
   return output;
 }
 
-await mkdir(work, { recursive: true });
-const reports = [],
-  apply = process.argv.includes("--apply"),
-  check = process.argv.includes("--check"),
-  rebuild = process.argv.includes("--rebuild"),
-  candidateOnly = process.argv.includes("--candidate");
-const floors = {
-  version: 1,
-  sampleRate: 60,
-  clearance: 0.008,
-  sampling:
-    "time[i]=min(duration,i/sampleRate). Linearly interpolate using the actual shorter final interval. Offsets are nonnegative model-space metres and exclude weapons/props.",
-  profiles: {},
-};
-const verifyFloor = process.argv.includes("--verify-floor")
-  ? JSON.parse(
-      await readFile(
-        resolve(project, "public/assets/cast/floor-v7.json"),
-        "utf8",
-      ),
-    )
-  : null;
-for (const name of ["prisoner", "watcher"]) {
-  const file = resolve(project, `public/assets/cast/${name}.glb`),
-    input = rebuild ? resolve(work, `before-${name}.glb`) : file,
-    buffer = await readFile(input),
-    doc = await io.read(input);
-  const protectedBefore = invariants(doc);
-  if (process.argv.includes("--fingerprints"))
-    console.log(name, JSON.stringify(fingerprints(protectedBefore)));
-  const report = {
-    name,
-    sha256: sha(buffer),
-    bytes: buffer.length,
-    invariants: protectedBefore,
-    inspect: inspect(doc),
+export { floorProfile, invariants, fingerprints, PROTECTED };
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  await mkdir(work, { recursive: true });
+  const reports = [],
+    apply = process.argv.includes("--apply"),
+    check = process.argv.includes("--check"),
+    rebuild = process.argv.includes("--rebuild"),
+    candidateOnly = process.argv.includes("--candidate");
+  const floors = {
+    version: 1,
+    sampleRate: 60,
+    clearance: 0.008,
+    sampling:
+      "time[i]=min(duration,i/sampleRate). Linearly interpolate using the actual shorter final interval. Offsets are nonnegative model-space metres and exclude weapons/props.",
+    profiles: {},
   };
-  const alreadyFixed =
-    doc.getRoot().getAsset().extras.new0GarmentV7?.revision ===
-    (name === "watcher" ? 4 : 3);
-  if (process.argv.includes("--study") && !apply)
-    report.studyFrames = await study(
-      doc,
+  const verifyFloor = process.argv.includes("--verify-floor")
+    ? JSON.parse(
+        await readFile(
+          resolve(project, "public/assets/cast/floor-v7.json"),
+          "utf8",
+        ),
+      )
+    : null;
+  for (const name of ["prisoner", "watcher"]) {
+    const file = resolve(project, `public/assets/cast/${name}.glb`),
+      input = rebuild ? resolve(work, `before-${name}.glb`) : file,
+      buffer = await readFile(input),
+      doc = await io.read(input);
+    const protectedBefore = invariants(doc);
+    if (process.argv.includes("--fingerprints"))
+      console.log(name, JSON.stringify(fingerprints(protectedBefore)));
+    const report = {
       name,
-      alreadyFixed ? "after" : "before",
-    );
-  if (apply && !alreadyFixed) {
-    assert(
-      rebuild || !doc.getRoot().getAsset().extras.new0GarmentV7,
-      "Updating an earlier garment repair requires --rebuild to restore concealed body indices from the source backup",
-    );
-    const backup = resolve(work, `before-${name}.glb`);
-    try {
-      await stat(backup);
-    } catch {
-      await writeFile(backup, buffer);
-    }
-    report.changes = repair(doc, name);
-    assert.deepEqual(
-      invariants(doc),
-      protectedBefore,
-      "Protected rig/motion/image data changed",
-    );
-    const candidate = resolve(work, `candidate-${name}.glb`);
-    await io.write(candidate, doc);
-    const reloaded = await io.read(candidate);
-    assert.deepEqual(
-      invariants(reloaded),
-      protectedBefore,
-      "Protected data changed on GLB round-trip",
-    );
-    const after = await readFile(candidate);
-    report.afterSha256 = sha(after);
-    report.afterBytes = after.length;
-    report.afterInspect = inspect(reloaded);
-    if (candidateOnly && process.argv.includes("--poses"))
-      report.posedValidation = await validatePoses(reloaded, name);
-    if (process.argv.includes("--study")) await study(reloaded, name, "after");
-    if (!candidateOnly) await writeFile(file, after);
-  }
-  if (check) {
-    assert(alreadyFixed, `${name}: garment v7 repair not applied`);
-    assert.deepEqual(
-      fingerprints(invariants(doc)),
-      PROTECTED,
-      `${name}: protected rig/motion/image/body-record data drifted`,
-    );
-    for (const mesh of report.inspect.meshes.filter((m) =>
-      m.name.startsWith("new0_v7_"),
-    ))
-      for (const primitive of mesh.primitives) {
-        assert.equal(
-          primitive.geometricBoundaryEdges,
-          0,
-          `${name}/${mesh.name}: open shell`,
-        );
-        assert.equal(
-          primitive.nonManifoldEdges,
-          0,
-          `${name}/${mesh.name}: nonmanifold shell`,
-        );
-      }
-    for (const mesh of doc
-      .getRoot()
-      .listMeshes()
-      .filter((m) => m.getName().startsWith("new0_v7_")))
-      for (const p of mesh.listPrimitives()) {
-        const weights = p.getAttribute("WEIGHTS_0").getArray();
-        for (let i = 0; i < weights.length; i += 4) {
-          assert(
-            Math.abs(
-              weights[i] + weights[i + 1] + weights[i + 2] + weights[i + 3] - 1,
-            ) < 1e-6,
-          );
-          assert(
-            [0, 1, 2, 3].every(
-              (k) => weights[i + k] >= 0 && Number.isFinite(weights[i + k]),
-            ),
-          );
-        }
-        if (/tunic|robe/.test(mesh.getName())) {
-          const ids = p.getAttribute("JOINTS_0").getArray(),
-            jointNames = doc
-              .getRoot()
-              .listSkins()[0]
-              .listJoints()
-              .map((n) => n.getName());
-          for (let i = 0; i < weights.length; i++)
-            if (weights[i] > 0)
-              assert(
-                !/^(head|upperarm_|forearm_|hand_|shin_|foot_|toe_)/.test(
-                  jointNames[ids[i]],
-                ),
-                `${name}/${mesh.getName()}: unrelated limb weight`,
-              );
-        }
-      }
-    if (verifyFloor)
-      assert.equal(
-        verifyFloor.profiles[name].geometryHash,
-        sha(buffer),
-        `${name}: stale geometry hash in floor table`,
+      sha256: sha(buffer),
+      bytes: buffer.length,
+      invariants: protectedBefore,
+      inspect: inspect(doc),
+    };
+    const alreadyFixed =
+      doc.getRoot().getAsset().extras.new0GarmentV7?.revision ===
+      (name === "watcher" ? 4 : 3);
+    if (process.argv.includes("--study") && !apply)
+      report.studyFrames = await study(
+        doc,
+        name,
+        alreadyFixed ? "after" : "before",
       );
-    if (process.argv.includes("--poses"))
-      report.posedValidation = await validatePoses(doc, name, verifyFloor);
+    if (apply && !alreadyFixed) {
+      assert(
+        rebuild || !doc.getRoot().getAsset().extras.new0GarmentV7,
+        "Updating an earlier garment repair requires --rebuild to restore concealed body indices from the source backup",
+      );
+      const backup = resolve(work, `before-${name}.glb`);
+      try {
+        await stat(backup);
+      } catch {
+        await writeFile(backup, buffer);
+      }
+      report.changes = repair(doc, name);
+      assert.deepEqual(
+        invariants(doc),
+        protectedBefore,
+        "Protected rig/motion/image data changed",
+      );
+      const candidate = resolve(work, `candidate-${name}.glb`);
+      await io.write(candidate, doc);
+      const reloaded = await io.read(candidate);
+      assert.deepEqual(
+        invariants(reloaded),
+        protectedBefore,
+        "Protected data changed on GLB round-trip",
+      );
+      const after = await readFile(candidate);
+      report.afterSha256 = sha(after);
+      report.afterBytes = after.length;
+      report.afterInspect = inspect(reloaded);
+      if (candidateOnly && process.argv.includes("--poses"))
+        report.posedValidation = await validatePoses(reloaded, name);
+      if (process.argv.includes("--study"))
+        await study(reloaded, name, "after");
+      if (!candidateOnly) await writeFile(file, after);
+    }
+    if (check) {
+      assert(alreadyFixed, `${name}: garment v7 repair not applied`);
+      assert.deepEqual(
+        fingerprints(invariants(doc)),
+        PROTECTED,
+        `${name}: protected rig/motion/image/body-record data drifted`,
+      );
+      for (const mesh of report.inspect.meshes.filter((m) =>
+        m.name.startsWith("new0_v7_"),
+      ))
+        for (const primitive of mesh.primitives) {
+          assert.equal(
+            primitive.geometricBoundaryEdges,
+            0,
+            `${name}/${mesh.name}: open shell`,
+          );
+          assert.equal(
+            primitive.nonManifoldEdges,
+            0,
+            `${name}/${mesh.name}: nonmanifold shell`,
+          );
+        }
+      for (const mesh of doc
+        .getRoot()
+        .listMeshes()
+        .filter((m) => m.getName().startsWith("new0_v7_")))
+        for (const p of mesh.listPrimitives()) {
+          const weights = p.getAttribute("WEIGHTS_0").getArray();
+          for (let i = 0; i < weights.length; i += 4) {
+            assert(
+              Math.abs(
+                weights[i] +
+                  weights[i + 1] +
+                  weights[i + 2] +
+                  weights[i + 3] -
+                  1,
+              ) < 1e-6,
+            );
+            assert(
+              [0, 1, 2, 3].every(
+                (k) => weights[i + k] >= 0 && Number.isFinite(weights[i + k]),
+              ),
+            );
+          }
+          if (/tunic|robe/.test(mesh.getName())) {
+            const ids = p.getAttribute("JOINTS_0").getArray(),
+              jointNames = doc
+                .getRoot()
+                .listSkins()[0]
+                .listJoints()
+                .map((n) => n.getName());
+            for (let i = 0; i < weights.length; i++)
+              if (weights[i] > 0)
+                assert(
+                  !/^(head|upperarm_|forearm_|hand_|shin_|foot_|toe_)/.test(
+                    jointNames[ids[i]],
+                  ),
+                  `${name}/${mesh.getName()}: unrelated limb weight`,
+                );
+          }
+        }
+      if (verifyFloor)
+        assert.equal(
+          verifyFloor.profiles[name].geometryHash,
+          sha(buffer),
+          `${name}: stale geometry hash in floor table`,
+        );
+      if (process.argv.includes("--poses"))
+        report.posedValidation = await validatePoses(doc, name, verifyFloor);
+    }
+    if (process.argv.includes("--floor")) {
+      assert(
+        alreadyFixed && !rebuild,
+        `${name}: floor table must use final public geometry`,
+      );
+      floors.profiles[name] = await floorProfile(doc, name, sha(buffer));
+    }
+    reports.push(report);
   }
-  if (process.argv.includes("--floor")) {
-    assert(
-      alreadyFixed && !rebuild,
-      `${name}: floor table must use final public geometry`,
-    );
-    floors.profiles[name] = await floorProfile(doc, name, sha(buffer));
-  }
-  reports.push(report);
-}
-await writeFile(
-  resolve(
-    work,
-    candidateOnly
-      ? "candidate-report.json"
-      : apply
-        ? "repair-report.json"
-        : check
-          ? "check-report.json"
-          : "before-inspection.json",
-  ),
-  JSON.stringify(reports, null, 2),
-);
-console.log(
-  JSON.stringify(
-    reports.map(({ invariants, inspect, afterInspect, ...r }) => r),
-    null,
-    2,
-  ),
-);
-if (process.argv.includes("--floor")) {
-  const output = resolve(project, "public/assets/cast/floor-v7.json"),
-    encoded = JSON.stringify(floors) + "\n";
-  await writeFile(output, encoded);
-  console.log(
-    JSON.stringify({
-      floorTableBytes: Buffer.byteLength(encoded),
-      sampleCounts: Object.fromEntries(
-        Object.entries(floors.profiles).map(([n, p]) => [
-          n,
-          Object.values(p.clips).reduce((sum, c) => sum + c.offsets.length, 0),
-        ]),
-      ),
-    }),
+  await writeFile(
+    resolve(
+      work,
+      candidateOnly
+        ? "candidate-report.json"
+        : apply
+          ? "repair-report.json"
+          : check
+            ? "check-report.json"
+            : "before-inspection.json",
+    ),
+    JSON.stringify(reports, null, 2),
   );
+  console.log(
+    JSON.stringify(
+      reports.map(({ invariants, inspect, afterInspect, ...r }) => r),
+      null,
+      2,
+    ),
+  );
+  if (process.argv.includes("--floor")) {
+    const output = resolve(project, "public/assets/cast/floor-v7.json"),
+      encoded = JSON.stringify(floors) + "\n";
+    await writeFile(output, encoded);
+    console.log(
+      JSON.stringify({
+        floorTableBytes: Buffer.byteLength(encoded),
+        sampleCounts: Object.fromEntries(
+          Object.entries(floors.profiles).map(([n, p]) => [
+            n,
+            Object.values(p.clips).reduce(
+              (sum, c) => sum + c.offsets.length,
+              0,
+            ),
+          ]),
+        ),
+      }),
+    );
+  }
 }

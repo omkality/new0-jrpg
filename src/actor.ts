@@ -3,9 +3,13 @@ import * as THREE from "three";
 import { clone } from "three/addons/utils/SkeletonUtils.js";
 import { ATTACKS, ENEMIES, type Fighter, type EnemyKind } from "./game";
 import { assetUrl } from "./assets";
-import { heldWeapon } from "./level-props";
+import { heldWeapon, attachWeapon } from "./level-props";
 import { loadModel as load } from "./asset-store";
 import type { WeaponId } from "./world-layout";
+import { armourModel, flaskModel } from "./gear-visuals";
+import { GearPose } from "./gear-pose";
+import { GearCollision } from "./gear-collision";
+import { WEAPON_RELEASE_TIME } from "./weapon-spec";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
@@ -20,6 +24,10 @@ interface RigState {
   dropped: boolean;
   floorOffset: number;
   profile: string;
+  armour?: THREE.Group;
+  flask?: THREE.Group;
+  gear: GearPose;
+  collision?: GearCollision;
 }
 interface FloorClip {
   duration: number;
@@ -91,14 +99,42 @@ export class Actor {
             m.envMapIntensity = 0.2;
             m.color.set(
               kind === "pilgrim"
-                ? 0xc9c1b1
+                ? 0xd5d9d6
                 : kind === "effigy"
                   ? 0xb5c3b9
                   : kind === "gaoler"
                     ? 0xa9a69a
                     : 0x9fa8a9,
             );
+            if (/new0_v8_fitted/.test(o.name))
+              m.color.set(
+                /trousers/.test(o.name)
+                  ? kind === "pilgrim"
+                    ? 0x818b85
+                    : 0x515c57
+                  : kind === "pilgrim"
+                    ? 0xe4e6dc
+                    : 0x7c8980,
+              );
+            else if (/hood/.test(o.name))
+              m.color.set(kind === "pilgrim" ? 0x656e64 : 0x46514a);
+            else if (/collar/.test(o.name))
+              m.color.set(kind === "pilgrim" ? 0x929e8f : 0x59675b);
             o.material = m;
+            if (/linen|headwrap/.test(m.name)) {
+              m.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                  "#include <map_fragment>",
+                  `#ifdef USE_MAP
+ vec4 clothTexel=texture2D(map,vMapUv);
+ float weave=pow(clamp(dot(clothTexel.rgb,vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.42);
+ diffuseColor.rgb*=mix(vec3(0.38),vec3(0.97),weave);
+ diffuseColor.a*=clothTexel.a;
+ #endif`,
+                );
+              };
+              m.customProgramCacheKey = () => "new0-bleached-cloth-v8";
+            }
             o.frustumCulled = false;
           }
         });
@@ -110,6 +146,7 @@ export class Actor {
         const hand = rig.getObjectByName("hand_R"),
           weapon = heldWeapon(
             kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : "sword",
+            kind === "gaoler",
           );
         const weapons = new Map<string, THREE.Group>([["sword", weapon]]);
         if (kind === "pilgrim") {
@@ -121,6 +158,21 @@ export class Actor {
           weapons.set("relic", weapon);
         }
         for (const item of new Set(weapons.values())) hand?.add(item);
+        let armour: THREE.Group | undefined, flask: THREE.Group | undefined;
+        if (kind === "pilgrim") {
+          armour = armourModel();
+          armour.position.set(0, 1.16, 0.01);
+          armour.visible = false;
+          rig.add(armour);
+          rig.updateMatrixWorld(true);
+          rig.getObjectByName("chest")?.attach(armour);
+          flask = flaskModel();
+          flask.scale.setScalar(0.4);
+          flask.position.set(-0.024, 0.078, 0.124);
+          flask.rotation.x = -Math.PI / 2;
+          flask.visible = false;
+          rig.getObjectByName("hand_L")?.add(flask);
+        }
         this.states.set(kind, {
           rig,
           mixer,
@@ -132,6 +184,13 @@ export class Actor {
           dropped: false,
           floorOffset: 0,
           profile: model,
+          armour,
+          flask,
+          gear: new GearPose(rig, kind === "gaoler"),
+          collision:
+            hand && kind !== "effigy"
+              ? new GearCollision(rig, hand, weapons, kind === "gaoler")
+              : undefined,
         });
       }),
     );
@@ -173,8 +232,7 @@ export class Actor {
       if (this.active) {
         if (this.active.dropped) {
           this.active.hand?.add(this.active.weapon);
-          this.active.weapon.position.set(0, 0.06, 0);
-          this.active.weapon.rotation.set(-Math.PI / 2, 0, 0);
+          attachWeapon(this.active.weapon, this.kind === "gaoler");
           this.active.dropped = false;
         }
         this.active.rig.visible = false;
@@ -187,8 +245,7 @@ export class Actor {
     if (weapon !== s.weapon) {
       s.hand?.add(s.weapon);
       s.weapon.visible = false;
-      s.weapon.position.set(0, 0.06, 0);
-      s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      attachWeapon(s.weapon, kind === "gaoler");
       s.weapon = weapon;
       s.weapon.visible = true;
       s.dropped = false;
@@ -196,6 +253,16 @@ export class Actor {
     this.root.position.set(f.x, f.y, f.z);
     this.root.rotation.set(0, f.yaw, 0);
     const mode = f.mode;
+    if (s.armour) s.armour.visible = f.armour > 0;
+    if (s.flask) {
+      s.flask.visible = mode === "heal";
+      const stopper = s.flask.getObjectByName("FlaskStopper"),
+        liquid = s.flask.getObjectByName("FlaskLiquid");
+      if (stopper) stopper.visible = false;
+      if (liquid)
+        liquid.scale.y =
+          mode === "heal" ? Math.max(0.1, 0.92 - f.time * 0.6) : 0.92;
+    }
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));
     const name =
       mode === "dead"
@@ -268,8 +335,32 @@ export class Actor {
         ? offset
         : THREE.MathUtils.damp(s.floorOffset, offset, 28, dt);
     this.root.position.y = f.y + s.floorOffset;
+    if (!(mode === "dead" && f.time > WEAPON_RELEASE_TIME)) {
+      this.root.updateMatrixWorld(true);
+      const item =
+        kind === "gaoler" ? "axe" : kind === "effigy" ? "unarmed" : f.weapon;
+      s.gear.apply(
+        item,
+        mode === "heal" ? "Drink" : name,
+        f.y,
+        s.collision
+          ? (matrix, correction) => {
+              s.collision!.update();
+              return s.collision!.penalty(
+                kind === "gaoler" ? "sword" : item,
+                matrix,
+                f.y,
+                correction,
+              );
+            }
+          : undefined,
+        action.time,
+      );
+    }
+    if (mode === "heal") s.gear.drink(f.time);
 
-    if (mode === "dead" && f.time > 0.65) {
+    if (mode === "dead" && f.time > WEAPON_RELEASE_TIME) {
+      s.gear.setGrip(0, 0);
       if (!s.dropped) {
         this.root.updateMatrixWorld(true);
         this.root.attach(s.weapon);
@@ -301,8 +392,7 @@ export class Actor {
       );
     } else if (mode !== "dead" && s.dropped) {
       s.hand?.add(s.weapon);
-      s.weapon.position.set(0, 0.06, 0);
-      s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+      attachWeapon(s.weapon, kind === "gaoler");
       s.dropped = false;
     }
   }
@@ -314,14 +404,14 @@ export class Actor {
       s.floorOffset = 0;
       if (s.dropped) {
         s.hand?.add(s.weapon);
-        s.weapon.position.set(0, 0.06, 0);
-        s.weapon.rotation.set(-Math.PI / 2, 0, 0);
+        attachWeapon(s.weapon, s.profile === "gaoler");
         s.dropped = false;
       }
     }
   }
   dispose() {
     for (const s of this.states.values()) {
+      s.collision?.dispose();
       s.mixer.stopAllAction();
       s.mixer.uncacheRoot(s.rig);
       s.rig.traverse((o) => {

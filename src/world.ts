@@ -2,9 +2,10 @@ import * as THREE from "three";
 import { ConnectedEnvironment, LOCATIONS, type LocationId } from "./locations";
 import { Actor } from "./actor";
 import { Campaign } from "./campaign";
-import { AREA_ORDER, AREAS, type AreaId } from "./world-layout";
+import { ENCOUNTERS, type AreaId } from "./world-layout";
 import type { GameEvent } from "./game";
 import { LevelProps } from "./level-props";
+import { cameraClearance, FollowCameraClearance } from "./camera-clearance";
 import {
   loadProps,
   modelCacheSize,
@@ -17,7 +18,7 @@ export class World {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(57, 1, 0.08, 165);
   player = new Actor();
-  private actors = new Map<AreaId, Actor>();
+  private actors = new Map<string, Actor>();
   private props: LevelProps;
   private environment: ConnectedEnvironment;
   private readyTextures: Promise<void>;
@@ -31,12 +32,16 @@ export class World {
   private position = new THREE.Vector3(0.7, 2.5, 9);
   private desiredAim = new THREE.Vector3();
   private desiredPosition = new THREE.Vector3();
+  private cameraFocus = new THREE.Vector3();
+  private cameraSolver = new FollowCameraClearance();
+  private cameraBounds = { minX: -7.1, maxX: 7.1, maxY: Infinity };
   private fogColor = new THREE.Color();
   private playerFill = new THREE.PointLight(0xcdd8e4, 2.2, 4.2, 2);
   private shadows: THREE.Mesh[] = [];
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
+  private wasInspecting = false;
   private resizeHandler = () => this.resize();
   private contextHandler = (e: Event) => {
     e.preventDefault();
@@ -73,19 +78,22 @@ export class World {
       new THREE.TextureLoader(manager),
     );
     this.scene.add(this.environment.root, this.playerFill, this.player.root);
-    for (const id of AREA_ORDER)
-      if (id !== "crypt") {
-        const kind = AREAS[id].enemy.kind as "effigy" | "watcher" | "gaoler";
+    for (const spec of ENCOUNTERS)
+      if (spec.kind !== "mimic") {
+        const kind = spec.kind;
         const actor = new Actor(true, kind);
-        this.actors.set(id, actor);
+        this.actors.set(spec.id, actor);
         this.scene.add(actor.root);
       }
     this.props = new LevelProps(game);
     this.scene.add(this.props.root);
     const shadowTexture = new THREE.CanvasTexture(this.radial("#000000", 0.75));
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i <= ENCOUNTERS.length; i++) {
       const shadow = new THREE.Mesh(
-        new THREE.PlaneGeometry(i === 4 ? 2 : 1.35, i === 4 ? 1.7 : 1.2),
+        new THREE.PlaneGeometry(
+          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 2 : 1.35,
+          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 1.7 : 1.2,
+        ),
         new THREE.MeshBasicMaterial({
           map: shadowTexture,
           transparent: true,
@@ -155,9 +163,13 @@ export class World {
     this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.002, -0.2, 0.65);
   }
   moveAxis(axis: { x: number; y: number }) {
+    const viewYaw = Math.atan2(
+      this.camera.position.x - this.aim.x,
+      this.camera.position.z - this.aim.z,
+    );
     return {
-      x: axis.x * Math.cos(this.yaw) + axis.y * Math.sin(this.yaw),
-      z: -axis.x * Math.sin(this.yaw) + axis.y * Math.cos(this.yaw),
+      x: axis.x * Math.cos(viewYaw) + axis.y * Math.sin(viewYaw),
+      z: -axis.x * Math.sin(viewYaw) + axis.y * Math.cos(viewYaw),
     };
   }
   resize() {
@@ -195,9 +207,8 @@ export class World {
     this.player.update(dt, p);
     this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
     let shadowIndex = 1;
-    for (const id of AREA_ORDER) {
-      const e = this.game.enemies.get(id)!,
-        shadow = this.shadows[shadowIndex++];
+    for (const [id, e] of this.game.enemies) {
+      const shadow = this.shadows[shadowIndex++];
       const visible = Math.abs(e.z - p.z) < 36;
       shadow.visible = visible;
       shadow.position.set(e.x, e.y + 0.015, e.z);
@@ -236,45 +247,50 @@ export class World {
       );
       this.playerFill.intensity = 7;
     } else this.playerFill.intensity = 2.2;
-    if (p.y > 4.9 && this.location === "chapel") {
-      this.desiredPosition.x = THREE.MathUtils.clamp(
-        this.desiredPosition.x,
-        3.7,
-        6.2,
-      );
-      this.desiredPosition.y = Math.min(this.desiredPosition.y, 8.6);
-    }
-    // Keep the camera in the playable corridor and under low crypt ceilings.
-    this.desiredPosition.x = THREE.MathUtils.clamp(
-      this.desiredPosition.x,
-      -7.1,
-      7.1,
-    );
-    if (this.location === "crypt")
-      this.desiredPosition.y = Math.min(this.desiredPosition.y, 6.35);
-    // Analytic column occlusion, independent of triangle count and map detail.
-    for (const o of this.game.obstacles) {
-      if (o.hx > 0.45 || o.hz > 0.45) continue;
-      const dx = this.desiredPosition.x - this.desiredAim.x,
-        dz = this.desiredPosition.z - this.desiredAim.z,
-        fx = this.desiredAim.x - o.x,
-        fz = this.desiredAim.z - o.z;
-      const a = dx * dx + dz * dz,
-        b = 2 * (fx * dx + fz * dz),
-        c = fx * fx + fz * fz - 0.65 * 0.65,
-        discriminant = b * b - 4 * a * c;
-      if (discriminant <= 0 || a < 0.01) continue;
-      const t = (-b - Math.sqrt(discriminant)) / (2 * a);
-      if (t > 0.15 && t < 1)
-        this.desiredPosition.lerpVectors(
-          this.desiredAim,
-          this.desiredPosition,
-          Math.max(0.28, t - 0.06),
-        );
-    }
     const alpha = 1 - Math.exp(-dt * 8);
+    // Cast from head height so a waist-high chest cannot pull the camera
+    // into the hero's shoulder while walking around it.
+    this.cameraFocus.set(p.x, p.y + 1.55, p.z);
+    if (inspect) this.cameraFocus.copy(this.desiredAim);
+    this.cameraBounds.minX =
+      p.y > 4.9 && this.location === "chapel" ? 3.7 : -7.1;
+    this.cameraBounds.maxX =
+      // The east window's 32 cm frame projects into the upper room.
+      p.y > 4.9 && this.location === "chapel" ? 5.9 : 7.1;
+    this.cameraBounds.maxY =
+      p.y > 4.9 && this.location === "chapel"
+        ? 8.6
+        : this.location === "crypt"
+          ? 6.35
+          : Infinity;
+    this.cameraSolver.resolve(
+      this.cameraFocus,
+      this.desiredPosition,
+      this.desiredPosition,
+      this.game.obstacles,
+      this.game.openDoors,
+      this.cameraBounds,
+      this.position,
+    );
+    if (this.wasInspecting && !inspect && p.mode === "hit") {
+      this.aim.copy(this.desiredAim);
+      this.position.copy(this.desiredPosition);
+    }
+    this.wasInspecting = !!inspect;
     this.aim.lerp(this.desiredAim, alpha);
     this.position.lerp(this.desiredPosition, alpha);
+    this.position.lerpVectors(
+      this.cameraFocus,
+      this.position,
+      cameraClearance(
+        this.cameraFocus,
+        this.position,
+        this.game.obstacles,
+        this.game.openDoors,
+      ),
+    );
+    if (this.position.distanceTo(this.cameraFocus) < 1.6)
+      this.position.copy(this.desiredPosition);
     this.camera.position.copy(this.position);
     this.cameraKick *= Math.exp(-dt * 30);
     this.camera.position.x += Math.sin(this.elapsed * 67) * this.cameraKick;

@@ -1,13 +1,21 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { assetUrl } from "./assets";
-import { areaAt, TREES, type AreaId } from "./world-layout";
+import {
+  areaAt,
+  TREES,
+  WALLS,
+  DRESSING,
+  COURT_COLUMNS,
+  CRYPT_BAYS,
+  type AreaId,
+} from "./world-layout";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
-  roofs: { name: "Воротный двор", fog: 0x535b64, density: 0.021 },
-  chapel: { name: "Собор и верхняя галерея", fog: 0x26333b, density: 0.034 },
-  crypt: { name: "Зал погребённых", fog: 0x1e2a32, density: 0.043 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xb8bebc, density: 0.027 },
+  roofs: { name: "Воротный двор", fog: 0xaeb7b7, density: 0.028 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0x879392, density: 0.037 },
+  crypt: { name: "Зал погребённых", fog: 0x626d6d, density: 0.046 },
   courtyard: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
@@ -69,7 +77,10 @@ export class ConnectedEnvironment {
     area: AreaId;
     phase: number;
   }[] = [];
-  private flames: { object: THREE.Object3D; z: number; scale: number }[] = [];
+  private flames: { x: number; y: number; z: number; scale: number }[] = [];
+  private flameOuter?: THREE.InstancedMesh;
+  private flameCore?: THREE.InstancedMesh;
+  private fireMatrix = new THREE.Matrix4();
   private patterns = new Map<string, THREE.CanvasTexture>();
   constructor(loader: THREE.TextureLoader) {
     for (const sector of [
@@ -85,8 +96,8 @@ export class ConnectedEnvironment {
       this.batches.set(sector, new Map());
       this.root.add(group);
     }
-    const tiled = (file: string, tint: number) =>
-      new THREE.MeshStandardMaterial({
+    const tiled = (file: string, tint: number) => {
+      const material = new THREE.MeshStandardMaterial({
         map: loader.load(assetUrl(`/assets/dungeon/${file}.png`), (t) => {
           t.colorSpace = THREE.SRGBColorSpace;
           t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -96,9 +107,23 @@ export class ConnectedEnvironment {
         roughness: 1,
         vertexColors: true,
       });
-    this.wall = tiled("TEX_Wall_03", 0xabb3b7);
-    this.stone = tiled("TEX_Arch_02", 0xc5c9cc);
-    this.floor = tiled("TEX_Ground_04", 0xa6b1b5);
+      material.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <map_fragment>",
+          `#ifdef USE_MAP
+ vec4 stoneTexel = texture2D(map, vMapUv);
+ float chalk = pow(clamp(dot(stoneTexel.rgb, vec3(0.2126,0.7152,0.0722)),0.0,1.0),0.45);
+ diffuseColor.rgb *= mix(vec3(0.34,0.35,0.33),vec3(0.96,0.98,0.94),chalk);
+ diffuseColor.a *= stoneTexel.a;
+ #endif`,
+        );
+      };
+      material.customProgramCacheKey = () => "new0-chalk-stone-v8";
+      return material;
+    };
+    this.wall = tiled("TEX_Wall_03", 0xebeee8);
+    this.stone = tiled("TEX_Arch_02", 0xf1f2ed);
+    this.floor = tiled("TEX_Ground_04", 0xd9ddd6);
     this.metal = new THREE.MeshStandardMaterial({
       color: 0x353e48,
       roughness: 0.87,
@@ -116,7 +141,7 @@ export class ConnectedEnvironment {
       roughness: 1,
       vertexColors: true,
     });
-    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.46));
+    this.root.add(new THREE.HemisphereLight(0xc8d1d8, 0x182029, 0.58));
     const moon = new THREE.DirectionalLight(0xe8eef3, 1.05);
     moon.position.set(-9, 18, 8);
     this.root.add(moon);
@@ -139,6 +164,23 @@ export class ConnectedEnvironment {
     this.court();
     this.cathedral();
     this.crypt();
+    for (const w of WALLS)
+      this.box(
+        w.hx * 2,
+        w.height,
+        w.hz * 2,
+        w.x,
+        w.base + w.height / 2,
+        w.z,
+        w.material === "stone"
+          ? this.stone
+          : w.material === "dark"
+            ? this.dark
+            : this.wall,
+        w.area,
+      );
+    this.dressing();
+    this.buildFlames();
     this.flush();
   }
   private group(sector: Sector) {
@@ -292,6 +334,28 @@ export class ConnectedEnvironment {
   private flush() {
     for (const [sector, batches] of this.batches)
       for (const [material, geometries] of batches) {
+        // Persistent warm bounce remains visible when a torch is outside the
+        // small dynamic light pool. Walking closer never ignites the flame.
+        for (const g of geometries) {
+          const p = g.getAttribute("position"),
+            c = g.getAttribute("color");
+          for (let i = 0; i < p.count; i++) {
+            let glow = 0;
+            for (const a of this.warm) {
+              const d2 =
+                (p.getX(i) - a.x) ** 2 +
+                (p.getY(i) - a.y) ** 2 +
+                (p.getZ(i) - a.z) ** 2;
+              if (d2 < 24) glow += 0.22 * Math.exp(-d2 / 5.5);
+            }
+            c.setXYZ(
+              i,
+              c.getX(i) + glow,
+              c.getY(i) + glow * 0.82,
+              c.getZ(i) + glow * 0.65,
+            );
+          }
+        }
         const geometry = mergeGeometries(geometries);
         if (geometry)
           this.group(sector).add(new THREE.Mesh(geometry, material));
@@ -368,16 +432,17 @@ export class ConnectedEnvironment {
           );
       }
     }
-    for (const side of [-1, 1]) {
-      this.box(9, 10, 0.8, side * 7.8, 5, -17.8, this.wall);
-      for (let x = side < 0 ? -12 : -2; x < (side < 0 ? -3 : 13); x += 2)
-        this.box(0.7, 1.1, 1, x, 10.5, -17.8, this.stone);
-    }
-    this.arch(0, 0, -17.5, 3.2, 4.2, this.stone);
-    this.box(6.4, 2.6, 3.3, 0, 9.2, -17.6, this.wall);
-    this.box(28, 1.1, 2.4, 0, 11.1, -37, this.stone);
+    this.arch(0, 0, -14.18, 1.65, 2.6, this.stone, "forest");
+    for (let x = -7; x <= 7; x += 2)
+      this.box(0.8, 1, 1.2, x, 8.5, -14, this.stone, "forest");
+    // A supported stone bridge: arch feet meet the court, crowns meet the deck.
+    this.box(28, 0.7, 2.6, 0, 7.25, -37, this.stone);
+    for (const side of [-1, 1])
+      this.box(1, 9.3, 2.6, side * 14, 2.25, -37, this.wall);
+    for (const z of [-38.15, -35.85])
+      this.box(28, 1.1, 0.3, 0, 8.15, z, this.wall);
     for (let x = -12; x <= 12; x += 4)
-      this.arch(x, 3, -37, 1.7, 3.1, this.wall);
+      this.arch(x, 2.4, -37.5, 1.9, 2.6, this.wall);
     // Beyond the last arch: another inhabited-looking volume, never a floating exit.
     this.box(24, 8, 15, 0, 4, -115, this.wall);
     this.box(25, 0.5, 16, 0, 8.3, -115, this.stone);
@@ -430,7 +495,6 @@ export class ConnectedEnvironment {
     leaves.computeBoundingSphere();
     this.group("forest").add(trunks, leaves);
     for (const side of [-1, 1]) {
-      this.box(1, 1.3, 4.4, side * 6.7, 0.65, -5, this.wall, "forest");
       this.arch(side * 5.8, 0, -4, 1.2, 1.1, this.stone, "forest");
       for (let i = 0; i < 3; i++)
         this.box(
@@ -457,8 +521,6 @@ export class ConnectedEnvironment {
       log.rotation.y = 0.4;
       this.part(log, "forest");
     }
-    this.ironFence(-5, -14, 6.2, 0, "forest");
-    this.ironFence(5, -14, 6.2, 0, "forest");
     this.torch(-3.3, 1.7, -13.6, "forest");
     this.torch(3.3, 1.7, -13.6, "forest");
     this.beam({
@@ -491,19 +553,9 @@ export class ConnectedEnvironment {
     for (const side of [-1, 1]) {
       this.box(0.45, 1.1, 22, side * 7.6, 2.95, -31, this.wall, "roofs");
       this.ironFence(side * 7.4, -31, 23, Math.PI / 2, "roofs", 3.5);
-      for (const z of [-24, -34, -40])
-        this.cylinder(
-          0.28,
-          0.43,
-          4.5,
-          14,
-          side * 6.6,
-          4.65,
-          z,
-          this.stone,
-          "roofs",
-        );
     }
+    for (const { x, z } of COURT_COLUMNS)
+      this.cylinder(0.28, 0.43, 4.5, 14, x, 4.65, z, this.stone, "roofs");
     this.arch(-4.5, 2.4, -26.2, 1.4, 2.1, this.stone, "roofs");
     this.box(2.8, 0.55, 1, -4.6, 2.68, -27.5, this.wall, "roofs");
     this.torch(-6.6, 4.3, -23.4, "roofs");
@@ -565,15 +617,15 @@ export class ConnectedEnvironment {
       }
     }
     for (const z of [-43, -51, -58, -67]) {
-      this.arch(-1.5, base, z, 4.9, 3.6, this.stone, sector);
+      this.arch(-1.825, base, z, 4.675, 3.7, this.stone, sector);
       for (const x of [-6.5, 2.85]) {
         this.cylinder(
           0.26,
           0.41,
-          6.9,
+          3.7,
           16,
           x,
-          base + 3.45,
+          base + 1.85,
           z,
           this.stone,
           sector,
@@ -613,7 +665,7 @@ export class ConnectedEnvironment {
     this.torch(-7.3, base + 2, -46, "chapel");
     this.torch(-7.3, base + 2, -61, "chapel");
     this.chandelier(-0.3, base + 5.1, -51.5, "chapel");
-    // Up and down staircases connect an explorable upper room and gallery.
+    // One entrance to a locked vestry. Loot requires returning by the same stairs.
     for (let i = 1; i <= 20; i++) {
       const h = (i / 20) * 2.8;
       this.box(
@@ -628,27 +680,9 @@ export class ConnectedEnvironment {
       );
     }
     this.box(3.35, 0.3, 9, 5, 5.05, -63.5, this.stone, sector);
-    for (let i = 0; i < 16; i++) {
-      const h = 2.8 * (1 - i / 16);
-      this.box(
-        3.1,
-        h,
-        0.375,
-        5,
-        base + h / 2,
-        -68 - ((i + 0.5) * 6) / 16,
-        this.stone,
-        sector,
-      );
-    }
     this.ironFence(3.35, -63.5, 8.7, Math.PI / 2, sector, 5.2);
     this.ironFence(6.65, -63.5, 9, Math.PI / 2, sector, 5.2);
-    for (const z of [-60.4, -68]) {
-      this.box(0.8, 3.6, 0.35, 3.7, 7, z, this.wall, sector);
-      this.box(0.6, 3.6, 0.35, 6.3, 7, z, this.wall, sector);
-      this.arch(5, 5.2, z, 1.14, 1.9, this.stone, sector);
-    }
-    this.box(0.35, 3.6, 7.6, 6.65, 7, -64.2, this.wall, sector);
+    this.arch(5, 5.2, -60.4, 1.14, 1.9, this.stone, sector);
     this.box(3.6, 0.3, 8, 5, 9, -64, this.dark, sector);
     this.window(6.43, 6.1, -65, 1.3, 2.1, sector, -Math.PI / 2, true);
     this.chandelier(5, 8.35, -61.9, "chapel");
@@ -660,22 +694,22 @@ export class ConnectedEnvironment {
     this.ground(15.5, 27, 0, b, -89.5, s);
     for (const side of [-1, 1]) {
       this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
-      for (const z of [-80, -86, -92, -98]) {
-        this.cylinder(
-          0.28,
-          0.38,
-          3.6,
-          12,
-          side * 5.9,
-          b + 1.8,
-          z,
-          this.stone,
-          s,
-        );
-        this.arch(side * 5.8, b + 0.2, z, 1.05, 1.5, this.stone, s);
-        this.box(1.6, 0.26, 1.1, side * 5.8, b + 0.28, z, this.stone, s);
-        this.ironFence(side * 5.8, z + 0.3, 1.6, 0, s, b + 0.4);
-      }
+    }
+    for (const { x, z } of CRYPT_BAYS) {
+      this.cylinder(
+        0.28,
+        0.38,
+        3.6,
+        12,
+        x + Math.sign(x) * 0.1,
+        b + 1.8,
+        z,
+        this.stone,
+        s,
+      );
+      this.arch(x, b + 0.2, z, 1.05, 1.5, this.stone, s);
+      this.box(1.6, 0.26, 1.1, x, b + 0.28, z, this.stone, s);
+      this.ironFence(x, z + 0.3, 1.6, 0, s, b + 0.4);
     }
     // Four slabs leave a real break in the ceiling above the encounter.
     this.box(5.3, 0.35, 27, -5.15, b + 4.4, -89.5, this.dark, s);
@@ -718,6 +752,91 @@ export class ConnectedEnvironment {
       area: "crypt",
     });
     this.box(1.1, 0.5, 1.2, 3.8, b + 0.25, -81, this.stone, s);
+  }
+  private dressing() {
+    for (const d of DRESSING) {
+      if (d.kind === "tomb") {
+        const turned = d.yaw !== 0;
+        this.box(
+          turned ? 1.8 : 0.8,
+          0.65,
+          turned ? 0.8 : 1.8,
+          d.x,
+          d.y + 0.325,
+          d.z,
+          this.wall,
+          d.area,
+        );
+        this.box(
+          turned ? 1.95 : 0.95,
+          0.12,
+          turned ? 0.95 : 1.95,
+          d.x,
+          d.y + 0.71,
+          d.z,
+          this.stone,
+          d.area,
+        );
+        this.box(0.06, 0.025, 0.45, d.x, d.y + 0.785, d.z, this.dark, d.area);
+        this.box(
+          0.28,
+          0.025,
+          0.06,
+          d.x,
+          d.y + 0.785,
+          d.z - 0.07,
+          this.dark,
+          d.area,
+        );
+      } else if (d.kind === "bench") {
+        this.box(0.55, 0.14, 2.1, d.x, d.y + 0.52, d.z, this.dark, d.area);
+        this.box(
+          0.14,
+          1.05,
+          2.1,
+          d.x - 0.2,
+          d.y + 0.525,
+          d.z,
+          this.dark,
+          d.area,
+        );
+        for (const z of [-0.8, 0.8])
+          this.box(
+            0.4,
+            0.48,
+            0.15,
+            d.x,
+            d.y + 0.24,
+            d.z + z,
+            this.stone,
+            d.area,
+          );
+      } else if (d.kind === "crate") {
+        this.box(0.85, 0.95, 0.85, d.x, d.y + 0.475, d.z, this.bark, d.area);
+        for (const y of [0.12, 0.83])
+          this.box(0.89, 0.07, 0.89, d.x, d.y + y, d.z, this.metal, d.area);
+      } else {
+        this.box(0.85, 0.45, 0.85, d.x, d.y + 0.225, d.z, this.stone, d.area);
+        this.cylinder(
+          0.21,
+          0.32,
+          1.4,
+          10,
+          d.x,
+          d.y + 1.15,
+          d.z,
+          this.wall,
+          d.area,
+        );
+        const head = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(0.22, 1),
+          this.stone,
+        );
+        head.position.set(d.x, d.y + 1.96, d.z);
+        this.part(head, d.area);
+        this.box(0.75, 0.15, 0.25, d.x, d.y + 1.45, d.z, this.stone, d.area);
+      }
+    }
   }
   private ironFence(
     x: number,
@@ -856,22 +975,38 @@ export class ConnectedEnvironment {
     this.warm.push({ x, y: y + 0.3, z, power: 46, range: 8 });
   }
   private fire(x: number, y: number, z: number, sector: Sector, scale = 1) {
-    const group = new THREE.Group(),
-      outer = new THREE.Mesh(
-        new THREE.ConeGeometry(0.065, 0.32, 8),
-        new THREE.MeshBasicMaterial({ color: 0xffd79f, toneMapped: false }),
-      ),
-      core = new THREE.Mesh(
-        new THREE.ConeGeometry(0.035, 0.2, 7),
-        new THREE.MeshBasicMaterial({ color: 0xfffaf0, toneMapped: false }),
-      );
-    outer.position.y = 0.08;
-    core.position.y = 0.015;
-    group.add(outer, core);
-    group.position.set(x, y, z);
-    group.scale.setScalar(scale);
-    this.group(sector).add(group);
-    this.flames.push({ object: group, z, scale });
+    this.flames.push({ x, y, z, scale });
+  }
+  private buildFlames() {
+    this.flameOuter = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.065, 0.32, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd79f, toneMapped: false }),
+      this.flames.length,
+    );
+    this.flameCore = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.035, 0.2, 7),
+      new THREE.MeshBasicMaterial({ color: 0xfffaf0, toneMapped: false }),
+      this.flames.length,
+    );
+    this.root.add(this.flameOuter, this.flameCore);
+    this.updateFlames(0);
+    this.flameOuter.computeBoundingSphere();
+    this.flameCore.computeBoundingSphere();
+  }
+  private updateFlames(time: number) {
+    if (!this.flameOuter || !this.flameCore) return;
+    for (let i = 0; i < this.flames.length; i++) {
+      const f = this.flames[i],
+        sy = f.scale * (0.94 + Math.sin(time * 12 + f.z) * 0.06);
+      this.fireMatrix
+        .makeScale(f.scale, sy, f.scale)
+        .setPosition(f.x, f.y + 0.08 * sy, f.z);
+      this.flameOuter.setMatrixAt(i, this.fireMatrix);
+      this.fireMatrix.setPosition(f.x, f.y + 0.015 * sy, f.z);
+      this.flameCore.setMatrixAt(i, this.fireMatrix);
+    }
+    this.flameOuter.instanceMatrix.needsUpdate =
+      this.flameCore.instanceMatrix.needsUpdate = true;
   }
   private beam(anchor: BeamAnchor) {
     this.cool.push(anchor);
@@ -1041,12 +1176,11 @@ export class ConnectedEnvironment {
       light.position.set(a.x, a.y, a.z);
       light.distance = a.range;
       light.intensity =
-        distance < 150
-          ? a.power *
-            (0.96 +
-              Math.sin(time * 11 + best) * 0.025 +
-              Math.sin(time * 17 + best) * 0.015)
-          : 0;
+        a.power *
+        0.3 *
+        (0.96 +
+          Math.sin(time * 11 + best) * 0.025 +
+          Math.sin(time * 17 + best) * 0.015);
     }
     this.chosenCool.fill(-1);
     for (let slot = 0; slot < this.coolPool.length; slot++) {
@@ -1076,9 +1210,6 @@ export class ConnectedEnvironment {
       b.material.opacity =
         (b.area === area ? 0.12 : 0.045) *
         (1 + Math.sin(time * 0.65 + b.phase) * 0.08);
-    for (const f of this.flames) {
-      f.object.visible = Math.abs(f.z - player.z) < 19;
-      f.object.scale.y = f.scale * (0.94 + Math.sin(time * 12 + f.z) * 0.06);
-    }
+    this.updateFlames(time);
   }
 }

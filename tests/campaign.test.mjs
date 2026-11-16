@@ -90,10 +90,11 @@ for (const scenario of Object.keys(SCENARIOS))
       maxStep = 0,
       hurts = 0,
       prev = { x: g.player.x, z: g.player.z },
-      previousHP = 100;
+      previousHP = 100,
+      previousHeals = 0;
     const weapons = new Set(),
       areas = new Set();
-    while (!driver.done && frames++ < 120 * 160) {
+    while (!driver.done && frames++ < 120 * 300) {
       const input = driver.update(1 / 120);
       g.update(1 / 120, input);
       maxStep = Math.max(
@@ -101,8 +102,13 @@ for (const scenario of Object.keys(SCENARIOS))
         Math.hypot(g.player.x - prev.x, g.player.z - prev.z),
       );
       prev = { x: g.player.x, z: g.player.z };
-      assert.ok(g.player.hp <= previousHP);
+      if (g.player.hp > previousHP)
+        assert.ok(
+          g.healed > previousHeals,
+          "HP rose without drinking a potion",
+        );
       previousHP = g.player.hp;
+      previousHeals = g.healed;
       assert.ok(
         Math.abs(g.player.y - floorHeight(g.player.x, g.player.z)) < 1e-6,
       );
@@ -114,11 +120,23 @@ for (const scenario of Object.keys(SCENARIOS))
     }
     assert.ok(driver.done, `${scenario} stalled at ${driver.label}`);
     assert.ok(maxStep < 0.08, `teleport ${maxStep}`);
-    if (scenario === "defeat") {
+    if (scenario === "defeat" || scenario === "unarmoured") {
       assert.equal(g.phase, "lost");
       assert.equal(g.player.hp, 0);
       assert.equal(g.enemy.hp, g.enemy.maxHp);
-      assert.equal(hurts, 4);
+      if (scenario === "defeat") assert.equal(hurts, 4);
+    } else if (scenario === "ambush" || scenario === "healing") {
+      assert.equal(g.phase, "playing");
+      assert.ok(g.player.hp > 0);
+      if (scenario === "ambush") {
+        assert.equal(g.interruptedInspections, 1);
+        assert.equal(g.lootedChests.size, 1);
+      }
+      if (scenario === "healing") {
+        assert.equal(g.interruptedHeals, 1);
+        assert.equal(g.healed, 0);
+        assert.equal(g.flasks, 0);
+      }
     } else {
       assert.equal(g.phase, "finished");
       assert.ok(g.player.hp > 0);
@@ -136,9 +154,21 @@ for (const scenario of Object.keys(SCENARIOS))
         "sword",
         "unarmed",
       ]);
-      assert.ok(frames / 120 > 90 && frames / 120 < 150);
+      assert.equal(g.enemies.size, 8);
+      assert.ok([...g.enemies.values()].every((e) => e.hp === 0));
+      assert.equal(g.player.armour, 1);
+      assert.ok(g.healed > 0);
+      assert.ok(frames / 120 > 150 && frames / 120 < 300);
     }
     if (scenario === "chapel") assert.ok(maxY >= 5.2);
+    if (scenario === "escape") {
+      assert.ok(g.openDoors.has("gate"));
+      assert.equal(g.lootedChests.size, 0);
+      assert.equal(g.player.armour, 0);
+      assert.equal(g.healed, 0);
+      assert.equal(g.mimicAwake, false);
+      assert.ok([...g.enemies.values()].every((e) => e.hp === e.maxHp));
+    }
   });
 
 test("mimic remains a harmless closed chest until interacted with, then delivers real damage", () => {
@@ -147,12 +177,11 @@ test("mimic remains a harmless closed chest until interacted with, then delivers
   Object.assign(g.player, { x: -2, z: -83.6, y: 2.4 });
   advance(g, 3);
   assert.equal(g.player.hp, 100);
-  assert.ok(g.enemyDormant);
   assert.equal(g.mimicAwake, false);
   g.interact();
   assert.ok(g.mimicAwake);
   assert.equal(g.enemyDormant, false);
   advance(g, 5);
   assert.ok(g.player.hp < 100);
-  assert.equal(g.enemy.hp, g.enemy.maxHp);
+  assert.equal(g.enemies.get("crypt").hp, g.enemies.get("crypt").maxHp);
 });

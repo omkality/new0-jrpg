@@ -84,7 +84,7 @@ export class DeviceCheck {
     }
     this.elapsed += rawMs / 1000;
     this.samples.add(rawMs);
-    if (finished || this.elapsed >= 175) {
+    if (finished || this.elapsed >= 300) {
       this.store(finished && completed.has(location), scale, resources);
       this.done = true;
     }
