@@ -145,7 +145,7 @@ test("six complete input-driven World journeys keep warmed resources bounded", a
       resource_check_only: true,
       physical_iphone_benchmark: false,
       expected_renderer: "SwiftShader software renderer",
-      viewport: { width: 540, height: 360 },
+      viewport: { width: 270, height: 180 },
       wait_timeout_ms: waitMs,
       playwright_version: require("@playwright/test/package.json").version,
       browser_version: browser.version(),
@@ -188,7 +188,7 @@ test("six complete input-driven World journeys keep warmed resources bounded", a
     report.renderer,
     "The constrained run must use the declared software renderer",
   ).toMatch(/swiftshader/i);
-  expect(report.viewport).toEqual({ width: 540, height: 360 });
+  expect(report.viewport).toEqual({ width: 270, height: 180 });
   expect(report.flags.simulation_step).toBe("fast");
   expect(report.fast_simulation_seconds_per_render).toBe(12);
   expect(observations.page_crashes).toBe(0);

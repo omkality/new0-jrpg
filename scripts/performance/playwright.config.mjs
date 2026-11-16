@@ -25,7 +25,9 @@ export default defineConfig({
     browserName: "chromium",
     headless: true,
     baseURL: "http://127.0.0.1:4178",
-    viewport: { width: 540, height: 360 },
+    // Preserve the 3:2 camera coverage while bounding SwiftShader raster work.
+    // This checks resource lifecycle, never realtime or phone frame rate.
+    viewport: { width: 270, height: 180 },
     deviceScaleFactor: 1,
     actionTimeout: 30_000,
     launchOptions: {
