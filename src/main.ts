@@ -404,8 +404,10 @@ function beginDeviceCheck() {
   visible("#check-result", false);
   startScenario("journey");
   deviceCheck = new DeviceCheck();
-  frameCost = frameCostRequested ? new FrameCostProfile() : null;
-  world.frameCosts = frameCost ? {} : null;
+  // Keep the lightweight route counters in the normal device autocheck too.
+  // The healthy physical run used this same path before its optional probe.
+  frameCost = new FrameCostProfile();
+  world.frameCosts = {};
   profileLayers("normal");
 }
 $("#autoplay").onclick = beginDeviceCheck;
@@ -630,7 +632,7 @@ function frame(now: number) {
       world.resources(),
     );
     if (deviceCheck.done) {
-      if (profile && game.phase === "finished") {
+      if (profile && frameCostRequested && game.phase === "finished") {
         if (!profile.inProbe) {
           profile.beginProbe(now);
           toast("Диагностика слоёв / ещё 48 секунд на том же ракурсе");

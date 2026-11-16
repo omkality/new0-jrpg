@@ -122,8 +122,8 @@ class CostRow {
   }
 }
 
-// Opt-in device diagnosis. The route is untouched. The paired layer probe runs
-// only after the genuine four-area finish at the same camera and resolution.
+// Bounded device-autocheck counters. The route is untouched. The optional
+// paired layer probe runs after the genuine four-area finish at the same view.
 export class FrameCostProfile {
   private rows = new Map<string, CostRow>();
   private probeStart: number | null = null;
