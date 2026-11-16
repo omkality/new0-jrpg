@@ -245,7 +245,7 @@ function report() {
     physical_iphone_benchmark: false,
     mode: targetRuns > 1 ? "restart-resource-test" : "normal-input-tour",
     limits:
-      "World and Campaign only, excludes main.ts HUD, noise soft-light compositing and audio. Accelerated modes are not realtime FPS benchmarks. CPU component values are sums per rendered frame and include probe overhead. GPU timing optional.",
+      "World and Campaign only, includes fixes3 shader grain and static lighting, excludes main.ts HUD and audio. Accelerated modes are not realtime FPS benchmarks. CPU component values are sums per rendered frame and include probe overhead. GPU timing optional.",
     flags: flags(),
     gpu_timer_available: !!ext,
     heap_api_available: !!(performance as any).memory,
@@ -286,71 +286,17 @@ function showReport() {
 }
 function lightBoundary() {
   const environment = (world as any).environment,
-    p = game.player,
-    area = game.location;
-  const warm = environment.warm as {
-    x: number;
-    y: number;
-    z: number;
-    area: string;
-    range: number;
-  }[];
-  const selected: number[] = [];
-  for (let slot = 0; slot < environment.warmPool.length; slot++) {
-    let best = -1,
-      distance = Infinity;
-    for (let i = 0; i < warm.length; i++) {
-      const a = warm[i];
-      if (selected.includes(i) || (a.area !== area && a.area !== "world"))
-        continue;
-      const d = (a.x - p.x) ** 2 + (a.z - p.z) ** 2 + (a.y - p.y - 1) ** 2;
-      if (d < distance) {
-        best = i;
-        distance = d;
-      }
-    }
-    const previous = environment.assignedWarm[slot],
-      old = warm[previous];
-    if (
-      old &&
-      (old.area === area || old.area === "world") &&
-      !selected.includes(previous)
-    ) {
-      const d =
-        (old.x - p.x) ** 2 + (old.z - p.z) ** 2 + (old.y - p.y - 1) ** 2;
-      if (d < distance * 1.18 + 0.7) best = previous;
-    }
-    selected.push(best);
-  }
-  const hot = selected
-    .map((i) => {
-      const a = warm[i];
-      return a
-        ? `${i}:${Math.hypot(a.x - p.x, a.y - p.y - 1, a.z - p.z) < a.range ? 1 : 0}`
-        : "none";
-    })
-    .sort();
-  const cool = (
-    environment.cool as {
-      x: number;
-      y: number;
-      z: number;
-      tx: number;
-      tz: number;
-      area: string;
-    }[]
-  )
-    .map((a, i) => ({ a, i, d: (a.tx - p.x) ** 2 + (a.tz - p.z) ** 2 }))
-    .filter((v) => v.a.area === area)
-    .sort((a, b) => a.d - b.d)
-    .slice(0, environment.coolPool.length)
+    p = game.player;
+  // All anchors are baked once. There is no nearest-light pool to relocate.
+  // Keep resource snapshots around entering/leaving each actual light volume.
+  return [...environment.warm, ...environment.cool]
     .map(
-      ({ a, i }) =>
-        `${i}:${Math.hypot(a.x - p.x, a.y - p.y - 1, a.z - p.z) < 20 ? 1 : 0}`,
+      (a: { x: number; y: number; z: number; range?: number }, i: number) =>
+        `${i}:${Math.hypot(a.x - p.x, a.y - p.y - 1, a.z - p.z) < (a.range ?? 20) ? 1 : 0}`,
     )
-    .sort();
-  return hot.join(",") + "/" + cool.join(",");
+    .join(",");
 }
+
 function startRun() {
   game.startScenario("journey");
   world.resetView();

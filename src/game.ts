@@ -45,16 +45,6 @@ export const DODGE = {
   invulnerableEnd: 0.57,
 } as const;
 export function dodgeTravelAt(f: Fighter, time: number) {
-  if (f.kind === "pilgrim" && f.weapon === "unarmed" && f.armour === 0) {
-    const u = Math.max(
-      0,
-      Math.min(
-        1,
-        (time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
-      ),
-    );
-    return DODGE.distance * (0.5 - 0.5 * Math.cos(Math.PI * u));
-  }
   const profile = evadeMotion[`Evade${f.dodgeSide}`],
     rows = profile.samples;
   let i = 1;
@@ -667,7 +657,7 @@ export class CombatGame {
       dz += Math.cos(p.yaw) * ATTACKS[p.combo - 1].lunge;
     }
     if (p.mode === "dodge") {
-      // Compression and landing stay planted. Travel belongs to the tucked roll.
+      // All humans use the grounded source step, including empty hands.
       const travel = dodgeTravelAt(p, p.time);
       const step = travel - this.dodgeTravel;
       this.dodgeTravel = travel;

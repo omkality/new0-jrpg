@@ -177,7 +177,8 @@ export class RouteNavigation {
         const q = point(n);
         if (
           !valid(n) ||
-          this.game.heightAt(q.x, q.z) > this.game.heightAt(p.x, p.z) + 0.3
+          this.game.heightAt(q.x, q.z) > this.game.heightAt(p.x, p.z) + 0.3 ||
+          !this.clear(current === first ? start : p, q)
         )
           continue;
         if (

@@ -159,6 +159,7 @@ export class CampaignShowcase {
   private healthAtStep = 100;
   private navigation: RouteNavigation;
   private frameDt = 1 / 60;
+  private retreat?: { x: number; z: number; until: number };
   private walkTargets = new WeakMap<object, Point>();
   constructor(game: Campaign, scenario: ScenarioId) {
     this.g = game;
@@ -273,6 +274,7 @@ export class CampaignShowcase {
     this.fightStage = 0;
     this.attackBegan = false;
     this.dodged = false;
+    this.retreat = undefined;
   }
   private towards(
     point: Point,
@@ -391,30 +393,46 @@ export class CampaignShowcase {
   private backOff(): MoveInput {
     const g = this.g,
       p = g.player;
+    const clear = (x: number, z: number, distance: number) =>
+      [0.12, distance].every((s) =>
+        g.walkable(p.x + x * s, p.z + z * s, p.x, p.z, true),
+      );
+    // Keep an escape decision long enough to take a step. Re-scoring the
+    // sixteen headings every physics tick flips between nearly equal routes
+    // beside a pillar, making the whole body turn back and forth at 120 Hz.
+    if (
+      this.retreat &&
+      this.retreat.until > g.elapsed &&
+      clear(this.retreat.x, this.retreat.z, 0.3)
+    )
+      return { x: this.retreat.x, z: this.retreat.z, guard: false };
     let best = rest,
       bestScore = -Infinity;
     for (let i = 0; i < 16; i++) {
       const angle = (i * Math.PI) / 8,
         x = Math.sin(angle),
         z = Math.cos(angle);
-      let clear = true;
-      for (const s of [0.18, 0.36, 0.65])
-        if (!g.walkable(p.x + x * s, p.z + z * s, p.x, p.z, true)) {
-          clear = false;
-          break;
-        }
-      if (!clear) continue;
+      if (!clear(x, z, 0.65)) continue;
       let score = 0;
       for (const foe of g.foes) {
         const before = Math.hypot(p.x - foe.x, p.z - foe.z),
           after = Math.hypot(p.x + x * 0.65 - foe.x, p.z + z * 0.65 - foe.z);
         score += 1 / Math.max(0.25, before) - 1 / Math.max(0.25, after);
       }
+      // A safe pause is preferable to walking into greater danger when all
+      // escape directions are blocked. The normal enemy attack still lands.
+      if (score <= 0.002) continue;
+      if (this.retreat)
+        score -= 0.025 * (1 - x * this.retreat.x - z * this.retreat.z);
       if (score > bestScore) {
         bestScore = score;
         best = { x, z, guard: false };
       }
     }
+    this.retreat =
+      best === rest
+        ? undefined
+        : { x: best.x, z: best.z, until: g.elapsed + 0.4 };
     return best;
   }
   update(dt: number): MoveInput {

@@ -130,6 +130,8 @@ for (const tree of TREES) {
 }
 const fire = env.root.getObjectByName("AlwaysBurningTexturedFlames");
 const version = fire.instanceMatrix.version;
+const lightVersion = env.localLighting.texture.version;
+const lightData = env.localLighting.texture.image.data.slice();
 for (let i = 0; i < 600; i++)
   env.update(i / 60, { x: 0, y: 2.4, z: -99 }, "crypt", i > 300);
 assert.equal(
@@ -137,6 +139,17 @@ assert.equal(
   version,
   "Fire uploaded instance matrices per frame",
 );
+assert.equal(
+  env.localLighting.texture.version,
+  lightVersion,
+  "Local illumination was uploaded again during movement",
+);
+assert.deepEqual(
+  env.localLighting.texture.image.data,
+  lightData,
+  "Walking or changing area changed a static source",
+);
+assert.equal(env.localLighting.texture.image.data.byteLength, 187500);
 let triangles = 0,
   meshes = 0,
   lights = 0,
@@ -167,7 +180,11 @@ assert.equal(
   0,
   "A textured scene material opts out of atmospheric fog",
 );
-assert(lights <= 9, "Unexpected new dynamic light pool");
+assert.equal(
+  lights,
+  3,
+  "Static sources must not return to a nearest-point/spot pool",
+);
 assert(
   LOCATIONS.crypt.density < LOCATIONS.forest.density &&
     LOCATIONS.chapel.density < LOCATIONS.forest.density,

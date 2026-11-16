@@ -15,6 +15,7 @@ import {
   type AreaId,
 } from "./world-layout.ts";
 import { createForest } from "./forest.ts";
+import { StaticLightField } from "./static-light.ts";
 import { terrainHeight } from "./terrain-height.ts";
 import { CRYPT_FURNISHINGS } from "./castle-furnishings.ts";
 import {
@@ -23,11 +24,11 @@ import {
 } from "./environment-materials.ts";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0xc1c9c3, density: 0.043 },
-  roofs: { name: "Воротный двор", fog: 0xb8c2bd, density: 0.032 },
-  chapel: { name: "Собор и верхняя галерея", fog: 0xaab5b0, density: 0.023 },
-  crypt: { name: "Зал погребённых", fog: 0xa5b0ab, density: 0.026 },
-  courtyard: { name: "Лес у Чёрных ворот", fog: 0xc1c9c3, density: 0.043 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.057 },
+  roofs: { name: "Воротный двор", fog: 0xcbd2cc, density: 0.048 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0xc7cec8, density: 0.045 },
+  crypt: { name: "Зал погребённых", fog: 0xc3cbc5, density: 0.047 },
+  courtyard: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.057 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
 export const LOCATION_IDS = Object.keys(LOCATIONS) as LocationId[];
@@ -68,6 +69,7 @@ const rand = (i: number) => {
 // A continuous map. Geometry, materials and light pools are allocated once.
 export class ConnectedEnvironment {
   root = new THREE.Group();
+  readonly localLighting: StaticLightField;
   private sectors = new Map<Sector, THREE.Group>();
   private batches = new Map<
     Sector,
@@ -93,11 +95,6 @@ export class ConnectedEnvironment {
   private lastTime = 0;
   private warm: WarmAnchor[] = [];
   private cool: BeamAnchor[] = [];
-  private warmPool: THREE.PointLight[] = [];
-  private coolPool: THREE.SpotLight[] = [];
-  private chosen = new Int16Array(4);
-  private assignedWarm = new Int16Array(4).fill(-1);
-  private chosenCool = new Int16Array(2);
   private beams: {
     material: THREE.MeshBasicMaterial;
     area: AreaId;
@@ -227,16 +224,6 @@ export class ConnectedEnvironment {
     this.moonLight.position.set(-9, 18, 8);
     this.bounceLight.position.set(8, 4, -40);
     this.root.add(this.skyLight, this.moonLight, this.bounceLight);
-    for (let i = 0; i < 4; i++) {
-      const light = new THREE.PointLight(0xffbc78, 0, 7, 2);
-      this.warmPool.push(light);
-      this.root.add(light);
-    }
-    for (let i = 0; i < 2; i++) {
-      const light = new THREE.SpotLight(0xf4f7ff, 0, 20, 0.48, 0.7, 2);
-      this.coolPool.push(light);
-      this.root.add(light, light.target);
-    }
     this.terrain();
     this.fortress();
     this.forest();
@@ -275,6 +262,7 @@ export class ConnectedEnvironment {
     this.dressing();
     this.buildFlames();
     this.flush();
+    this.localLighting = new StaticLightField(this.warm, this.cool);
   }
   private group(sector: Sector) {
     return this.sectors.get(sector)!;
@@ -1793,79 +1781,6 @@ export class ConnectedEnvironment {
     for (const [id, group] of this.sectors)
       group.visible =
         id === "world" || Math.abs(CENTERS[id as AreaId] - player.z) < 42;
-    this.chosen.fill(-1);
-    for (let slot = 0; slot < this.warmPool.length; slot++) {
-      let best = -1,
-        distance = Infinity;
-      for (let i = 0; i < this.warm.length; i++) {
-        if (this.chosen.includes(i)) continue;
-        const a = this.warm[i],
-          d =
-            (a.x - player.x) ** 2 +
-            (a.z - player.z) ** 2 +
-            (a.y - player.y - 1) ** 2;
-        if (a.area !== area && a.area !== "world") continue;
-        if (d < distance) {
-          best = i;
-          distance = d;
-        }
-      }
-      const previous = this.assignedWarm[slot],
-        old = this.warm[previous];
-      if (
-        old &&
-        (old.area === area || old.area === "world") &&
-        !this.chosen.includes(previous)
-      ) {
-        const oldDistance =
-          (old.x - player.x) ** 2 +
-          (old.z - player.z) ** 2 +
-          (old.y - player.y - 1) ** 2;
-        if (oldDistance < distance * 1.18 + 0.7) best = previous;
-      }
-      this.chosen[slot] = best;
-      this.assignedWarm[slot] = best;
-      const light = this.warmPool[slot],
-        a = this.warm[best];
-      if (!a) {
-        light.intensity = 0;
-        continue;
-      }
-      light.position.set(a.x, a.y, a.z);
-      light.distance = a.range;
-      light.intensity =
-        a.power *
-        0.72 *
-        (0.96 +
-          Math.sin(time * 11 + best) * 0.025 +
-          Math.sin(time * 17 + best) * 0.015);
-    }
-    this.chosenCool.fill(-1);
-    for (let slot = 0; slot < this.coolPool.length; slot++) {
-      let best = -1,
-        distance = Infinity;
-      for (let i = 0; i < this.cool.length; i++) {
-        const a = this.cool[i];
-        if (a.area !== area || this.chosenCool.includes(i)) continue;
-        const d = (a.tx - player.x) ** 2 + (a.tz - player.z) ** 2;
-        if (d < distance) {
-          best = i;
-          distance = d;
-        }
-      }
-      this.chosenCool[slot] = best;
-      const light = this.coolPool[slot],
-        a = this.cool[best];
-      light.intensity = a
-        ? a.power *
-          (a.threshold ? 0.2 + 0.8 * exit : 1) *
-          (0.96 + Math.sin(time * 0.73 + a.z) * 0.04)
-        : 0;
-      if (a) {
-        light.position.set(a.x, a.y, a.z);
-        light.target.position.set(a.tx, a.ty, a.tz);
-      }
-    }
     for (const b of this.beams)
       b.material.opacity =
         (b.area === area ? 0.12 : 0.045) *

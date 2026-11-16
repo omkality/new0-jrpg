@@ -72,8 +72,7 @@ a {
   overflow: hidden;
 }
 #world,
-#hud,
-#atmosphere {
+#hud {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -83,13 +82,8 @@ a {
   outline: none;
   touch-action: none;
 }
-#hud,
-#atmosphere {
+#hud {
   pointer-events: none;
-}
-#atmosphere {
-  opacity: 0.16;
-  mix-blend-mode: soft-light;
 }
 #hud {
   z-index: 3;

@@ -746,16 +746,16 @@ for (const weapon of ["sword", "axe", "spear", "unarmed"].filter(
     });
   }
 }
-// Full tuck rolls remain available without metal armour. Exercise the actual
+// Grounded empty-hand evasions retain their own native arm poses. Exercise the
 // cloth/neck skinning throughout these clips with every armour part switched
 // off, separately from the cuirass intersection test.
-const unarmouredRolls = [];
+const unarmouredEvades = [];
 armour.visible = false;
 setArmourCoverage(rig, false);
 assert.equal(
   rig.getObjectByName("ArmourFauld").visible,
   false,
-  "Fauld did not disappear for unarmoured roll",
+  "Fauld did not disappear for unarmoured evade",
 );
 if (!weaponFilter || weaponFilter.includes("unarmed"))
   for (const side of ["Forward", "Back", "Left", "Right"]) {
@@ -766,7 +766,7 @@ if (!weaponFilter || weaponFilter.includes("unarmed"))
       kind: "pilgrim",
       armour: 0,
     });
-    assert.ok(name.startsWith("Dodge"), "Unarmoured roll policy is missing");
+    assert.equal(name, `Evade${side}`, "Empty hands must use a grounded source step");
     if (clipFilter && !clipFilter.includes(name)) continue;
     const clip = clips.get(name),
       duration = Math.max(
@@ -820,7 +820,7 @@ if (!weaponFilter || weaponFilter.includes("unarmed"))
       }
       frames++;
     }
-    unarmouredRolls.push({
+    unarmouredEvades.push({
       clip: name,
       frames,
       verticesChecked: vertices,
@@ -908,7 +908,7 @@ for (const result of results)
 if (maxSeamGap > 0.0001)
   failures.push(`Fitted collar seam opened by ${maxSeamGap} metres`);
 assert.ok(
-  results.length + unarmouredRolls.length > 0,
+  results.length + unarmouredEvades.length > 0,
   "No selected clips were tested",
 );
 const report = {
@@ -923,7 +923,7 @@ const report = {
   },
   seam: { vertices: seamSources.length, maxGap: maxSeamGap },
   cloth: results,
-  unarmouredRolls,
+  unarmouredEvades,
   liquid: fills,
   uncovered,
   failures,
@@ -937,7 +937,7 @@ console.log(
       seam: report.seam,
       liquid: fills,
       clips: results.length,
-      unarmouredRolls,
+      unarmouredEvades,
       visibleContactClips: failures.length,
       uncoveredExamples: uncovered.slice(0, 4),
       failures,
