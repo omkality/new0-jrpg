@@ -21,7 +21,9 @@ export interface StageMetrics {
   resources: ResourceMetrics;
 }
 export interface DeviceReport {
-  protocol: "device-check-2";
+  protocol: "device-check-3";
+  asset_revision: string;
+  client_revision: string;
   platform: string;
   telegram_version: string;
   viewport_width: number;

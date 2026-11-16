@@ -69,11 +69,15 @@ for (const character of ["prisoner", "watcher", "gaoler", "effigy"]) {
   const fixes = await io.read(
     `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-fixes1.glb`,
   );
+  const fixes2 = await io.read(
+    `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-fixes2.glb`,
+  );
   const clips = new Map(
     [
       ...d.getRoot().listAnimations(),
       ...motion.getRoot().listAnimations(),
       ...fixes.getRoot().listAnimations(),
+      ...fixes2.getRoot().listAnimations(),
     ].map((c) => [c.getName(), c]),
   );
   const variants =
@@ -143,8 +147,14 @@ for (const character of ["prisoner", "watcher", "gaoler", "effigy"]) {
             armour,
             dodgeSide: semanticName.slice(5),
           })
-        : weapon === "sword" && semanticName.startsWith("Attack")
-          ? "Sword" + semanticName
+        : semanticName.startsWith("Attack")
+          ? (weapon === "sword"
+              ? "Sword"
+              : weapon === "spear"
+                ? "Spear"
+                : weapon === "unarmed"
+                  ? "Fist"
+                  : "") + semanticName
           : semanticName;
       const c = clips.get(name === "Drink" ? "Idle" : name);
       assert(c, `${character}: missing ${name}`);
@@ -259,9 +269,9 @@ for (const character of ["prisoner", "watcher", "gaoler", "effigy"]) {
     });
   }
 }
-await mkdir("work/fixes1", { recursive: true });
+await mkdir("work/fixes2", { recursive: true });
 await writeFile(
-  `work/fixes1/${process.argv.includes("--baseline") ? "baseline-" : "current-"}continuity.json`,
+  `work/fixes2/${process.argv.includes("--baseline") ? "baseline-" : "current-"}continuity.json`,
   JSON.stringify(report, null, 2),
 );
 console.log(

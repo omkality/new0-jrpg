@@ -1,3 +1,4 @@
+import { CRYPT_FURNISHINGS } from "./castle-furnishings.ts";
 export type AreaId = "forest" | "roofs" | "chapel" | "crypt";
 export type WeaponId = "sword" | "axe" | "spear" | "unarmed" | "relic";
 export interface Point {
@@ -160,30 +161,26 @@ export function floorHeight(x: number, z: number) {
 // Every structural solid below is rendered from this same record. A closed room
 // cannot acquire a second entrance because its visual and collision walls differ.
 export const WALLS: Wall[] = [
-  ...[-1, 1].map(
-    (side): Wall => ({
-      id: `forest-ruin-${side}`,
-      area: "forest",
-      x: side * 6.7,
-      z: -5,
-      hx: 0.5,
-      hz: 2.2,
-      base: 0,
-      height: 1.3,
-    }),
-  ),
-  ...[-1, 1].map(
-    (s): Wall => ({
-      id: `gate-wing-${s}`,
-      area: "forest",
-      x: s * 5,
-      z: -14,
-      hx: 3.4,
-      hz: 0.5,
-      base: 0,
-      height: 8,
-    }),
-  ),
+  ...[-1, 1].map((side): Wall => ({
+    id: `forest-ruin-${side}`,
+    area: "forest",
+    x: side * 6.7,
+    z: -5,
+    hx: 0.5,
+    hz: 2.2,
+    base: 0,
+    height: 1.3,
+  })),
+  ...[-1, 1].map((s): Wall => ({
+    id: `gate-wing-${s}`,
+    area: "forest",
+    x: s * 5,
+    z: -14,
+    hx: 3.4,
+    hz: 0.5,
+    base: 0,
+    height: 8,
+  })),
   {
     id: "gate-header",
     area: "forest",
@@ -194,19 +191,17 @@ export const WALLS: Wall[] = [
     base: 4.25,
     height: 3.75,
   },
-  ...[-6, -2, 2, 6].map(
-    (x): Wall => ({
-      id: `bridge-pier-${x}`,
-      area: "roofs",
-      x,
-      z: -37,
-      hx: 0.32,
-      hz: 0.65,
-      base: 2.4,
-      height: 2.6,
-      material: "stone",
-    }),
-  ),
+  ...[-6, -2, 2, 6].map((x): Wall => ({
+    id: `bridge-pier-${x}`,
+    area: "roofs",
+    x,
+    z: -37,
+    hx: 0.32,
+    hz: 0.65,
+    base: 2.4,
+    height: 2.6,
+    material: "stone",
+  })),
   {
     id: "vestry-front-left",
     area: "chapel",
@@ -321,8 +316,6 @@ export const DRESSING = [
   { kind: "tomb", area: "chapel", x: -4.8, z: -62.5, y: 2.4, yaw: Math.PI / 2 },
   { kind: "statue", area: "chapel", x: 1.8, z: -66.7, y: 2.4, yaw: Math.PI },
   { kind: "statue", area: "roofs", x: -6.5, z: -31, y: 2.4, yaw: 0.4 },
-  { kind: "tomb", area: "crypt", x: 6.7, z: -91.3, y: 2.4, yaw: 0 },
-  { kind: "tomb", area: "crypt", x: 4.8, z: -92.5, y: 2.4, yaw: Math.PI / 2 },
 ] as const;
 export const COURT_COLUMNS = [-1, 1].flatMap((side) =>
   [-24, -34, -40].map((z) => ({ x: side * 6.6, z })),
@@ -433,12 +426,13 @@ export const OBSTACLES: Obstacle[] = [
     minY: 2.3,
     maxY: 6.9,
   })),
-  ...CRYPT_BAYS.map((p) => ({
-    ...p,
-    hx: 1.08,
-    hz: 0.58,
+  ...CRYPT_FURNISHINGS.map((p) => ({
+    x: p.x,
+    z: p.z,
+    hx: p.hx,
+    hz: p.hz,
     minY: 2.3,
-    maxY: 6.1,
+    maxY: 2.4 + p.height,
   })),
   ...[-1, 1].flatMap((side) =>
     [-1, 1].map((leg) => ({

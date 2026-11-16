@@ -21,6 +21,7 @@ import {
   sourceAttackTime,
 } from "./motion-policy";
 import { WEAPON_RELEASE_TIME } from "./weapon-spec";
+import { MixerPose } from "./mixer-pose";
 
 type Kind = "pilgrim" | Exclude<EnemyKind, "mimic">;
 interface RigState {
@@ -40,6 +41,7 @@ interface RigState {
   gear: GearPose;
   continuity: SkeletonContinuity;
   feet: FootContact;
+  mixerPose: MixerPose;
 }
 interface FloorClip {
   duration: number;
@@ -57,18 +59,22 @@ function loadFloor() {
     })
     .then((data) => {
       floorTable = data;
-      return fetch(assetUrl("/assets/motion/fixes1-floor.json"))
-        .then((r) => {
-          if (!r.ok) throw new Error("Motion contact data failed");
-          return r.json();
-        })
-        .then((extra) => {
+      return Promise.all(
+        ["fixes1", "fixes2"].map((revision) =>
+          fetch(assetUrl(`/assets/motion/${revision}-floor.json`)).then((r) => {
+            if (!r.ok) throw new Error("Motion contact data failed");
+            return r.json();
+          }),
+        ),
+      ).then((tables) => {
+        for (const extra of tables) {
           for (const [profile, value] of Object.entries(extra.profiles) as [
             string,
             { clips: Record<string, FloorClip> },
           ][])
             Object.assign(floorTable.profiles[profile].clips, value.clips);
-        });
+        }
+      });
     }));
 }
 function contactOffset(profile: string, clip: string, time: number) {
@@ -107,10 +113,11 @@ export class Actor {
       kinds.map(async (kind) => {
         const model = MODELS[kind],
           motion = model === "gaoler" ? "gaoler" : "prisoner";
-        const [gltf, combat, fixes] = await Promise.all([
+        const [gltf, combat, fixes, fixes2] = await Promise.all([
           load(`/assets/cast/${model}.glb`),
           load(`/assets/motion/${motion}-combat.glb`),
           load(`/assets/motion/${motion}-fixes1.glb`),
+          load(`/assets/motion/${motion}-fixes2.glb`),
         ]);
         const rig = clone(gltf.scene);
         rig.visible = false;
@@ -172,6 +179,7 @@ export class Actor {
           ...gltf.animations,
           ...combat.animations,
           ...fixes.animations,
+          ...fixes2.animations,
         ])
           actions.set(clip.name, mixer.clipAction(clip));
         const hand = rig.getObjectByName("hand_R"),
@@ -220,6 +228,7 @@ export class Actor {
           gear: new GearPose(rig, kind === "gaoler"),
           continuity: new SkeletonContinuity(rig, kind === "gaoler"),
           feet: new FootContact(rig),
+          mixerPose: new MixerPose(rig),
         });
       }),
     );
@@ -300,6 +309,7 @@ export class Actor {
         ? semanticAttackTime(f, this.enemy)
         : f.time;
     const once = !["Idle", "Walk", "Run", "Guard"].includes(name);
+    s.mixerPose.restore();
     this.change(s, name, once);
     const action = s.action!;
     action.paused = false;
@@ -322,6 +332,7 @@ export class Actor {
             : 1,
       );
     s.mixer.update(dt);
+    s.mixerPose.capture();
     s.continuity.apply(dt);
     const loop = ["Idle", "Walk", "Run", "Guard"].includes(name);
     const offset =
@@ -392,6 +403,7 @@ export class Actor {
   reset() {
     for (const s of this.states.values()) {
       s.mixer.stopAllAction();
+      s.mixerPose.reset();
       s.current = "";
       s.gear.reset();
       s.continuity.reset();

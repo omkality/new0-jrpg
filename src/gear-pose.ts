@@ -31,6 +31,7 @@ export class GearPose {
   private chest?: THREE.Object3D;
   private head?: THREE.Object3D;
   private mouth?: THREE.Object3D;
+  private armour?: THREE.Object3D;
   private chestUp = new THREE.Vector3(0, 1, 0);
   private chestRight = new THREE.Vector3(-1, 0, 0);
   private chestFront = new THREE.Vector3(0, 0, 1);
@@ -54,6 +55,7 @@ export class GearPose {
     this.chest = rig.getObjectByName("chest");
     this.head = rig.getObjectByName("head");
     this.mouth = rig.getObjectByName("fixes1_mouth");
+    this.armour = rig.getObjectByName("ArmourGuardianCuirass");
     if (this.chest) {
       rig.updateWorldMatrix(true, true);
       rig.getWorldQuaternion(this.q[0]);
@@ -195,23 +197,19 @@ export class GearPose {
       .addScaledVector(v, height * Math.sin(angle));
     const upperDirection = this.v[24].copy(elbow).sub(a),
       foreDirection = this.v[25].copy(goal).sub(elbow);
-    const normal = this.v[26].copy(shaft).negate();
-    this.orient(
-      arm.upper,
-      arm.axes[0],
-      upperDirection,
-      normal,
-      arm.ready ? arm.previous[0] : undefined,
-      dt,
-    );
-    this.orient(
-      arm.fore,
-      arm.axes[1],
-      foreDirection,
-      normal,
-      arm.ready ? arm.previous[1] : undefined,
-      dt,
-    );
+    // A weapon shaft determines the palm orientation, not the twist of the
+    // upper arm and sleeve. Aiming every arm bone with the shaft as its normal
+    // rolled the elbow surface inward even when the joint centres were clear.
+    // Transport the previous bend frame before aiming. The source forearm's
+    // independent roll can switch its IK branch during a two-hand transition.
+    // Carrying the frame keeps both palms on one shaft without a snap.
+    if (arm.ready && this.leftSupport) {
+      arm.upper.quaternion.copy(arm.previous[0]);
+      arm.fore.quaternion.copy(arm.previous[1]);
+      arm.upper.updateWorldMatrix(false, true);
+    }
+    this.aim(arm.upper, arm.fore, upperDirection);
+    this.aim(arm.fore, arm.hand, foreDirection);
     // Limit wrist extension. The shaft may bank a little instead of bending
     // the wrist backwards to force a mathematically exact world orientation.
     const distal = this.v[27].copy(foreDirection).normalize();
@@ -234,6 +232,8 @@ export class GearPose {
     const bones = [arm.upper, arm.fore, arm.hand];
     for (let i = 0; i < 3; i++) {
       const supporting = arm === this.left && this.leftSupport;
+      // The support goal follows the filtered rear grip. Preserve a bounded
+      // return from actions such as drinking before committing the closed chain.
       if (arm.ready && (commit || (supporting && i === 2))) {
         this.q[4]
           .copy(arm.previous[i])
@@ -241,10 +241,16 @@ export class GearPose {
             bones[i].quaternion,
             Math.max(0, dt) *
               (arm === this.left && this.leftSupport
-                ? 15
+                ? 18.5
                 : this.gaoler
                   ? 4
-                  : 6),
+                  : this.lastClip.startsWith("SpearAttack")
+                    ? 17.5
+                    : this.lastClip.startsWith("FistAttack")
+                      ? 18
+                      : this.lastClip.startsWith("Attack")
+                        ? 10
+                        : 6),
           );
         bones[i].quaternion.copy(this.q[4]);
       }
@@ -275,13 +281,107 @@ export class GearPose {
       if (commit) arm.ready = true;
     }
   }
-  private native(arm: Arm, dt: number) {
+  private aim(
+    bone: THREE.Object3D,
+    child: THREE.Object3D,
+    direction: THREE.Vector3,
+  ) {
+    const from = this.v[21]
+        .copy(child.position)
+        .transformDirection(bone.matrixWorld),
+      to = this.v[22].copy(direction).normalize();
+    bone.getWorldQuaternion(this.q[2]);
+    this.q[3].setFromUnitVectors(from, to).multiply(this.q[2]);
+    bone.parent!.getWorldQuaternion(this.q[4]).invert();
+    bone.quaternion.copy(this.q[4]).multiply(this.q[3]);
+    bone.updateWorldMatrix(false, true);
+  }
+  private native(arm: Arm, dt: number, rate = 6) {
+    if (
+      this.armour?.visible &&
+      this.chest &&
+      this.pelvis &&
+      arm === this.left &&
+      /^FistAttack[23]$/.test(this.lastClip) &&
+      this.right
+    ) {
+      const up = this.v[31]
+          .copy(this.chest.getWorldPosition(this.v[32]))
+          .sub(this.pelvis.getWorldPosition(this.v[33]))
+          .normalize(),
+        shoulder = arm.upper.getWorldPosition(this.v[32]),
+        other = this.right.upper.getWorldPosition(this.v[33]),
+        elbow = arm.fore.getWorldPosition(this.v[34]),
+        out = this.v[35].copy(shoulder).sub(other);
+      out.addScaledVector(up, -out.dot(up)).normalize();
+      const front = this.v[36].crossVectors(out, up).normalize(),
+        target = arm.hand.getWorldPosition(this.v[37]),
+        amount = 1 - smooth(0.18, 0.34, target.distanceTo(shoulder)),
+        shaft = this.v[38]
+          .set(0, 0, -1)
+          .transformDirection(arm.hand.matrixWorld),
+        pole = this.v[39].copy(elbow).sub(shoulder).normalize();
+      if (amount > 1e-4) {
+        target
+          .addScaledVector(front, 0.16 * amount)
+          .addScaledVector(out, 0.04 * amount);
+        pole
+          .lerp(
+            this.v[34]
+              .copy(out)
+              .multiplyScalar(0.5)
+              .addScaledVector(up, -0.9)
+              .addScaledVector(front, 0.2)
+              .normalize(),
+            amount,
+          )
+          .normalize();
+        this.solve(arm, target, shaft, pole, dt);
+        return;
+      }
+    }
+
+    if (this.armour?.visible && this.chest && this.pelvis) {
+      const up = this.v[31]
+          .copy(this.chest.getWorldPosition(this.v[32]))
+          .sub(this.pelvis.getWorldPosition(this.v[33]))
+          .normalize(),
+        shoulder = arm.upper.getWorldPosition(this.v[34]),
+        direction = this.v[35]
+          .copy(arm.fore.getWorldPosition(this.v[36]))
+          .sub(shoulder)
+          .normalize(),
+        other = arm === this.left ? this.right : this.left;
+      if (other && direction.dot(up) < -0.5) {
+        const out = this.v[37]
+          .copy(shoulder)
+          .sub(other.upper.getWorldPosition(this.v[38]));
+        out.addScaledVector(up, -out.dot(up)).normalize();
+        // A fitted metal side requires a few degrees of free-arm clearance,
+        // while preserving the authored swing and elbow flexion.
+        direction.addScaledVector(out, 0.2).normalize();
+        const handHeight = arm.hand.getWorldPosition(this.v[39]).y;
+        const chestHeight = this.chest.getWorldPosition(this.v[32]).y;
+        const front = this.v[39]
+          .crossVectors(up, out)
+          .multiplyScalar(arm === this.left ? -1 : 1)
+          .normalize();
+        direction
+          .addScaledVector(
+            front,
+            0.06 +
+              0.12 * smooth(chestHeight - 0.35, chestHeight - 0.22, handHeight),
+          )
+          .normalize();
+        this.aim(arm.upper, arm.fore, direction);
+      }
+    }
     const bones = [arm.upper, arm.fore, arm.hand];
     for (let i = 0; i < 3; i++) {
       if (arm.ready) {
         this.q[4]
           .copy(arm.previous[i])
-          .rotateTowards(bones[i].quaternion, dt * (this.gaoler ? 4 : 6));
+          .rotateTowards(bones[i].quaternion, dt * (this.gaoler ? 4 : rate));
         bones[i].quaternion.copy(this.q[4]);
       }
       arm.previous[i].copy(bones[i].quaternion);
@@ -301,9 +401,9 @@ export class GearPose {
     this.lastClip = clip;
     const r = this.right,
       l = this.left;
-    const attack = /^(?:Sword)?Attack([123])$/.exec(clip),
+    const attack = /^(?:Sword|Spear|Fist)?Attack([123])$/.exec(clip),
       guard = /^(Guard|Block)/.test(clip),
-      step = /Step/.test(clip),
+      step = /Step|Evade/.test(clip),
       roll = /^Dodge/.test(clip),
       dead = /^Death/.test(clip);
     const two =
@@ -314,11 +414,26 @@ export class GearPose {
     this.setGrip(
       THREE.MathUtils.lerp(
         this.gripR,
-        id === "unarmed" ? (attack ? 1 : 0) : 1,
+        id === "unarmed" ? (attack || guard ? 1 : 0.3) : 1,
         gain,
       ),
-      THREE.MathUtils.lerp(this.gripL, two || clip === "Drink" ? 1 : 0, gain),
+      THREE.MathUtils.lerp(
+        this.gripL,
+        two || clip === "Drink" || (id === "unarmed" && (attack || guard))
+          ? 1
+          : 0.3,
+        gain,
+      ),
     );
+    // Preserve authored arm swing and punch mechanics. Holding empty hands at
+    // an artificial lateral target produced the old permanent chicken-wing pose.
+    if (id === "unarmed" && clip !== "Drink") {
+      this.native(r, dt, attack ? 18 : 8);
+      this.native(l, dt, attack ? 18 : 8);
+      this.rig.updateWorldMatrix(true, true);
+      this.ready = false;
+      return;
+    }
     this.rig.updateWorldMatrix(true, true);
     const pelvis = this.pelvis.getWorldPosition(this.v[0]),
       chest = this.chest.getWorldPosition(this.v[1]);
@@ -360,22 +475,22 @@ export class GearPose {
       shaft
         .copy(up)
         .multiplyScalar(0.72)
-        .addScaledVector(front, 0.7)
-        .addScaledVector(right, 0.16)
+        .addScaledVector(front, 0.45)
+        .addScaledVector(right, -0.45)
         .normalize();
       if (!this.gaoler)
         target
           .copy(shoulders)
-          .addScaledVector(right, 0.11 * scale)
+          .addScaledVector(right, 0.24 * scale)
           .addScaledVector(up, -0.2 * scale)
-          .addScaledVector(front, 0.3 * scale);
+          .addScaledVector(front, 0.38 * scale);
     }
     if (id === "spear") {
       target
         .copy(shoulders)
         .addScaledVector(up, -0.2 * scale)
-        .addScaledVector(right, 0.12 * scale)
-        .addScaledVector(front, 0.3 * scale);
+        .addScaledVector(right, 0.24 * scale)
+        .addScaledVector(front, 0.32 * scale);
       shaft
         .copy(up)
         .multiplyScalar(0.72)
@@ -383,6 +498,11 @@ export class GearPose {
         .addScaledVector(right, -0.52)
         .normalize();
     }
+    // Keep a two-hand axe grip above the lower ribs even while the torso
+    // pitches during an evade. A chest-relative forward offset alone can
+    // otherwise put the support goal beyond the left arm's reach.
+    if (id === "axe" && !this.gaoler)
+      target.y = Math.max(target.y, shoulders.y - 0.15 * scale);
     const carryTarget = this.v[38].copy(target),
       carryShaft = this.v[39].copy(shaft);
     if (attack) {
@@ -405,23 +525,31 @@ export class GearPose {
           .addScaledVector(front, (0.3 + 0.2 * punch) * scale);
         shaft.copy(front);
       } else if (id === "spear") {
-        const thrust =
-          smooth(a.contact - 0.16, a.contact, time) *
-          (1 - smooth(a.contact + 0.03, a.contact + 0.22, time));
-        target.addScaledVector(
-          front,
-          (0.025 * active + 0.035 * thrust) * scale,
-        );
+        // Full-body dedicated stab supplies the actual reach, hip turn and
+        // recovery. Keep the point on the attack line while the torso rotates.
+        target.copy(r.hand.getWorldPosition(this.v[9]));
+        const rigRight = this.v[35]
+            .set(-1, 0, 0)
+            .transformDirection(this.rig.matrixWorld),
+          rigFront = this.v[36]
+            .set(0, 0, 1)
+            .transformDirection(this.rig.matrixWorld),
+          lateral = this.v[34].copy(target).sub(pelvis).dot(rigRight),
+          prepare = attack[1] === "1" ? wind : 1;
+        // Keep the rear grip near the centreline. The cartoon source has a
+        // much wider rear hand, beyond a human support arm's physical reach.
+        target
+          .addScaledVector(rigRight, 0.2 * scale - lateral)
+          .addScaledVector(rigFront, -0.04 * scale);
+        target.y = chest.y + 0.12 * scale;
+        target.lerp(carryTarget, 1 - prepare);
         shaft
-          .lerp(
-            this.v[9]
-              .copy(front)
-              .addScaledVector(right, -0.08)
-              .addScaledVector(up, 0.08)
-              .normalize(),
-            active,
-          )
+          .set(0.2, 0.02, 1)
+          .transformDirection(this.rig.matrixWorld)
+          .lerp(carryShaft, 1 - prepare)
           .normalize();
+        target.lerp(carryTarget, recover);
+        shaft.lerp(carryShaft, recover).normalize();
       } else if (id === "axe") {
         const cut = smooth(a.contact - 0.22, a.contact + 0.04, time),
           chop = attack[1] === "2" ? 1 - cut : cut,
@@ -433,13 +561,17 @@ export class GearPose {
             up,
             (this.gaoler ? 0.16 - 0.2 * chop : -0.08 - 0.14 * chop) * scale,
           )
-          .addScaledVector(front, (0.3 + 0.035 * chop) * scale);
+          .addScaledVector(front, (0.38 + 0.035 * chop) * scale);
         shaft
           .copy(up)
           .multiplyScalar(Math.cos(angle))
           .addScaledVector(front, Math.sin(angle))
           .addScaledVector(right, -0.18)
           .normalize();
+        if (attack[1] === "1") {
+          target.lerp(carryTarget, 1 - wind);
+          shaft.lerp(carryShaft, 1 - wind).normalize();
+        }
       } else {
         const sweep = smooth(a.contact - 0.18, a.contact + 0.1, time),
           sign = attack[1] === "2" ? -1 : 1;
@@ -482,6 +614,19 @@ export class GearPose {
         up,
         -0.035 * scale * Math.sin(Math.min(1, time / 0.82) * Math.PI),
       );
+    if (id === "spear" && attack) {
+      // A human rear grip stays in front of the torso during preparation.
+      // The stylised source's long shoulder turn otherwise pulls its wrist
+      // through the chest before the real forward stab begins.
+      const facing = this.v[35]
+        .set(0, 0, 1)
+        .transformDirection(this.rig.matrixWorld);
+      const depth = this.v[36].copy(target).sub(pelvis).dot(facing);
+      if (depth < 0.3 * scale)
+        target.addScaledVector(facing, 0.3 * scale - depth);
+    }
+    if (id === "axe" && !this.gaoler)
+      target.y = Math.max(target.y, shoulders.y - 0.15 * scale);
     target.y = Math.max(floor + 0.28 * scale, target.y);
     const reach = id === "spear" ? 1.65 : id === "axe" ? 0.96 : 0.94;
     const lower = -(target.y - floor - 0.06) / reach;
@@ -514,10 +659,24 @@ export class GearPose {
     shaft.copy(this.shaft).transformDirection(this.rig.matrixWorld);
     const pole = this.v[31]
       .copy(right)
-      .multiplyScalar(0.85)
-      .addScaledVector(up, -0.85)
-      .addScaledVector(front, 0.65)
+      .multiplyScalar(0.5)
+      .addScaledVector(up, -1)
+      .addScaledVector(front, -0.22)
       .normalize();
+    if (id === "spear" && attack)
+      pole
+        .copy(right)
+        .multiplyScalar(0.6)
+        .addScaledVector(up, -0.8)
+        .addScaledVector(front, 0.1)
+        .normalize();
+    if (id === "axe" && attack && !this.gaoler)
+      pole
+        .copy(right)
+        .multiplyScalar(0.65)
+        .addScaledVector(up, -0.8)
+        .addScaledVector(front, 0.05)
+        .normalize();
     this.solve(r, target, shaft, pole, dt);
     if (two) {
       const grip = this.v[32]
@@ -526,7 +685,24 @@ export class GearPose {
       const actualShaft = this.v[33]
         .set(0, 0, -1)
         .transformDirection(r.hand.matrixWorld);
-      let spacing = id === "spear" ? (attack ? 0.2 : 0.25) : 0.135;
+      const carrySpacing = id === "spear" ? 0.25 : 0.18;
+      const attackSpacing = id === "spear" ? 0.2 : 0.1;
+      let spacing = carrySpacing;
+      if (attack) {
+        const a = ATTACKS[Number(attack[1]) - 1];
+        const prepare =
+          attack[1] === "1" ? smooth(0, a.contact * 0.6, time) : 1;
+        const recovery = smooth(
+          a.link === a.duration ? a.contact + 0.14 : a.link,
+          a.duration,
+          time,
+        );
+        spacing = THREE.MathUtils.lerp(
+          carrySpacing,
+          attackSpacing,
+          prepare * (1 - recovery),
+        );
+      }
       const shoulder = l.upper.getWorldPosition(this.v[38]);
       const toShoulder = this.v[39].copy(shoulder).sub(grip),
         along = toShoulder.dot(actualShaft);
@@ -549,38 +725,24 @@ export class GearPose {
         HAND_GRIP[this.gaoler ? "gaoler" : "human"],
       );
       handOffset.x *= -1;
-      // Four bounded corrections seat the palm rather than the wrist on the shaft.
+      // Relax the palm-offset fixed point. Full error steps can alternate
+      // between two wrist-cone branches and leave the palm off the shaft.
       const goal = this.v[36].copy(support);
       pole
         .copy(right)
-        .multiplyScalar(-1.0)
-        .addScaledVector(up, -0.35)
-        .addScaledVector(front, 1.2)
+        .multiplyScalar(id === "axe" ? -1 : -0.9)
+        .addScaledVector(up, id === "axe" ? -0.5 : -0.4)
+        .addScaledVector(front, id === "axe" ? 0.55 : 0.7)
         .normalize();
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 12; i++) {
         this.solve(l, goal, actualShaft, pole, dt, false);
         const at = this.v[30].copy(handOffset).applyMatrix4(l.hand.matrixWorld);
-        goal.add(this.v[9].copy(support).sub(at));
+        const error = this.v[9].copy(support).sub(at);
+        if (error.lengthSq() < 1e-6) break;
+        goal.addScaledVector(error, 0.4);
       }
       this.solve(l, goal, actualShaft, pole, dt);
-    } else if (clip !== "Drink") {
-      const free = this.v[34]
-        .copy(pelvis)
-        .addScaledVector(right, -0.4 * scale)
-        .addScaledVector(up, 0.035 * scale)
-        .addScaledVector(front, 0.14 * scale);
-      const freeShaft = this.v[33]
-        .copy(front)
-        .addScaledVector(up, 0.1)
-        .normalize();
-      pole
-        .copy(right)
-        .multiplyScalar(-1.3)
-        .addScaledVector(up, -0.4)
-        .addScaledVector(front, 0.35)
-        .normalize();
-      this.solve(l, free, freeShaft, pole, dt);
-    }
+    } else if (clip !== "Drink") this.native(l, dt);
     this.rig.updateWorldMatrix(true, true);
     this.diagnostics.candidates = 1;
     if (this.verify && exact) {

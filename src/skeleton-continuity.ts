@@ -28,7 +28,7 @@ export class SkeletonContinuity {
           q: new THREE.Quaternion(),
           goal: new THREE.Quaternion(),
           p: b.position.clone(),
-          speed: /thigh|calf|foot|toe/.test(b.name)
+          speed: /thigh|shin|calf|foot|toe/.test(b.name)
             ? gaoler
               ? 10
               : 14

@@ -249,3 +249,14 @@ def test_continuous_device_report_accepts_bounded_nullable_resources(client):
     response = client.post("/api/diagnostics", headers=h, json=body)
     assert response.status_code == 200
     assert client.get("/api/diagnostics/" + response.json()["id"], headers=h).json() == body
+
+
+def test_device_report_identifies_the_measured_client_without_accepting_arbitrary_text(client):
+    h = login(client)
+    body = {**device_payload(), "protocol": "device-check-3",
+            "asset_revision": "1234567890abcdef", "client_revision": "abcdef1234567890"}
+    bad = {**body, "client_revision": "unbounded-client-text"}
+    assert client.post("/api/diagnostics", headers=h, json=bad).status_code == 422
+    response = client.post("/api/diagnostics", headers=h, json=body)
+    assert response.status_code == 200
+    assert client.get("/api/diagnostics/" + response.json()["id"], headers=h).json() == body

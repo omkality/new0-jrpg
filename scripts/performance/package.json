@@ -1,0 +1,14 @@
+{
+  "name": "new0-browser-resource-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "playwright test --config playwright.config.mjs",
+    "validate": "node validate-soak.mjs",
+    "docker": "node run-docker.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

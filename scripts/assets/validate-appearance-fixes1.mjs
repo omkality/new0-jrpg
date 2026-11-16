@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { resolve, dirname } from "node:path";
-import { writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 // scripts/assets has its own dependencies. Use the application's instances so
@@ -88,7 +88,12 @@ for (const kind of ["pilgrim", "watcher", "effigy"]) {
 }
 const doc = await io.read("public/assets/cast/prisoner.glb"),
   motion = await io.read("public/assets/motion/prisoner-combat.glb"),
-  fixes = await io.read("public/assets/motion/prisoner-fixes1.glb");
+  fixes = await io.read("public/assets/motion/prisoner-fixes1.glb"),
+  fixes2Contract = JSON.parse(
+    await readFile("public/assets/motion/fixes2-contract.json", "utf8"),
+  ),
+  fixes2 = await io.read(`public/assets/motion/${fixes2Contract.files.human}`);
+assert.equal(fixes2Contract.version, 2, "Unexpected fixes2 motion contract");
 const info = structure(doc),
   root = doc.getRoot(),
   joints = root.listSkins()[0].listJoints();
@@ -342,7 +347,7 @@ assert.equal(
   "Equipped torso coverage disabled",
 );
 assert.ok(
-  compiled.uniforms.new0SkinColor.value.equals(new T.Color(0xc5ab9a)),
+  compiled.uniforms.new0SkinColor.value.equals(new T.Color(0xd5b6a2)),
   "Hand skin and face skin palette differ",
 );
 setArmourCoverage(rig, false);
@@ -429,6 +434,7 @@ const clips = new Map(
     ...doc.getRoot().listAnimations(),
     ...motion.getRoot().listAnimations(),
     ...fixes.getRoot().listAnimations(),
+    ...fixes2.getRoot().listAnimations(),
   ].map((c) => [c.getName(), c]),
 );
 for (const weapon of ["sword", "axe", "spear", "unarmed"].filter(
@@ -444,9 +450,24 @@ for (const weapon of ["sword", "axe", "spear", "unarmed"].filter(
     }),
   );
   assert.ok(
-    dodgeNames.every((n) => n.startsWith("WeaponStep")),
+    dodgeNames.every(
+      (n) =>
+        n.startsWith("Evade") &&
+        clips.has(n) &&
+        fixes2Contract.evades.rootTravel[n],
+    ),
     "Armoured policy must keep the rigid cuirass out of a full tuck roll",
   );
+  for (const name of dodgeNames) {
+    const clip = clips.get(name),
+      duration = Math.max(
+        ...clip.listSamplers().map((s) => s.getInput().getArray().at(-1)),
+      );
+    assert.ok(
+      Math.abs(duration - fixes2Contract.evades.duration) < 1e-5,
+      `${name}: evade timing differs from runtime contract`,
+    );
+  }
   const names = [
     "Idle",
     "Walk",
@@ -460,7 +481,15 @@ for (const weapon of ["sword", "axe", "spear", "unarmed"].filter(
     "DeathFront",
     "DeathSide",
     "Drink",
-    ...[1, 2, 3].map((i) => `${weapon === "sword" ? "Sword" : ""}Attack${i}`),
+    ...[1, 2, 3].map((i) =>
+      motionName({
+        mode: "attack",
+        weapon,
+        combo: i,
+        kind: "pilgrim",
+        armour: 1,
+      }),
+    ),
     ...dodgeNames,
   ];
   for (const name of names.filter(
@@ -471,7 +500,7 @@ for (const weapon of ["sword", "axe", "spear", "unarmed"].filter(
     const nativeDuration = Math.max(
         ...clip.listSamplers().map((s) => s.getInput().getArray().at(-1)),
       ),
-      attack = /^(?:Sword)?Attack([123])$/.exec(name);
+      attack = /^(?:Sword|Spear|Fist)?Attack([123])$/.exec(name);
     const duration =
       name === "Drink"
         ? 1.3
@@ -858,13 +887,11 @@ for (const fill of [1, 0.5, 0.1, 0]) {
     levelSpread: fill > 0 ? maxLevel - minLevel : 0,
   });
 }
-if (
-  !(
-    fills[0].box.max.y > fills[1].box.max.y &&
-    fills[1].box.max.y > fills[2].box.max.y &&
-    fills[3].visible === false
-  )
-)
+if (!(
+  fills[0].box.max.y > fills[1].box.max.y &&
+  fills[1].box.max.y > fills[2].box.max.y &&
+  fills[3].visible === false
+))
   throw Error("Liquid fill levels are not strictly ordered");
 for (const fill of fills.slice(0, 3))
   if (

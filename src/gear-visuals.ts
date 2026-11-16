@@ -174,28 +174,45 @@ export function setFlaskFill(root: THREE.Object3D, fraction: number) {
 }
 
 let steelTexture: THREE.DataTexture | undefined;
+let steelFinish: THREE.DataTexture | undefined;
 function hammeredSteel() {
   if (steelTexture) return steelTexture;
-  const size = 128,
-    data = new Uint8Array(size * size * 4);
+  const size = 256,
+    data = new Uint8Array(size * size * 4),
+    finish = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
       const noise = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
       const grain = noise - Math.floor(noise);
       const hammer =
-        Math.sin(x * 0.57 + Math.sin(y * 0.39)) *
-        Math.cos(y * 0.51 + Math.sin(x * 0.42));
-      const tone = 0.82 + grain * 0.13 + hammer * 0.06;
+        Math.sin(x * 0.14 + Math.sin(y * 0.19)) *
+        Math.cos(y * 0.13 + Math.sin(x * 0.17));
+      const scratch =
+        Math.max(0, Math.sin(x * 1.87 + Math.sin(y * 0.03) * 0.6) - 0.975) * 10;
+      const tone = 0.89 + grain * 0.025 + hammer * 0.01 + scratch * 0.025;
       const index = (y * size + x) * 4;
-      data[index] = 180 * tone;
-      data[index + 1] = 177 * tone;
-      data[index + 2] = 169 * tone;
+      data[index] = 226 * tone;
+      data[index + 1] = 233 * tone;
+      data[index + 2] = 238 * tone;
       data[index + 3] = 255;
+      finish[index] = 255;
+      finish[index + 1] = 168 + grain * 28 + hammer * 7 - scratch * 9;
+      finish[index + 2] = 176 + grain * 15;
+      finish[index + 3] = 255;
     }
   steelTexture = new THREE.DataTexture(data, size, size);
   steelTexture.colorSpace = THREE.SRGBColorSpace;
   steelTexture.wrapS = steelTexture.wrapT = THREE.RepeatWrapping;
+  steelTexture.generateMipmaps = true;
+  steelTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  steelTexture.magFilter = THREE.LinearFilter;
   steelTexture.needsUpdate = true;
+  steelFinish = new THREE.DataTexture(finish, size, size);
+  steelFinish.wrapS = steelFinish.wrapT = THREE.RepeatWrapping;
+  steelFinish.generateMipmaps = true;
+  steelFinish.minFilter = THREE.LinearMipmapLinearFilter;
+  steelFinish.magFilter = THREE.LinearFilter;
+  steelFinish.needsUpdate = true;
   return steelTexture;
 }
 function curveTube(
@@ -206,9 +223,9 @@ function curveTube(
   return new THREE.Mesh(
     new THREE.TubeGeometry(
       new THREE.CatmullRomCurve3(points),
-      Math.max(12, points.length * 2),
+      Math.max(12, Math.min(48, points.length)),
       radius,
-      6,
+      4,
       false,
     ),
     material,
@@ -227,11 +244,11 @@ function metalShell(back: boolean, material: THREE.Material) {
         angle = (back ? Math.PI / 2 : -Math.PI / 2) + (i / segments) * Math.PI;
       const xUnit = Math.sin(angle),
         zUnit = Math.cos(angle);
-      const width = 0.176 + 0.048 * Math.sin(t * Math.PI * 0.83);
+      const width = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83);
       const y = THREE.MathUtils.lerp(-0.09, 0.195 + 0.045 * Math.abs(xUnit), t);
       const depth = back
-        ? 0.177 - t * 0.025
-        : 0.148 + Math.sin(t * Math.PI) * 0.034;
+        ? 0.159 - t * 0.009
+        : 0.13 + Math.sin(t * Math.PI) * 0.016;
       const keel = back
         ? 0
         : 0.01 * Math.exp(-((xUnit / 0.23) ** 2)) * Math.sin(t * Math.PI);
@@ -274,9 +291,9 @@ function batchStatic(root: THREE.Group) {
   }
 }
 const STRAP_PATH = [
-  new THREE.Vector3(0.169, 0.185, 0.126),
-  new THREE.Vector3(0.1755, 0.265, 0.025),
-  new THREE.Vector3(0.169, 0.185, -0.15),
+  new THREE.Vector3(0.126, 0.17, 0.112),
+  new THREE.Vector3(0.145, 0.237, 0.015),
+  new THREE.Vector3(0.126, 0.17, -0.123),
 ];
 function armourStrap(side: number, material: THREE.Material) {
   const curve = new THREE.CatmullRomCurve3(
@@ -292,7 +309,7 @@ function armourStrap(side: number, material: THREE.Material) {
     for (const width of [-1, 1])
       for (const thickness of [-1, 1]) {
         vertices.push(
-          p.x + width * 0.018,
+          p.x + width * 0.013,
           p.y + normal.y * thickness * 0.0025,
           p.z + normal.z * thickness * 0.0025,
         );
@@ -321,16 +338,118 @@ function armourStrap(side: number, material: THREE.Material) {
   return new THREE.Mesh(geometry, material);
 }
 
+// Narrow overlapping steel lames wrap the outside of the upper arm. Their
+// axis is the original upper-arm-to-elbow direction, so the bone carries them
+// naturally when the arm hangs, bends or lifts. No hovering oval shoulder cap.
+function shoulderLames(
+  side: number,
+  metal: THREE.Material,
+  edge: THREE.Material,
+) {
+  const root = new THREE.Group(),
+    axis = new THREE.Vector3(0.16 * side, -0.24, -0.01).normalize();
+  const outward = new THREE.Vector3(0, 1, 0)
+    .addScaledVector(axis, -axis.y)
+    .normalize();
+  const transverse = new THREE.Vector3()
+    .crossVectors(axis, outward)
+    .normalize();
+  const surface = (t: number, angle: number, layer: number) =>
+    new THREE.Vector3()
+      .addScaledVector(axis, t)
+      .addScaledVector(
+        outward,
+        Math.cos(angle) * (0.068 - 0.107 * t + layer * 0.001),
+      )
+      .addScaledVector(
+        transverse,
+        Math.sin(angle) * (0.068 - 0.107 * t + layer * 0.001),
+      );
+  for (let layer = 0; layer < 3; layer++) {
+    const positions: number[] = [],
+      uv: number[] = [],
+      indices: number[] = [],
+      rows = 3,
+      segments = 16;
+    const start = 0.003 + layer * 0.041,
+      length = 0.057;
+    for (let j = 0; j <= rows; j++)
+      for (let i = 0; i <= segments; i++) {
+        const angle = THREE.MathUtils.lerp(-1.5, 1.5, i / segments),
+          t = start + (j / rows) * length;
+        surface(t, angle, 2 - layer).toArray(positions, positions.length);
+        uv.push(i / segments, (j / rows) * 0.65 + layer * 0.4);
+        if (i < segments && j < rows) {
+          const a = j * (segments + 1) + i,
+            b = a + segments + 1;
+          indices.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    root.add(new THREE.Mesh(geometry, metal));
+    const rolledEdge: THREE.Vector3[] = [];
+    for (let i = 0; i <= segments; i++)
+      rolledEdge.push(
+        surface(
+          start + length,
+          THREE.MathUtils.lerp(-1.5, 1.5, i / segments),
+          2 - layer,
+        ),
+      );
+    root.add(
+      new THREE.Mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(rolledEdge),
+          16,
+          0.0016,
+          4,
+          false,
+        ),
+        edge,
+      ),
+    );
+    for (const angle of [-1.24, 1.24]) {
+      const rivet = new THREE.Mesh(
+        new THREE.SphereGeometry(0.0026, 6, 4),
+        edge,
+      );
+      rivet.position.copy(surface(start + 0.015, angle, 3 - layer));
+      root.add(rivet);
+    }
+  }
+  batchStatic(root);
+  return root;
+}
+
 export function armourModel(rig?: THREE.Object3D) {
   const root = new THREE.Group();
   root.userData.fixes1StrapPath = new THREE.CatmullRomCurve3(STRAP_PATH)
     .getPoints(8)
     .map((p) => new THREE.Vector2(p.y, p.z));
+  // Share the exact twenty generated strap sections with cloth coverage.
+  root.userData.fixes2StrapSurface = new THREE.CatmullRomCurve3(
+    STRAP_PATH,
+  ).getPoints(20);
+  root.userData.fixes2StrapNormals = Array.from({ length: 21 }, (_, i) => {
+    const t = new THREE.CatmullRomCurve3(STRAP_PATH).getTangent(i / 20);
+    return new THREE.Vector2(-t.z, t.y).normalize();
+  });
   const metal = new THREE.MeshStandardMaterial({
-    color: 0x858078,
+    color: 0xc2c5c8,
     map: hammeredSteel(),
-    metalness: 0.7,
-    roughness: 0.57,
+    metalness: 0.62,
+    roughness: 0.7,
+    roughnessMap: steelFinish,
+    metalnessMap: steelFinish,
+    bumpMap: hammeredSteel(),
+    bumpScale: 0.00055,
     side: THREE.DoubleSide,
   });
   const dark = new THREE.MeshStandardMaterial({
@@ -338,12 +457,7 @@ export function armourModel(rig?: THREE.Object3D) {
     metalness: 0.06,
     roughness: 0.96,
   });
-  const edge = new THREE.MeshStandardMaterial({
-    color: 0xa09a8c,
-    map: hammeredSteel(),
-    metalness: 0.68,
-    roughness: 0.58,
-  });
+  const edge = metal;
   root.add(metalShell(false, metal), metalShell(true, metal));
   const fauldRoot = new THREE.Group();
   fauldRoot.name = "ArmourFauld";
@@ -358,7 +472,7 @@ export function armourModel(rig?: THREE.Object3D) {
         a = (i / fauldSides) * Math.PI * 2;
       const bottom = -0.16 + 0.065 * Math.max(0, Math.cos(a));
       fauldPositions.push(
-        Math.sin(a) * THREE.MathUtils.lerp(0.1875, 0.18, t),
+        Math.sin(a) * THREE.MathUtils.lerp(0.165, 0.16, t),
         THREE.MathUtils.lerp(bottom, -0.085, t),
         Math.cos(a) * THREE.MathUtils.lerp(0.1574, 0.153, t),
       );
@@ -385,16 +499,29 @@ export function armourModel(rig?: THREE.Object3D) {
         s = Math.sin(a),
         c = Math.cos(a),
         t = top ? 1 : 0;
-      const width = 0.176 + 0.048 * Math.sin(t * Math.PI * 0.83);
+      const width = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83);
       points.push(
         new THREE.Vector3(
           s * width,
           top ? 0.195 + 0.045 * Math.abs(s) : -0.09,
-          c * (c < 0 ? 0.177 - t * 0.025 : 0.148),
+          c * (c < 0 ? 0.159 - t * 0.009 : 0.13),
         ),
       );
     }
-    root.add(curveTube(points, 0.005, edge));
+    // Keep the narrow rolled neckline smooth enough to match its physical
+    // 3 mm section. Coarse long chords pushed its inner edge through cloth.
+    root.add(
+      new THREE.Mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(points),
+          128,
+          0.003,
+          4,
+          false,
+        ),
+        edge,
+      ),
+    );
   }
   // The waist lames move with the pelvis. The short breast/back plate follows
   // the chest, so a deep crouch does not drag one long rigid bucket through legs.
@@ -405,7 +532,7 @@ export function armourModel(rig?: THREE.Object3D) {
         bottom = -0.16 + 0.065 * Math.max(0, Math.cos(a));
       points.push(
         new THREE.Vector3(
-          Math.sin(a) * THREE.MathUtils.lerp(0.1875, 0.18, t),
+          Math.sin(a) * THREE.MathUtils.lerp(0.165, 0.16, t),
           THREE.MathUtils.lerp(bottom, -0.085, t),
           Math.cos(a) * THREE.MathUtils.lerp(0.1574, 0.153, t),
         ),
@@ -428,42 +555,44 @@ export function armourModel(rig?: THREE.Object3D) {
         new THREE.SphereGeometry(0.0048, 8, 6),
         edge,
       );
-      rivet.position.set(side * 0.178, y, 0.112);
+      const t = THREE.MathUtils.clamp(
+        (y + 0.09) / (0.195 + 0.045 * 0.72 + 0.09),
+        0,
+        1,
+      );
+      const w = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83),
+        d = 0.13 + Math.sin(t * Math.PI) * 0.016;
+      rivet.position.set(
+        side * 0.72 * w,
+        y,
+        Math.sqrt(1 - 0.72 ** 2) * d + 0.0005,
+      );
       rivet.scale.z = 0.55;
       root.add(rivet);
     }
     const buckle = new THREE.Mesh(
-      new THREE.TorusGeometry(0.013, 0.003, 5, 10),
+      // A smooth centerline keeps the physical torus inside the exact 3 mm
+      // cloth-coverage volume, including the inner side of the buckle.
+      new THREE.TorusGeometry(0.013, 0.003, 8, 36),
       edge,
     );
-    buckle.position.set(side * 0.164, 0.178, 0.143);
+    buckle.position.set(side * 0.126, 0.169, 0.116);
     buckle.scale.y = 1.3;
     root.add(buckle);
   }
   const shoulders: THREE.Object3D[] = [];
   for (const side of [-1, 1]) {
-    const cap = new THREE.Group();
+    const cap = shoulderLames(side, metal, edge);
     cap.name = side < 0 ? "ArmourShoulderR" : "ArmourShoulderL";
-    const shell = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      metal,
-    );
-    shell.scale.set(0.103, 0.06, 0.113);
-    cap.add(shell);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.034, 5, 28), edge);
-    rim.rotation.x = Math.PI / 2;
-    rim.scale.set(0.102, 0.112, 0.102);
-    cap.add(rim);
-    batchStatic(cap);
     if (rig) {
-      cap.position.set(side * 0.212, 1.366, -0.01);
+      cap.position.set(side * 0.15, 1.36, -0.02);
       rig.add(cap);
       rig.updateWorldMatrix(true, true);
       rig.getObjectByName(side < 0 ? "upperarm_R" : "upperarm_L")?.attach(cap);
       cap.visible = false;
       shoulders.push(cap);
     } else {
-      cap.position.set(side * 0.212, 0.206, -0.02);
+      cap.position.set(side * 0.15, 0.2, -0.03);
       root.add(cap);
     }
   }

@@ -19,14 +19,83 @@ export type EnvironmentPattern =
   | "leaves"
   | "fern"
   | "fire"
-  | "torch-wrap";
+  | "torch-wrap"
+  | "iron"
+  | "wax"
+  | "oak"
+  | "burial-stone";
 
 export function environmentTexture(kind: EnvironmentPattern) {
   const canvas = document.createElement("canvas");
   canvas.width = kind === "fire" ? 1024 : 256;
   canvas.height = kind === "fire" ? 128 : 256;
   const ctx = canvas.getContext("2d")!;
-  if (kind === "brick") {
+  if (kind === "burial-stone") {
+    const image = ctx.createImageData(256, 256);
+    for (let y = 0; y < 256; y++)
+      for (let x = 0; x < 256; x++) {
+        const grain = noise(x + y * 257),
+          cloud =
+            Math.sin(x * 0.047 + Math.sin(y * 0.031) * 2.6) * 8 +
+            Math.cos(y * 0.061 - x * 0.017) * 6,
+          pore = grain > 0.984 ? 25 : 0,
+          v = 152 + grain * 19 + cloud - pore;
+        image.data.set([v * 0.97, v, v * 0.965, 255], (y * 256 + x) * 4);
+      }
+    ctx.putImageData(image, 0, 0);
+    ctx.lineWidth = 0.65;
+    ctx.strokeStyle = "#424e4438";
+    for (let i = 0; i < 9; i++) {
+      const x = noise(i + 52) * 256,
+        y = noise(i + 69) * 256;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 4, y + 12);
+      ctx.lineTo(x + 1, y + 19);
+      ctx.lineTo(x + 6, y + 25);
+      ctx.stroke();
+    }
+  } else if (kind === "iron" || kind === "wax" || kind === "oak") {
+    const image = ctx.createImageData(256, 256);
+    for (let y = 0; y < 256; y++)
+      for (let x = 0; x < 256; x++) {
+        const n = noise(x + y * 257),
+          grain = Math.sin(x * 0.12 + Math.sin(y * 0.035) * 1.8),
+          fine = Math.sin(x * 1.7 + y * 0.2);
+        const v =
+          kind === "iron"
+            ? 57 + n * 24 + grain * 5
+            : kind === "wax"
+              ? 173 + n * 17 + Math.sin(x * 0.095) * 4
+              : 130 + n * 11 + grain * 12 + fine * 2;
+        image.data.set(
+          kind === "iron"
+            ? [v * 0.96, v, v * 0.97, 255]
+            : kind === "wax"
+              ? [v + 13, v + 9, v - 8, 255]
+              : [v + 12, v + 3, v - 11, 255],
+          (y * 256 + x) * 4,
+        );
+      }
+    ctx.putImageData(image, 0, 0);
+    if (kind === "oak")
+      for (let x = 0; x < 256; x += 42) {
+        ctx.fillStyle = "#151b18a0";
+        ctx.fillRect(x, 0, 2, 256);
+        ctx.fillStyle = "#b1a18442";
+        ctx.fillRect(x + 2, 0, 1, 256);
+      }
+    if (kind === "iron")
+      for (let i = 0; i < 70; i++) {
+        ctx.fillStyle = "#adab9444";
+        ctx.fillRect(
+          noise(i + 9) * 256,
+          noise(i + 62) * 256,
+          1 + noise(i + 41) * 8,
+          0.7,
+        );
+      }
+  } else if (kind === "brick") {
     ctx.fillStyle = "#30332e";
     ctx.fillRect(0, 0, 256, 256);
     for (let row = 0; row < 12; row++) {
@@ -234,7 +303,7 @@ export function environmentTexture(kind: EnvironmentPattern) {
     ctx.putImageData(image, 0, 0);
   }
   const texture = new THREE.CanvasTexture(canvas);
-  texture.name = `new0-original-${kind}-fixes1`;
+  texture.name = `new0-original-${kind}-fixes2`;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT =
     kind === "fire" || kind === "leaves"

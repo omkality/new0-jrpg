@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+  <meta charset="utf-8" /><title>new0 / ограниченный World resource soak</title
+  ><link rel="icon" href="data:," /><style>
+    @font-face {
+      font-family: Ebbe;
+      src: url(/fonts/Ebbe-Black.ttf);
+    }
+    body {
+      margin: 0;
+      background: #172022;
+      color: #ddd;
+      font:
+        16px Ebbe,
+        serif;
+    }
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 2;
+      padding: 10px;
+      background: #172022e8;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    pre {
+      white-space: pre-wrap;
+      font: 13px monospace;
+      max-height: 40vh;
+      overflow: auto;
+    }
+    #status {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 2;
+      padding: 6px 10px;
+      background: #172022e8;
+    }
+    #report {
+      display: none;
+      position: fixed;
+      bottom: 40px;
+      left: 8px;
+      right: 8px;
+      z-index: 3;
+      background: #172022;
+    }
+    #report.open {
+      display: block;
+    }
+  </style>
+  <header>
+    <button id="one" disabled>Один полный прогон</button
+    ><button id="soak" disabled>6 повторов / ресурсы</button
+    ><button id="stop" disabled>Остановить</button
+    ><label
+      >Шаг
+      <select id="speed">
+        <option value="1">Реальное время</option>
+        <option value="4">Ускорение x4</option>
+        <option value="fast" selected>
+          Ресурсы: до 12 с / кадр, границы состояний
+        </option>
+      </select></label
+    ><label
+      ><input id="previousRadius" type="checkbox" />Прежний радиус
+      актёров</label
+    ><label><input id="local" type="checkbox" />Только текущая локация</label
+    ><label><input id="freeze" type="checkbox" />Заморозить NPC</label
+    ><label><input id="lights" type="checkbox" />Без локальных источников</label
+    ><label
+      ><input id="matrices" type="checkbox" />Считать матричные вызовы</label
+    ><button id="json">Обновить отчёт JSON</button
+    ><a id="download" hidden download>Скачать JSON</a>
+  </header>
+  <div id="status">
+    Загрузка. Это лаборатория World, без HUD, звука и soft-light слоя основной
+    страницы.
+  </div>
+  <canvas id="view"></canvas>
+  <pre id="health" hidden aria-label="Диагностика исполнения">{}</pre>
+  <pre id="report" aria-label="Отчёт производительности"></pre>
+  <script type="module" src="./world-lab.ts"></script>
+</html>

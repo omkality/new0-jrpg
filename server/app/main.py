@@ -58,7 +58,9 @@ class StageMetrics(Body):
 
 
 class DeviceReport(Body):
-    protocol: Literal["device-check-1", "device-check-2"]
+    protocol: Literal["device-check-1", "device-check-2", "device-check-3"]
+    asset_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{16}$")
+    client_revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{16}$")
     platform: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     telegram_version: str = Field(max_length=24, pattern=r"^[a-zA-Z0-9_.-]*$")
     viewport_width: int = Field(ge=100, le=10000)

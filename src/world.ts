@@ -36,6 +36,9 @@ export class World {
   private cameraSolver = new FollowCameraClearance();
   private cameraBounds = { minX: -7.1, maxX: 7.1, maxY: Infinity };
   private fogColor = new THREE.Color();
+  private actorFrustum = new THREE.Frustum();
+  private actorProjection = new THREE.Matrix4();
+  private actorSphere = new THREE.Sphere();
   private playerFill = new THREE.PointLight(0xcdd8e4, 0.42, 4.2, 2);
   private shadows: THREE.Mesh[] = [];
   private settledCorpses = new WeakSet<object>();
@@ -201,34 +204,22 @@ export class World {
     this.elapsed += dt;
     const p = this.game.player;
     this.location = this.game.location;
-    this.environment.update(this.elapsed, p, this.location);
+    this.environment.update(
+      this.elapsed,
+      p,
+      this.location,
+      (this.game.phase === "won" || this.game.phase === "finished") &&
+        this.location === "crypt",
+    );
     this.playerFill.position.set(p.x - 0.5, p.y + 2.1, p.z + 0.6);
     const fog = this.scene.fog as THREE.FogExp2,
       spec = LOCATIONS[this.location],
       blend = 1 - Math.exp(-dt * 2.3);
     fog.color.lerp(this.fogColor.set(spec.fog), blend);
+    (this.scene.background as THREE.Color).lerp(this.fogColor, blend);
     fog.density = THREE.MathUtils.lerp(fog.density, spec.density, blend);
     this.player.update(dt, p);
     this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
-    let shadowIndex = 1;
-    for (const [id, e] of this.game.enemies) {
-      const shadow = this.shadows[shadowIndex++];
-      const visible = Math.abs(e.z - p.z) < 36;
-      shadow.visible = visible;
-      shadow.position.set(e.x, e.y + 0.015, e.z);
-      const actor = this.actors.get(id);
-      if (actor) {
-        actor.root.visible = visible;
-        if (visible && !this.settledCorpses.has(e)) {
-          actor.update(dt, e);
-          if (e.hp <= 0) {
-            const posed = (this.corpsePoseTime.get(e) ?? 0) + dt;
-            this.corpsePoseTime.set(e, posed);
-            if (e.time > 3.5 && posed > 0.5) this.settledCorpses.add(e);
-          }
-        }
-      }
-    }
     this.props.update(dt, this.elapsed);
     const d = this.camera.aspect < 0.85 ? 4.5 : 3.9;
     this.desiredAim.set(
@@ -316,6 +307,40 @@ export class World {
         this.impactLife / 0.13,
       );
     } else this.impact.visible = false;
+    // Cull the complete animated actor with a conservative weapon/fall bound.
+    // Per-mesh bind-pose bounds are unsuitable for skinned attacks, while the
+    // previous Z-only rule posed and submitted fighters behind the camera.
+    this.camera.updateMatrixWorld();
+    this.actorProjection.multiplyMatrices(
+      this.camera.projectionMatrix,
+      this.camera.matrixWorldInverse,
+    );
+    this.actorFrustum.setFromProjectionMatrix(this.actorProjection);
+    let shadowIndex = 1;
+    for (const [id, e] of this.game.enemies) {
+      const heavy = e.kind === "gaoler";
+      this.actorSphere.center.set(e.x, e.y + (heavy ? 1.6 : 1.1), e.z);
+      this.actorSphere.radius = heavy ? 3.2 : 2.2;
+      const visible =
+        Math.abs(e.z - p.z) < 36 &&
+        this.actorFrustum.intersectsSphere(this.actorSphere);
+      const shadow = this.shadows[shadowIndex++];
+      shadow.visible = visible;
+      shadow.position.set(e.x, e.y + 0.015, e.z);
+      const actor = this.actors.get(id);
+      if (!actor) continue;
+      const appeared = visible && !actor.root.visible;
+      actor.root.visible = visible;
+      if (visible && !this.settledCorpses.has(e)) {
+        if (appeared && e.hp > 0) actor.reset();
+        actor.update(dt, e);
+        if (e.hp <= 0) {
+          const posed = (this.corpsePoseTime.get(e) ?? 0) + dt;
+          this.corpsePoseTime.set(e, posed);
+          if (e.time > 3.5 && posed > 0.5) this.settledCorpses.add(e);
+        }
+      }
+    }
     this.renderer.render(this.scene, this.camera);
   }
   resources() {

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { assetUrl } from "./assets";
+import { assetUrl } from "./assets.ts";
 import {
   areaAt,
   TREES,
@@ -9,24 +9,25 @@ import {
   COURT_COLUMNS,
   CHAPEL_COLUMNS,
   ARCH_PORTALS,
-  CRYPT_BAYS,
   CRYPT_COLUMNS,
   CRYPT_CEILING_Y,
   OBSTACLES,
   type AreaId,
-} from "./world-layout";
-import { createForest } from "./forest";
+} from "./world-layout.ts";
+import { createForest } from "./forest.ts";
+import { terrainHeight } from "./terrain-height.ts";
+import { CRYPT_FURNISHINGS } from "./castle-furnishings.ts";
 import {
   environmentTexture,
   type EnvironmentPattern,
-} from "./environment-materials";
+} from "./environment-materials.ts";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0xa6b0aa, density: 0.037 },
-  roofs: { name: "Воротный двор", fog: 0x8e9694, density: 0.026 },
-  chapel: { name: "Собор и верхняя галерея", fog: 0x6e7776, density: 0.032 },
-  crypt: { name: "Зал погребённых", fog: 0x56615e, density: 0.04 },
-  courtyard: { name: "Лес у Чёрных ворот", fog: 0x526166, density: 0.018 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xc1c9c3, density: 0.043 },
+  roofs: { name: "Воротный двор", fog: 0xb8c2bd, density: 0.032 },
+  chapel: { name: "Собор и верхняя галерея", fog: 0xaab5b0, density: 0.023 },
+  crypt: { name: "Зал погребённых", fog: 0xa5b0ab, density: 0.026 },
+  courtyard: { name: "Лес у Чёрных ворот", fog: 0xc1c9c3, density: 0.043 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
 export const LOCATION_IDS = Object.keys(LOCATIONS) as LocationId[];
@@ -57,6 +58,7 @@ type BeamAnchor = {
   power: number;
   width: number;
   area: AreaId;
+  threshold?: boolean;
 };
 const rand = (i: number) => {
   const n = Math.sin(i * 127.13 + 6.71) * 43758.5453;
@@ -79,9 +81,15 @@ export class ConnectedEnvironment {
   private bark: THREE.MeshStandardMaterial;
   private earth: THREE.MeshStandardMaterial;
   private torchCloth: THREE.MeshStandardMaterial;
+  private iron: THREE.MeshStandardMaterial;
+  private wax: THREE.MeshStandardMaterial;
+  private wood: THREE.MeshStandardMaterial;
+  private burialStone: THREE.MeshStandardMaterial;
   private skyLight = new THREE.HemisphereLight(0xb9c5c6, 0x20251e, 0.42);
   private moonLight = new THREE.DirectionalLight(0xd9e4df, 0.8);
   private bounceLight = new THREE.DirectionalLight(0x788b88, 0.1);
+  private indoorBounceColor = new THREE.Color(0x5c6863);
+  private outdoorBounceColor = new THREE.Color(0x20251e);
   private lastTime = 0;
   private warm: WarmAnchor[] = [];
   private cool: BeamAnchor[] = [];
@@ -94,6 +102,7 @@ export class ConnectedEnvironment {
     material: THREE.MeshBasicMaterial;
     area: AreaId;
     phase: number;
+    threshold?: boolean;
   }[] = [];
   private flames: { x: number; y: number; z: number; scale: number }[] = [];
   private flameOuter?: THREE.InstancedMesh;
@@ -101,6 +110,26 @@ export class ConnectedEnvironment {
   private fireMatrix = new THREE.Matrix4();
   private fireScale = new THREE.Vector3();
   private patterns = new Map<string, THREE.CanvasTexture>();
+  private exitSource?: THREE.Mesh<THREE.ShapeGeometry, THREE.MeshBasicMaterial>;
+  private exitHalo?: THREE.Sprite;
+  private exitRequest = 0;
+  private activeFurnishing?: { index: number; bounds: THREE.Box3 };
+  readonly assetReview = {
+    furnishings: [] as {
+      index: number;
+      kind: string;
+      min: number[];
+      max: number[];
+    }[],
+    candleFlames: [] as {
+      x: number;
+      z: number;
+      waxTop: number;
+      wickTop: number;
+      flameBase: number;
+      scale: number;
+    }[],
+  };
   constructor(loader: THREE.TextureLoader) {
     for (const sector of [
       "world",
@@ -165,6 +194,36 @@ export class ConnectedEnvironment {
       roughness: 1,
       vertexColors: true,
     });
+    this.iron = new THREE.MeshStandardMaterial({
+      map: this.pattern("iron"),
+      color: 0x9c9d95,
+      metalness: 0.65,
+      roughness: 0.74,
+      vertexColors: true,
+    });
+    this.wax = new THREE.MeshStandardMaterial({
+      map: this.pattern("wax"),
+      color: 0xd0c6a9,
+      // A small baked transmission term keeps the side facing away from the
+      // shared light readable, as a real wax candle scatters its own flame.
+      emissive: 0xc0a778,
+      emissiveMap: this.pattern("wax"),
+      emissiveIntensity: 0.12,
+      roughness: 0.92,
+      vertexColors: true,
+    });
+    this.wood = new THREE.MeshStandardMaterial({
+      map: this.pattern("oak"),
+      color: 0xa29b87,
+      roughness: 1,
+      vertexColors: true,
+    });
+    this.burialStone = new THREE.MeshStandardMaterial({
+      map: this.pattern("burial-stone"),
+      color: 0xb0b5ac,
+      roughness: 0.94,
+      vertexColors: true,
+    });
     this.moonLight.position.set(-9, 18, 8);
     this.bounceLight.position.set(8, 4, -40);
     this.root.add(this.skyLight, this.moonLight, this.bounceLight);
@@ -227,7 +286,7 @@ export class ConnectedEnvironment {
         (area === "crypt" && z < -78);
     // Material colour stays earthy. Cold distance fog and actual openings,
     // rather than a white albedo remap, provide the pale atmospheric range.
-    let value = inside ? 0.46 : 0.76;
+    let value = inside ? 0.53 : 0.76;
     value += Math.max(0, ny) * 0.1 + nx * 0.035;
     if (inside) {
       for (const w of [-47, -54, -62, -89]) {
@@ -252,6 +311,10 @@ export class ConnectedEnvironment {
       old.dispose();
     }
     geometry.applyMatrix4(mesh.matrix);
+    if (this.activeFurnishing) {
+      geometry.computeBoundingBox();
+      this.activeFurnishing.bounds.union(geometry.boundingBox!);
+    }
     const positions = geometry.getAttribute("position"),
       normals = geometry.getAttribute("normal"),
       uv = geometry.getAttribute("uv");
@@ -407,13 +470,8 @@ export class ConnectedEnvironment {
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i),
         z = p.getZ(i),
-        outside = Math.max(0, Math.min(1, (Math.abs(x) - 8) / 13));
-      const hills =
-        (Math.sin(x * 0.14 + z * 0.065) * 2.2 +
-          Math.cos(z * 0.12 - x * 0.03) * 2.8 -
-          1.4) *
-        outside;
-      p.setY(i, -0.12 + hills + (z < -18 ? Math.min(2, (-18 - z) * 0.08) : 0));
+        support = terrainHeight(x, z);
+      p.setY(i, support);
     }
     geometry.computeVertexNormals();
     const terrain = new THREE.MeshStandardMaterial({
@@ -730,7 +788,7 @@ export class ConnectedEnvironment {
     this.arch(5, 5.2, -60.4, 1.14, 1.9, this.stone, sector);
     this.box(3.6, 0.3, 8, 5, 9, -64, this.dark, sector);
     this.window(6.43, 6.1, -65, 1.3, 2.1, sector, -Math.PI / 2, true);
-    this.chandelier(5, 8.35, -61.9, "chapel");
+    this.chandelier(5, 7.35, -61.9, "chapel");
     this.torch(6.5, 6.5, -61.5, "chapel");
   }
   private crypt() {
@@ -740,8 +798,8 @@ export class ConnectedEnvironment {
     for (const side of [-1, 1]) {
       this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
     }
-    // Roof supports stand between cell bays. Their capitals meet the shared
-    // underside of the ceiling, and never pass through a cell's iron bars.
+    // Roof supports stand between occupied burial/storage bays. Their capitals
+    // meet the shared underside of the ceiling.
     for (const { x, z } of CRYPT_COLUMNS) {
       const shaft = CRYPT_CEILING_Y - b - 0.34;
       this.cylinder(
@@ -768,11 +826,7 @@ export class ConnectedEnvironment {
         s,
       );
     }
-    for (const { x, z } of CRYPT_BAYS) {
-      this.arch(x, b + 0.2, z, 1.05, 1.5, this.stone, s);
-      this.box(1.6, 0.26, 1.1, x, b + 0.28, z, this.stone, s);
-      this.ironFence(x, z + 0.3, 1.6, 0, s, b + 0.4);
-    }
+    this.cryptFurnishings(b, s);
     // Four slabs leave a real break in the ceiling above the encounter.
     this.box(
       5.3,
@@ -823,7 +877,7 @@ export class ConnectedEnvironment {
       this.torch(7.3, b + 1.9, z + 1, s);
     }
     this.chandelier(0, b + 2.7, -87, s);
-    this.window(0, b + 1, -103.2, 3, 3, s, 0, true);
+    this.exitLight(b);
     this.beam({
       x: -1.65,
       y: b + 4.6,
@@ -1049,22 +1103,428 @@ export class ConnectedEnvironment {
     });
   }
   private chandelier(x: number, y: number, z: number, sector: Sector) {
-    this.cylinder(0.023, 0.023, 1.8, 6, x, y + 1.1, z, this.metal, sector);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.63, 0.045, 6, 18),
-      this.metal,
+    // Six swept forged arms, supported by a central stem and a ceiling link.
+    // Sockets and drip pans support uneven wax candles, their wicks meet the fire.
+    this.cylinder(0.027, 0.034, 1.24, 8, x, y + 0.63, z, this.iron, sector);
+    for (const hy of [y - 0.17, y + 0.04, y + 0.78, y + 1.17])
+      this.cylinder(0.056, 0.048, 0.055, 10, x, hy, z, this.iron, sector);
+    const link = new THREE.Mesh(
+      new THREE.TorusGeometry(0.105, 0.018, 6, 16),
+      this.iron,
     );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(x, y, z);
-    this.part(ring, sector);
+    link.position.set(x, y + 1.36, z);
+    this.part(link, sector);
+    const ceiling =
+      sector === "crypt"
+        ? CRYPT_CEILING_Y
+        : sector === "chapel" && x > 3
+          ? 9
+          : 10.8;
+    const start = y + 1.47;
+    if (ceiling > start)
+      this.cylinder(
+        0.014,
+        0.014,
+        ceiling - start,
+        6,
+        x,
+        (ceiling + start) / 2,
+        z,
+        this.iron,
+        sector,
+      );
+    const finial = new THREE.Mesh(
+      new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(0, -0.24),
+          new THREE.Vector2(0.07, -0.2),
+          new THREE.Vector2(0.055, -0.12),
+          new THREE.Vector2(0.025, -0.06),
+        ],
+        10,
+      ),
+      this.iron,
+    );
+    finial.position.set(x, y, z);
+    this.part(finial, sector);
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2,
-        px = x + Math.sin(a) * 0.63,
-        pz = z + Math.cos(a) * 0.63;
-      this.cylinder(0.045, 0.05, 0.28, 8, px, y + 0.1, pz, this.stone, sector);
-      this.fire(px, y + 0.32, pz, sector, 0.42);
+        px = x + Math.sin(a) * 0.68,
+        pz = z + Math.cos(a) * 0.68;
+      const outward = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+      this.curve(
+        [
+          new THREE.Vector3(x, y - 0.1, z),
+          new THREE.Vector3(x, y - 0.04, z).addScaledVector(outward, 0.19),
+          new THREE.Vector3(x, y - 0.2, z).addScaledVector(outward, 0.43),
+          new THREE.Vector3(px, y - 0.1, pz),
+          new THREE.Vector3(px, y + 0.05, pz),
+        ],
+        0.018,
+        this.iron,
+        sector,
+      );
+      this.candle(px, y + 0.015, pz, 0.27 + (i % 3) * 0.038, sector);
     }
-    this.warm.push({ x, y: y + 0.3, z, power: 54, range: 8, area: sector });
+    this.warm.push({ x, y: y + 0.34, z, power: 84, range: 9.5, area: sector });
+  }
+  private curve(
+    points: THREE.Vector3[],
+    radius: number,
+    material: THREE.Material,
+    sector: Sector,
+  ) {
+    this.part(
+      new THREE.Mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(points),
+          14,
+          radius,
+          5,
+          false,
+        ),
+        material,
+      ),
+      sector,
+    );
+  }
+  private candle(
+    x: number,
+    y: number,
+    z: number,
+    height: number,
+    sector: Sector,
+  ) {
+    const pan = new THREE.Mesh(
+      new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(0.025, 0),
+          new THREE.Vector2(0.04, 0.027),
+          new THREE.Vector2(0.105, 0.037),
+          new THREE.Vector2(0.112, 0.056),
+        ],
+        12,
+      ),
+      this.iron,
+    );
+    pan.position.set(x, y, z);
+    this.part(pan, sector);
+    this.cylinder(0.044, 0.049, 0.11, 10, x, y + 0.09, z, this.iron, sector);
+    const base = y + 0.1,
+      top = base + height;
+    const wax = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.043, height, 12, 4),
+      this.wax,
+    );
+    const p = wax.geometry.getAttribute("position");
+    for (let i = 0; i < p.count; i++)
+      if (p.getY(i) > height * 0.48) {
+        p.setY(i, p.getY(i) - 0.004 * (1 + Math.sin(i * 1.7 + x)));
+      }
+    wax.geometry.computeVertexNormals();
+    wax.position.set(x, base + height / 2, z);
+    this.part(wax, sector);
+    // Small wax trails are part of the candle, never luminous cylinders.
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.3 + x,
+        drop = 0.025 + 0.012 * (i % 2);
+      this.cylinder(
+        0.004,
+        0.006,
+        drop,
+        5,
+        x + Math.sin(a) * 0.041,
+        top - 0.014 - drop / 2,
+        z + Math.cos(a) * 0.041,
+        this.wax,
+        sector,
+      );
+    }
+    this.cylinder(0.004, 0.006, 0.022, 5, x, top + 0.006, z, this.dark, sector);
+    const flameBase = top + 0.031,
+      scale = 0.43;
+    this.fire(x, flameBase, z, sector, scale);
+    this.assetReview.candleFlames.push({
+      x,
+      z,
+      waxTop: top,
+      wickTop: top + 0.017,
+      flameBase,
+      scale,
+    });
+  }
+  private cryptFurnishings(base: number, sector: Sector) {
+    for (let index = 0; index < CRYPT_FURNISHINGS.length; index++) {
+      const f = CRYPT_FURNISHINGS[index],
+        { x, z } = f;
+      this.activeFurnishing = { index, bounds: new THREE.Box3() };
+      this.box(
+        f.hx * 2 - 0.08,
+        0.12,
+        f.hz * 2 - 0.08,
+        x,
+        base + 0.06,
+        z,
+        this.burialStone,
+        sector,
+      );
+      if (f.kind === "sarcophagus") {
+        this.box(1.7, 0.68, 0.79, x, base + 0.46, z, this.burialStone, sector);
+        const outline = new THREE.Shape();
+        outline.moveTo(-0.88, -0.42);
+        outline.lineTo(0.88, -0.42);
+        outline.lineTo(0.88, 0.42);
+        outline.lineTo(-0.88, 0.42);
+        outline.closePath();
+        const lid = new THREE.Mesh(
+          new THREE.ExtrudeGeometry(outline, {
+            depth: 0.08,
+            bevelEnabled: true,
+            bevelSize: 0.045,
+            bevelThickness: 0.045,
+            bevelSegments: 1,
+            steps: 1,
+          }),
+          this.burialStone,
+        );
+        lid.rotation.x = -Math.PI / 2;
+        lid.position.set(x, base + 0.88, z);
+        this.part(lid, sector);
+        this.box(1.36, 0.027, 0.57, x, base + 1.005, z, this.dark, sector);
+        this.box(
+          1.21,
+          0.012,
+          0.43,
+          x,
+          base + 1.026,
+          z,
+          this.burialStone,
+          sector,
+        );
+        for (const side of [-1, 1]) {
+          this.box(
+            0.055,
+            0.44,
+            0.045,
+            x + side * 0.65,
+            base + 0.47,
+            z + 0.42,
+            this.burialStone,
+            sector,
+          );
+        }
+      } else if (f.kind === "ossuary") {
+        this.box(
+          1.8,
+          1.17,
+          0.11,
+          x,
+          base + 0.7,
+          z - 0.35,
+          this.burialStone,
+          sector,
+        );
+        for (const side of [-1, 1])
+          this.box(
+            0.12,
+            1.2,
+            0.78,
+            x + side * 0.82,
+            base + 0.71,
+            z,
+            this.burialStone,
+            sector,
+          );
+        for (const h of [0.14, 0.69, 1.28])
+          this.box(1.79, 0.08, 0.78, x, base + h, z, this.burialStone, sector);
+        for (const sx of [-0.54, 0, 0.54])
+          for (const h of [0.2, 0.75])
+            this.urn(x + sx, base + h, z + 0.04, sector);
+      } else if (f.kind === "memorial") {
+        this.box(1.7, 0.64, 0.76, x, base + 0.45, z, this.burialStone, sector);
+        this.box(1.82, 0.09, 0.86, x, base + 0.81, z, this.burialStone, sector);
+        const plaque = new THREE.Mesh(
+          new THREE.BoxGeometry(0.76, 0.045, 0.41),
+          this.dark,
+        );
+        plaque.rotation.x = -0.25;
+        plaque.position.set(x, base + 0.88, z + 0.04);
+        this.part(plaque, sector);
+        for (const sx of [-0.64, 0.64])
+          this.candle(x + sx, base + 0.87, z - 0.13, 0.25, sector);
+        this.warm.push({
+          x,
+          y: base + 1.25,
+          z,
+          power: 17,
+          range: 4,
+          area: sector,
+        });
+      } else {
+        this.box(0.9, 0.66, 0.75, x - 0.35, base + 0.45, z, this.wood, sector);
+        this.box(
+          0.74,
+          0.44,
+          0.66,
+          x - 0.34,
+          base + 1,
+          z - 0.03,
+          this.wood,
+          sector,
+        );
+        for (const sx of [-0.7, -0.03]) {
+          this.box(
+            0.045,
+            0.68,
+            0.79,
+            x + sx,
+            base + 0.46,
+            z,
+            this.iron,
+            sector,
+          );
+          this.box(
+            0.045,
+            0.45,
+            0.7,
+            x + sx * 0.85,
+            base + 1,
+            z - 0.03,
+            this.iron,
+            sector,
+          );
+        }
+        const barrel = new THREE.Mesh(
+          new THREE.LatheGeometry(
+            [
+              new THREE.Vector2(0.19, 0),
+              new THREE.Vector2(0.23, 0.08),
+              new THREE.Vector2(0.255, 0.32),
+              new THREE.Vector2(0.23, 0.58),
+              new THREE.Vector2(0.19, 0.66),
+            ],
+            12,
+          ),
+          this.wood,
+        );
+        barrel.position.set(x + 0.55, base + 0.13, z);
+        this.part(barrel, sector);
+        for (const h of [0.19, 0.36, 0.68]) {
+          const hoop = new THREE.Mesh(
+            new THREE.TorusGeometry(h === 0.36 ? 0.253 : 0.222, 0.016, 5, 12),
+            this.iron,
+          );
+          hoop.rotation.x = Math.PI / 2;
+          hoop.position.set(x + 0.55, base + h, z);
+          this.part(hoop, sector);
+        }
+        this.cylinder(
+          0.189,
+          0.189,
+          0.025,
+          12,
+          x + 0.55,
+          base + 0.797,
+          z,
+          this.wood,
+          sector,
+        );
+      }
+      const box = this.activeFurnishing.bounds;
+      this.assetReview.furnishings.push({
+        index,
+        kind: f.kind,
+        min: box.min.toArray(),
+        max: box.max.toArray(),
+      });
+      this.activeFurnishing = undefined;
+    }
+  }
+  private urn(x: number, y: number, z: number, sector: Sector) {
+    const vessel = new THREE.Mesh(
+      new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(0.06, 0),
+          new THREE.Vector2(0.1, 0.02),
+          new THREE.Vector2(0.13, 0.14),
+          new THREE.Vector2(0.12, 0.24),
+          new THREE.Vector2(0.065, 0.31),
+          new THREE.Vector2(0.058, 0.36),
+          new THREE.Vector2(0.078, 0.37),
+        ],
+        12,
+      ),
+      this.burialStone,
+    );
+    vessel.position.set(x, y, z);
+    this.part(vessel, sector);
+    this.cylinder(0.081, 0.072, 0.025, 12, x, y + 0.385, z, this.dark, sector);
+  }
+  private exitLight(base: number) {
+    const shape = new THREE.Shape();
+    shape.moveTo(-2.2, 0);
+    shape.lineTo(-2.2, 1.67);
+    shape.absarc(0, 1.67, 2.2, Math.PI, 0, true);
+    shape.lineTo(2.2, 0);
+    shape.closePath();
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xf8ffff,
+      transparent: true,
+      opacity: 0.76,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      depthWrite: false,
+      fog: true,
+    });
+    this.exitSource = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape, 24),
+      material,
+    );
+    this.exitSource.name = "FinalWhiteThreshold";
+    this.exitSource.position.set(0, base + 0.025, -103.26);
+    this.group("crypt").add(this.exitSource);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext("2d")!,
+      g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, "#f4fff9c0");
+    g.addColorStop(0.32, "#edf6f279");
+    g.addColorStop(1, "#e6efeb00");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    this.exitHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map,
+        color: 0xf4fff8,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        fog: true,
+      }),
+    );
+    this.exitHalo.name = "ThresholdMistGlare";
+    this.exitHalo.position.set(0, base + 2, -102.75);
+    this.exitHalo.scale.set(5.2, 5.2, 1);
+    this.group("crypt").add(this.exitHalo);
+    this.beam({
+      x: 0,
+      y: base + 3.2,
+      z: -103.12,
+      tx: 0,
+      ty: base + 0.03,
+      tz: -97.3,
+      power: 165,
+      width: 1.6,
+      area: "crypt",
+      threshold: true,
+    });
+  }
+  setExitLight(progress: number) {
+    this.exitRequest = THREE.MathUtils.clamp(progress, 0, 1);
   }
   private fire(x: number, y: number, z: number, sector: Sector, scale = 1) {
     this.flames.push({ x, y, z, scale });
@@ -1080,10 +1540,16 @@ export class ConnectedEnvironment {
     });
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uFireTime = this.flameClock;
-      shader.vertexShader = "varying float vFirePhase;\n" + shader.vertexShader;
+      shader.vertexShader =
+        "uniform float uFireTime;\nvarying float vFirePhase;\n" +
+        shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         "#include <begin_vertex>",
-        "#include <begin_vertex>\nvFirePhase=instanceMatrix[3].x*0.37+instanceMatrix[3].z*0.21;",
+        `#include <begin_vertex>
+        vFirePhase=instanceMatrix[3].x*0.37+instanceMatrix[3].z*0.21;
+        float flutter=.94+.06*sin(uFireTime*12.0+vFirePhase);
+        transformed.y=(transformed.y+.065)*flutter-.065;
+        transformed.x+=sin(uFireTime*8.0+vFirePhase)*.014*uv.y;`,
       );
       shader.fragmentShader =
         "uniform float uFireTime;\nvarying float vFirePhase;\n" +
@@ -1101,7 +1567,7 @@ export class ConnectedEnvironment {
       );
     };
     material.customProgramCacheKey = () =>
-      "new0-continuous-textured-fire-fixes1";
+      "new0-wick-anchored-textured-fire-fixes2";
     const geometry = new THREE.PlaneGeometry(0.31, 0.55);
     geometry.translate(0, 0.21, 0);
     this.flameOuter = new THREE.InstancedMesh(
@@ -1111,23 +1577,17 @@ export class ConnectedEnvironment {
     );
     this.flameOuter.name = "AlwaysBurningTexturedFlames";
     this.root.add(this.flameOuter);
-    this.updateFlames(0);
+    this.positionFlames();
     this.flameOuter.computeBoundingSphere();
   }
-  private updateFlames(time: number) {
+  private positionFlames() {
     if (!this.flameOuter) return;
-    this.flameClock.value = time;
     for (let i = 0; i < this.flames.length; i++) {
-      const f = this.flames[i],
-        sy = f.scale * (0.94 + Math.sin(time * 12 + f.z) * 0.06);
+      const f = this.flames[i];
       for (let side = 0; side < 2; side++) {
         this.fireMatrix.makeRotationY(Math.PI * 0.25 + side * Math.PI * 0.5);
-        this.fireMatrix.scale(this.fireScale.set(f.scale, sy, f.scale));
-        this.fireMatrix.setPosition(
-          f.x + Math.sin(time * 8 + f.z) * 0.008,
-          f.y,
-          f.z,
-        );
+        this.fireMatrix.scale(this.fireScale.setScalar(f.scale));
+        this.fireMatrix.setPosition(f.x, f.y, f.z);
         this.flameOuter.setMatrixAt(i * 2 + side, this.fireMatrix);
       }
     }
@@ -1181,7 +1641,12 @@ export class ConnectedEnvironment {
       geometry.computeVertexNormals();
       this.group(anchor.area).add(new THREE.Mesh(geometry, material));
     }
-    this.beams.push({ material, area: anchor.area, phase: anchor.z * 0.5 });
+    this.beams.push({
+      material,
+      area: anchor.area,
+      phase: anchor.z * 0.5,
+      threshold: anchor.threshold,
+    });
   }
   private pattern(kind: string) {
     const cached = this.patterns.get(kind);
@@ -1196,6 +1661,10 @@ export class ConnectedEnvironment {
         "fern",
         "fire",
         "torch-wrap",
+        "iron",
+        "wax",
+        "oak",
+        "burial-stone",
       ].includes(kind)
     ) {
       const texture = environmentTexture(kind as EnvironmentPattern);
@@ -1291,24 +1760,34 @@ export class ConnectedEnvironment {
     time: number,
     player: { x: number; y: number; z: number },
     area: AreaId,
+    ending = false,
   ) {
     const dt = Math.max(0, Math.min(0.1, time - this.lastTime));
     this.lastTime = time;
     const indoors = area === "chapel" || area === "crypt";
+    const approach =
+      area === "crypt" ? THREE.MathUtils.smoothstep(-player.z, 95, 101) : 0;
+    const exit = Math.max(this.exitRequest, ending ? 1 : 0, approach * 0.82);
     const blend = 1 - Math.exp(-dt * 4);
+    // Pale bounced light reaches the underside and front of the furnishings.
+    // This uses the existing hemisphere, not another mobile point-light pass.
+    this.skyLight.groundColor.lerp(
+      indoors ? this.indoorBounceColor : this.outdoorBounceColor,
+      blend,
+    );
     this.skyLight.intensity = THREE.MathUtils.lerp(
       this.skyLight.intensity,
-      indoors ? 0.18 : 0.65,
+      indoors ? 0.38 : 0.72,
       blend,
     );
     this.moonLight.intensity = THREE.MathUtils.lerp(
       this.moonLight.intensity,
-      indoors ? 0.16 : 0.8,
+      indoors ? 0.2 : 0.82,
       blend,
     );
     this.bounceLight.intensity = THREE.MathUtils.lerp(
       this.bounceLight.intensity,
-      indoors ? 0.045 : 0.14,
+      indoors ? 0.14 : 0.17,
       blend,
     );
     for (const [id, group] of this.sectors)
@@ -1378,7 +1857,9 @@ export class ConnectedEnvironment {
       const light = this.coolPool[slot],
         a = this.cool[best];
       light.intensity = a
-        ? a.power * (0.96 + Math.sin(time * 0.73 + a.z) * 0.04)
+        ? a.power *
+          (a.threshold ? 0.2 + 0.8 * exit : 1) *
+          (0.96 + Math.sin(time * 0.73 + a.z) * 0.04)
         : 0;
       if (a) {
         light.position.set(a.x, a.y, a.z);
@@ -1388,7 +1869,15 @@ export class ConnectedEnvironment {
     for (const b of this.beams)
       b.material.opacity =
         (b.area === area ? 0.12 : 0.045) *
+        (b.threshold ? 0.5 + 0.8 * exit : 1) *
         (1 + Math.sin(time * 0.65 + b.phase) * 0.08);
-    this.updateFlames(time);
+    this.flameClock.value = time;
+    const pulse =
+      0.94 + Math.sin(time * 2.2) * 0.045 + Math.sin(time * 5.7) * 0.015;
+    if (this.exitSource)
+      this.exitSource.material.opacity = (0.42 + 0.56 * exit) * pulse;
+    if (this.exitHalo)
+      (this.exitHalo.material as THREE.SpriteMaterial).opacity =
+        (0.09 + 0.4 * exit) * pulse;
   }
 }
