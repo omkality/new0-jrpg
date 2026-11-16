@@ -4,7 +4,7 @@ import { Campaign } from "../src/campaign.ts";
 import { floorHeight } from "../src/world-layout.ts";
 import { CampaignShowcase } from "../src/journey.ts";
 import { motionName, sourceAttackTime } from "../src/motion-policy.ts";
-import { ATTACKS } from "../src/game.ts";
+import { ATTACKS, dodgeTravelAt } from "../src/game.ts";
 import { bodyPenetration } from "../src/body-collision.ts";
 
 test("side corpse collision follows the actual leftward skinned fall", () => {
@@ -127,7 +127,11 @@ test("a watcher evades a telegraphed strike with continuous physical travel", ()
     g.update(1 / 120, { x: 0, z: 0, guard: false });
     maxStep = Math.max(maxStep, Math.hypot(x - e.x, z - e.z));
   }
-  assert(Math.hypot(e.x - start.x, e.z - start.z) > 1.2);
+  assert(
+    Math.abs(
+      Math.hypot(e.x - start.x, e.z - start.z) - dodgeTravelAt(e, 0.82),
+    ) < 0.02,
+  );
   assert(maxStep < 0.045);
   assert.equal(e.hp, e.maxHp);
 });
@@ -145,10 +149,10 @@ test("weapon policy selects available enemy clips and preserves retimed contacts
   g.player.weapon = "spear";
   g.player.mode = "dodge";
   g.player.dodgeSide = "Back";
-  assert.equal(motionName(g.player), "WeaponStepBack");
+  assert.equal(motionName(g.player), "EvadeBack");
   g.player.weapon = "unarmed";
   g.player.armour = 1;
-  assert.equal(motionName(g.player), "WeaponStepBack");
+  assert.equal(motionName(g.player), "EvadeBack");
   g.player.armour = 0;
   assert.equal(motionName(g.player), "DodgeBack");
   const contacts = [0.3, 0.27, 0.42];

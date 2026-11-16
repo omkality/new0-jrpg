@@ -49,12 +49,16 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
     ),
     fixes = await io.read(
       `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-fixes1.glb`,
+    ),
+    fixes2 = await io.read(
+      `public/assets/motion/${character === "gaoler" ? "gaoler" : "prisoner"}-fixes2.glb`,
     );
   const clips = new Map(
     [
       ...d.getRoot().listAnimations(),
       ...legacy.getRoot().listAnimations(),
       ...fixes.getRoot().listAnimations(),
+      ...fixes2.getRoot().listAnimations(),
     ].map((c) => [c.getName(), c]),
   );
   for (const id of (character === "prisoner"
@@ -103,15 +107,17 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
     let previous = null,
       frames = 0,
       minFloor = Infinity,
+      maxActorRadius = 0,
       maxWrist = 0,
       maxSupportGap = 0,
       worstSupport = {};
     const contacts = [];
     for (const [semantic, duration] of sequence) {
       const name = semantic.startsWith("Dodge")
-          ? semantic.replace("Dodge", "WeaponStep")
-          : id === "sword" && semantic.startsWith("Attack")
-            ? "Sword" + semantic
+          ? semantic.replace("Dodge", "Evade")
+          : semantic.startsWith("Attack")
+            ? (id === "sword" ? "Sword" : id === "spear" ? "Spear" : "") +
+              semantic
             : semantic,
         c = clips.get(name);
       assert(c, name);
@@ -150,7 +156,7 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
           id === "spear" ||
           (id === "axe" &&
             character !== "gaoler" &&
-            /Attack|Guard|Step/.test(name))
+            /Attack|Guard|Step|Evade/.test(name))
         ) {
           const grip = HAND_GRIP[character === "gaoler" ? "gaoler" : "human"],
             a = new T.Vector3().fromArray(grip).applyMatrix4(hand.matrixWorld),
@@ -189,6 +195,27 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
         }
         if (frame % (process.argv.includes("--fast") ? 6 : 1) === 0) {
           collision.update();
+          const centre = new T.Vector3(
+            0,
+            character === "gaoler" ? 1.6 : 1.1,
+            0,
+          );
+          const point = new T.Vector3();
+          for (const geometry of [
+            collision.surface,
+            collision.weapons.get(id).geometry,
+          ]) {
+            const positions = geometry.getAttribute("position");
+            for (let i = 0; i < positions.count; i++) {
+              point.fromBufferAttribute(positions, i);
+              if (geometry !== collision.surface)
+                point.applyMatrix4(hand.matrixWorld);
+              maxActorRadius = Math.max(
+                maxActorRadius,
+                point.distanceTo(centre),
+              );
+            }
+          }
           const penalty = collision.penalty(id, hand.matrixWorld, 0),
             bounds = collision.weapons
               .get(id)
@@ -230,6 +257,7 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
       surfaceVertices: collision.surface.getAttribute("position").count,
       checkedFrames: frames,
       minFloor,
+      maxActorRadius,
       maxWrist,
       maxSupportGap,
       worstSupport,
@@ -238,9 +266,9 @@ for (const character of ["prisoner", "watcher", "gaoler"].filter(
     collision.dispose();
   }
 }
-await mkdir("work/fixes1", { recursive: true });
+await mkdir("work/fixes2", { recursive: true });
 await writeFile(
-  `work/fixes1/gear-geometry${process.argv.includes("--weapon") ? "-" + process.argv[process.argv.indexOf("--weapon") + 1] : ""}.json`,
+  `work/fixes2/gear-geometry${process.argv.includes("--weapon") ? "-" + process.argv[process.argv.indexOf("--weapon") + 1] : ""}.json`,
   JSON.stringify(report, null, 2),
 );
 console.log(
@@ -263,6 +291,11 @@ if (!process.argv.includes("--report"))
       `${r.character}/${r.weapon}: weapon enters floor`,
     );
     assert(r.maxWrist < 32.01, `${r.character}/${r.weapon}: wrist bend`);
+    if (r.character === "watcher" || r.character === "gaoler")
+      assert(
+        r.maxActorRadius < (r.character === "gaoler" ? 3.2 : 2.2),
+        `${r.character}: actor frustum bound crops posed geometry`,
+      );
     assert(
       r.maxSupportGap < 0.035,
       `${r.character}/${r.weapon}: support hand misses shaft`,

@@ -54,7 +54,7 @@ test("review input driver demonstrates all three attacks, a block, a dodge and w
     stages = new Set();
   let blocked = false,
     dodged = false;
-  for (let n = 0; n < 120 * 24 && g.phase !== "finished"; n++) {
+  for (let n = 0; n < 120 * 40 && g.phase !== "finished"; n++) {
     const move = demo.update(1 / 120);
     g.update(1 / 120, move);
     if (g.player.mode === "attack") stages.add(g.player.combo);
@@ -114,7 +114,7 @@ test("one, two and three taps produce bounded distinct chains and corresponding 
     );
   }
 });
-test("held block never cancels a combo, and only guards after the final recovery", () => {
+test("held block never cancels a combo, and a new press guards after the final recovery", () => {
   const g = new CombatGame();
   g.start();
   g.attack();
@@ -133,6 +133,9 @@ test("held block never cancels a combo, and only guards after the final recovery
   h.attack();
   h.attack();
   advance(h, 2.1, { ...still, guard: true });
+  assert.equal(h.player.mode, "idle");
+  advance(h, 0.02, still);
+  advance(h, 0.02, { ...still, guard: true });
   assert.equal(h.player.mode, "guard");
   h.damagePlayer(10);
   assert.equal(h.player.hp, 98);
@@ -174,6 +177,7 @@ test("early dodge has an invulnerable window and costs stamina", () => {
 test("roll compression and landing are planted, attacks cannot truncate the rotation", () => {
   const g = new CombatGame();
   g.start();
+  g.player.weapon = "unarmed";
   const x = g.player.x;
   g.dodge({ x: 1, z: 0 });
   advance(g, DODGE.travelStart - 0.02);

@@ -1,6 +1,7 @@
 // Local movement/combat vertical slice. Never submitted to the prize leaderboard.
 import { bodyRadius, bodyPenetration } from "./body-collision.ts";
 import { WEAPONS } from "./weapon-spec.ts";
+import evadeMotion from "./evade-motion-data.json" with { type: "json" };
 import type { Obstacle, WeaponId } from "./world-layout.ts";
 export type Motion =
   | "idle"
@@ -43,6 +44,33 @@ export const DODGE = {
   invulnerableStart: 0.1,
   invulnerableEnd: 0.57,
 } as const;
+export function dodgeTravelAt(f: Fighter, time: number) {
+  if (f.kind === "pilgrim" && f.weapon === "unarmed" && f.armour === 0) {
+    const u = Math.max(
+      0,
+      Math.min(
+        1,
+        (time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
+      ),
+    );
+    return DODGE.distance * (0.5 - 0.5 * Math.cos(Math.PI * u));
+  }
+  const profile = evadeMotion[`Evade${f.dodgeSide}`],
+    rows = profile.samples;
+  let i = 1;
+  while (i < rows.length - 1 && time > rows[i][0]) i++;
+  const a = rows[i - 1],
+    b = rows[i],
+    u = Math.max(0, Math.min(1, (time - a[0]) / (b[0] - a[0] || 1)));
+  return profile.distance * (a[1] + (b[1] - a[1]) * u);
+}
+export const BLOCK = {
+  window: 0.66,
+  cooldown: 1.1,
+  raiseCost: 6,
+  impactBase: 28,
+  impactScale: 0.7,
+} as const;
 export const CHEST = { x: -3.85, z: 4.4, radius: 1.55 } as const;
 export const SECRETS = [
   { id: "inscription", x: -4.1, z: 0.4 },
@@ -62,7 +90,7 @@ export function deathFromImpact(
 export const ENEMIES = {
   gaoler: {
     name: "НОСИЛЬЩИК",
-    hp: 112,
+    hp: 188,
     speed: 1.05,
     reach: 2.8,
     windup: 1.1,
@@ -174,10 +202,10 @@ const fighter = (x: number, z: number): Fighter => ({
 
 export class CombatGame {
   player = fighter(0, 5);
-  enemy = {
+  enemy: Fighter & { kind: EnemyKind } = {
     ...fighter(0, -3.8),
-    hp: 112,
-    maxHp: 112,
+    hp: ENEMIES.gaoler.hp,
+    maxHp: ENEMIES.gaoler.hp,
     yaw: 0,
     kind: "gaoler" as EnemyKind,
   };
@@ -189,6 +217,8 @@ export class CombatGame {
   events: GameEvent[] = [];
   lock = false;
   hitPause = 0;
+  guardCooldown = 0;
+  private guardHeld = false;
   private vx = 0;
   private vz = 0;
   private dodgeX = 0;
@@ -271,6 +301,8 @@ export class CombatGame {
     this.staminaDelay = this.distanceWalked = this.deathTime = 0;
     this.lock = false;
     this.hitPause = 0;
+    this.guardCooldown = 0;
+    this.guardHeld = false;
     this.enemyDormant = false;
   }
   get distance() {
@@ -389,13 +421,22 @@ export class CombatGame {
       return false;
     amount = Math.ceil(amount * (p.armour ? 0.72 : 1));
     const facing = Math.cos(Math.atan2(source.x - p.x, source.z - p.z) - p.yaw);
-    if (p.mode === "guard" && p.stamina >= 12 && facing > 0.2) {
-      p.stamina -= 12;
+    const impactCost = Math.ceil(BLOCK.impactBase + amount * BLOCK.impactScale);
+    if (
+      p.mode === "guard" &&
+      p.recoil <= 0 &&
+      p.stamina >= impactCost &&
+      facing > 0.2
+    ) {
+      p.stamina -= impactCost;
+      this.staminaDelay = 1;
+      this.guardCooldown = BLOCK.cooldown;
       amount = Math.ceil(amount * 0.15);
       p.recoil = 0.32;
       this.hitPause = Math.max(this.hitPause, 0.018);
       this.emit("block");
     } else {
+      if (p.mode === "guard") this.guardCooldown = BLOCK.cooldown;
       p.reaction = (p.reaction + 1) % 3;
       p.combo = p.chain = 0;
       this.set(p, "hit");
@@ -474,6 +515,9 @@ export class CombatGame {
   update(dt: number, input: MoveInput) {
     if (this.phase === "intro" || this.phase === "finished") return;
     this.elapsed += dt;
+    this.guardCooldown = Math.max(0, this.guardCooldown - dt);
+    const raiseGuard = input.guard && !this.guardHeld;
+    this.guardHeld = input.guard;
     // A very short pose hold gives contact weight while rendering stays continuous.
     const held = Math.min(dt, this.hitPause);
     this.hitPause -= held;
@@ -521,7 +565,14 @@ export class CombatGame {
       const attack = ATTACKS[p.combo - 1];
       if (!this.swingHit && p.time >= attack.contact) {
         this.swingHit = true;
-        for (const e of this.opponents) {
+        const targets =
+          p.weapon === "spear"
+            ? [...this.opponents].sort(
+                (a, b) =>
+                  length(a.x - p.x, a.z - p.z) - length(b.x - p.x, b.z - p.z),
+              )
+            : this.opponents;
+        for (const e of targets) {
           const targetAngle = Math.atan2(e.x - p.x, e.z - p.z);
           const angle = Math.atan2(
             Math.sin(targetAngle - p.yaw),
@@ -536,7 +587,7 @@ export class CombatGame {
             ) &&
             length(e.x - p.x, e.z - p.z) < WEAPONS[p.weapon].reach &&
             Math.abs(p.y - e.y) < 1.1 &&
-            Math.abs(angle) < 1.1 &&
+            Math.abs(angle) < (p.weapon === "spear" ? 0.32 : 1.1) &&
             this.clearLine(p, e)
           ) {
             e.hp = Math.max(
@@ -559,6 +610,7 @@ export class CombatGame {
             } else if (e.mode !== "attack") {
               this.set(e, "hit");
             }
+            if (p.weapon === "spear") break;
           }
         }
       }
@@ -576,10 +628,24 @@ export class CombatGame {
       }
     }
     if (["idle", "move", "guard"].includes(p.mode)) {
-      if (input.guard) {
+      if (
+        p.mode === "guard" &&
+        (!input.guard ||
+          (p.recoil <= 0 && (p.time >= BLOCK.window || this.guardCooldown > 0)))
+      ) {
+        this.set(p, "idle");
+        this.guardCooldown = Math.max(this.guardCooldown, BLOCK.cooldown);
+      }
+      if (
+        raiseGuard &&
+        this.guardCooldown <= 0 &&
+        p.stamina >= BLOCK.raiseCost
+      ) {
+        p.stamina -= BLOCK.raiseCost;
+        this.staminaDelay = 0.7;
         this.set(p, "guard");
         if (this.distance < 6) p.yaw = this.enemyAngle;
-      } else if (p.mode === "guard") this.set(p, "idle");
+      }
     }
     const movement = length(input.x, input.z);
     let speed =
@@ -602,12 +668,7 @@ export class CombatGame {
     }
     if (p.mode === "dodge") {
       // Compression and landing stay planted. Travel belongs to the tucked roll.
-      const u = clamp(
-        (p.time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
-        0,
-        1,
-      );
-      const travel = DODGE.distance * (0.5 - 0.5 * Math.cos(Math.PI * u));
+      const travel = dodgeTravelAt(p, p.time);
       const step = travel - this.dodgeTravel;
       this.dodgeTravel = travel;
       this.vx = (this.dodgeX * step) / dt;
@@ -640,12 +701,7 @@ export class CombatGame {
       d = length(e.x - p.x, e.z - p.z);
     const evasion = this.evasions.get(e);
     if (e.mode === "dodge" && evasion) {
-      const u = clamp(
-        (e.time - DODGE.travelStart) / (DODGE.travelEnd - DODGE.travelStart),
-        0,
-        1,
-      );
-      const travel = 1.45 * (0.5 - 0.5 * Math.cos(Math.PI * u)),
+      const travel = dodgeTravelAt(e, e.time),
         step = travel - evasion.travel;
       evasion.travel = travel;
       this.move(e, evasion.x * step, evasion.z * step);
@@ -671,7 +727,8 @@ export class CombatGame {
       ] as const) {
         const x = Math.sin(facing + offset),
           z = Math.cos(facing + offset);
-        if (this.walkable(e.x + x * 1.45, e.z + z * 1.45, e.x, e.z, true)) {
+        const travel = dodgeTravelAt({ ...e, dodgeSide: side }, DODGE.duration);
+        if (this.walkable(e.x + x * travel, e.z + z * travel, e.x, e.z, true)) {
           e.dodgeSide = side;
           e.stamina -= 28;
           this.evasions.set(e, { next: this.elapsed + 6.5, x, z, travel: 0 });

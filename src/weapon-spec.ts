@@ -18,10 +18,10 @@ export const WEAPONS = {
   },
   spear: {
     name: "Погребальное копьё",
-    damage: 0.9,
-    reach: 2.25,
-    tempo: 1.1,
-    cost: 0.82,
+    damage: 1.9,
+    reach: 2.5,
+    tempo: 0.86,
+    cost: 1.7,
     asset: "weapon-spear",
   },
   unarmed: {

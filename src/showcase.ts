@@ -5,6 +5,7 @@ import {
   type MoveInput,
 } from "./game.ts";
 import type { LocationId } from "./locations";
+import { RouteNavigation } from "./route-navigation.ts";
 
 export const DEMO_ENEMIES: Record<LocationId, EnemyKind> = {
   forest: "effigy",
@@ -42,9 +43,12 @@ export class Showcase {
   private wonAt = 0;
   private game: CombatGame;
   private location: LocationId;
+  private navigation: RouteNavigation;
+  private frameDt = 1 / 120;
   constructor(game: CombatGame, location: LocationId = "chapel") {
     this.game = game;
     this.location = location;
+    this.navigation = new RouteNavigation(game);
   }
   private enter(stage: Stage) {
     this.stage = stage;
@@ -53,12 +57,14 @@ export class Showcase {
   }
   private walk(x: number, z: number, tolerance = 0.22): MoveInput {
     const p = this.game.player,
-      dx = x - p.x,
-      dz = z - p.z,
+      waypoint = this.navigation.next({ x, z }, this.frameDt),
+      dx = waypoint.x - p.x,
+      dz = waypoint.z - p.z,
       d = Math.hypot(dx, dz);
     return d < tolerance ? rest : { x: dx / d, z: dz / d, guard: false };
   }
   update(dt: number): MoveInput {
+    this.frameDt = dt;
     this.time += dt;
     this.stageTime += dt;
     const g = this.game,
@@ -138,7 +144,14 @@ export class Showcase {
     if (this.stage === "block") {
       this.label = "Блок и отдача";
       if (p.recoil > 0) this.enter("double");
-      return { ...rest, guard: true };
+      const profile = ENEMIES[e.kind as EnemyKind];
+      return {
+        ...rest,
+        guard:
+          g.guardCooldown <= 0 &&
+          ((e.mode === "windup" && e.time > profile.windup - 0.22) ||
+            e.mode === "attack"),
+      };
     }
     if (this.stage === "double" || this.stage === "triple") {
       const total = this.stage === "double" ? 2 : 3;

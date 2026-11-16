@@ -1,6 +1,6 @@
-import { ASSET_REVISION } from "./assets";
+import { ASSET_REVISION, CLIENT_REVISION } from "./assets";
 import "./style.css";
-import { ENEMIES, type EnemyKind } from "./game";
+import { BLOCK, ENEMIES, type EnemyKind } from "./game";
 import { Campaign, SCENARIOS, type ScenarioId } from "./campaign";
 import { WEAPONS } from "./weapon-spec";
 import { Input } from "./input";
@@ -119,7 +119,11 @@ const captureLimit = () =>
       ? 160
       : 90;
 let raf = 0;
-let soak: { runs: number; snapshots: ResourceMetrics[] } | null = null;
+let soak: {
+  runs: number;
+  snapshots: ResourceMetrics[];
+  completed: boolean[];
+} | null = null;
 
 function chooseScenario(id: ScenarioId) {
   selected = id;
@@ -193,9 +197,9 @@ $("#drop").onclick = () => game.dropWeapon();
 $("#heal").onclick = () => game.heal();
 $("#soak").onclick = () => {
   if (!loaded || recording || deviceCheck || soak) return;
-  soak = { runs: 0, snapshots: [] };
+  soak = { runs: 0, snapshots: [], completed: [] };
   visible("#soak-download", false);
-  startScenario("forest");
+  startScenario("journey");
 };
 $("#reload").onclick = () => location.reload();
 function fatal(text: string) {
@@ -331,7 +335,7 @@ function drawHUD() {
     const progress = deviceCheck
       ? `${deviceCheck.index + 1}/4 / `
       : soak
-        ? `Повтор ${soak.runs + 1}/5 / `
+        ? `Повтор ${soak.runs + 1}/6 / `
         : "";
     text(progress + demonstration.label, 20, hh - 39, mobile ? 9 : 11);
     if (deviceCheck)
@@ -401,7 +405,9 @@ async function finishDeviceCheck(interrupted: boolean) {
   input.enabled = false;
   const tg = window.Telegram?.WebApp;
   lastDeviceReport = {
-    protocol: "device-check-2",
+    protocol: "device-check-3",
+    asset_revision: ASSET_REVISION,
+    client_revision: CLIENT_REVISION,
     platform:
       (tg?.initData ? tg.platform || "unknown" : "browser")
         .replace(/[^a-zA-Z0-9_-]/g, "")
@@ -464,7 +470,7 @@ async function stopRecording() {
       a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
-    a.download = `new0-fixes1-${selected}-60fps.mp4`;
+    a.download = `new0-fixes2-${selected}-60fps.mp4`;
     visible("#download", true);
     const timeline = $<HTMLAnchorElement>("#record-timeline");
     if (timeline.href.startsWith("blob:")) URL.revokeObjectURL(timeline.href);
@@ -473,9 +479,10 @@ async function stopRecording() {
         [
           JSON.stringify(
             {
-              protocol: "fixes1-capture-1",
+              protocol: "fixes2-capture-1",
               scenario: selected,
               asset_revision: ASSET_REVISION,
+              client_revision: CLIENT_REVISION,
               accepted_frames: current.frames,
               simulation_hz: 60,
               real_time_fps_benchmark: false,
@@ -488,7 +495,7 @@ async function stopRecording() {
         { type: "application/json" },
       ),
     );
-    timeline.download = `new0-fixes1-${selected}-timeline.json`;
+    timeline.download = `new0-fixes2-${selected}-timeline.json`;
     visible("#record-timeline", true);
   } catch (error) {
     toast(error instanceof Error ? error.message : "Запись прервана");
@@ -589,13 +596,21 @@ function frame(now: number) {
   }
   if (soak && !paused && demonstration?.done && finishedTail > 1) {
     soak.snapshots.push(world.resources());
+    soak.completed.push(
+      game.phase === "finished" && game.completedAreas.size === 4,
+    );
     soak.runs++;
-    if (soak.runs < 5) startScenario("forest");
+    if (soak.runs < 6) startScenario("journey");
     else {
       const report = {
-        protocol: "resource-soak-1",
+        protocol: "resource-soak-2",
+        asset_revision: ASSET_REVISION,
+        client_revision: CLIENT_REVISION,
+        scenario: "journey",
+        physical_phone_benchmark: false,
         runs: soak.runs,
         snapshots: soak.snapshots,
+        completed: soak.completed,
         errors,
         context_losses: contextLosses,
       };
@@ -611,7 +626,7 @@ function frame(now: number) {
       visible("#soak-download", true);
       visible("#intro", true);
       $("#check-result").textContent =
-        "Пять повторов завершены. Отчёт ресурсов готов.";
+        "Шесть полных повторов завершены. Отчёт ресурсов готов.";
       visible("#check-result", true);
     }
   }
@@ -725,7 +740,20 @@ function frame(now: number) {
       "aria-pressed",
       String(game.player.mode === "guard"),
     );
-    $("#guard").classList.toggle("locked", game.player.mode === "attack");
+    $("#guard").classList.toggle(
+      "locked",
+      game.player.mode === "attack" || game.guardCooldown > 0,
+    );
+    $("#guard").setAttribute(
+      "aria-label",
+      game.guardCooldown > 0
+        ? `Блок восстанавливается / ${game.guardCooldown.toFixed(1)} с`
+        : "Блок",
+    );
+    $("#guard").style.setProperty(
+      "--cooldown",
+      String(Math.min(1, game.guardCooldown / BLOCK.cooldown)),
+    );
     if (toastValue && now > toastUntil) {
       visible("#toast", false);
       toastValue = "";

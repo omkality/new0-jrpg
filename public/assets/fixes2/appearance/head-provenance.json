@@ -1,0 +1,119 @@
+{
+  "source": "https://raw.githubusercontent.com/makehumancommunity/makehuman/1f508f6083b2f823dab15de924b3bde72e08d77c/",
+  "revision": "1f508f6083b2f823dab15de924b3bde72e08d77c",
+  "license": "CC0-1.0",
+  "manifest": [
+    {
+      "file": "makehuman/data/3dobjs/base.obj",
+      "sha256": "8e761e6624b8f54536409135d1636da63b32486a90d4897f84e121d144f6fb4c",
+      "bytes": 1749303
+    },
+    {
+      "file": "makehuman/data/targets/macrodetails/caucasian-female-young.target",
+      "sha256": "118379f6e8ba9266247fdb8788a20e1df40a239f97ced0b9905bcbcc74f6e820",
+      "bytes": 420559
+    },
+    {
+      "file": "makehuman/data/targets/macrodetails/caucasian-male-young.target",
+      "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5",
+      "bytes": 396479
+    },
+    {
+      "file": "makehuman/data/targets/macrodetails/asian-female-young.target",
+      "sha256": "095fe79694fa19e1fe98d93009ec116199bd524e081c640351a10eccf2cca1eb",
+      "bytes": 435553
+    },
+    {
+      "file": "makehuman/data/targets/macrodetails/asian-male-young.target",
+      "sha256": "ed2e8c191cb6b87b4a2d97c80486acb2604fa549316c7aa2a738a5d5a14334dc",
+      "bytes": 421040
+    },
+    {
+      "file": "makehuman/data/targets/nose/nose-scale-depth-decr.target",
+      "sha256": "b46c35046c9c451b7ffe77acc0573bd945d7c6acaefe43d8c21912d4ce1a6e4c",
+      "bytes": 5811
+    },
+    {
+      "file": "makehuman/data/targets/nose/nose-flaring-decr.target",
+      "sha256": "394229c051ec21a8d233341d7ff1b2dc94da7929ace1d0bb2de2bcbdd08d6c0f",
+      "bytes": 3350
+    },
+    {
+      "file": "makehuman/data/targets/nose/nose-nostrils-angle-down.target",
+      "sha256": "151478df5f37878b1ef5458990504c042f76dba5ea2b98d7b98def2ff0037f6c",
+      "bytes": 3393
+    },
+    {
+      "file": "makehuman/data/targets/chin/chin-prominent-decr.target",
+      "sha256": "071afc623e6feb38afa5dde7abca83710c062bf1281e30a51fa42a6fbacfc00e",
+      "bytes": 3522
+    },
+    {
+      "file": "makehuman/data/targets/cheek/l-cheek-volume-incr.target",
+      "sha256": "edb0bf9389aa7fd00f9d735603729b687b3899e9a6df0934ca14aa4d44574e27",
+      "bytes": 4754
+    },
+    {
+      "file": "makehuman/data/targets/cheek/r-cheek-volume-incr.target",
+      "sha256": "dfdde51eb34b3e2c70a4c0c9fe876339dd80ee6ec0fbb3f798e630af556f9695",
+      "bytes": 4690
+    },
+    {
+      "file": "makehuman/data/targets/mouth/mouth-upperlip-volume-decr.target",
+      "sha256": "20b285d94ecb62cf605907d65659ab11ff760dbb938ba9ae7fc13429b1e3ba16",
+      "bytes": 2649
+    },
+    {
+      "file": "makehuman/data/targets/mouth/mouth-lowerlip-volume-decr.target",
+      "sha256": "45f1fe355546cdaa86581512810ee1cd2c6971ac67ffb46d3391ac438e539d15",
+      "bytes": 1828
+    },
+    {
+      "file": "makehuman/data/targets/expression/units/caucasian/mouth-open.target",
+      "sha256": "07377ba3a3eb1b92b00029908f896ea1f8cc50356789f54268d897f2e89c2843",
+      "bytes": 26815
+    }
+  ],
+  "femaleSculpt": [
+    [
+      "nose/nose-scale-depth-decr",
+      0.35
+    ],
+    [
+      "nose/nose-flaring-decr",
+      0.25
+    ],
+    [
+      "nose/nose-nostrils-angle-down",
+      0.18
+    ],
+    [
+      "chin/chin-prominent-decr",
+      0.4
+    ],
+    [
+      "cheek/l-cheek-volume-incr",
+      0.2
+    ],
+    [
+      "cheek/r-cheek-volume-incr",
+      0.2
+    ],
+    [
+      "mouth/mouth-upperlip-volume-decr",
+      0.7
+    ],
+    [
+      "mouth/mouth-lowerlip-volume-decr",
+      0.7
+    ],
+    [
+      "expression/units/caucasian/mouth-open",
+      -0.08
+    ]
+  ],
+  "output": {
+    "female": 2600,
+    "male": 2600
+  }
+}

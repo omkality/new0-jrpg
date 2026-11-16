@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "license": "CC0-1.0",
+  "sources": {
+    "mage": {
+      "file": "work/roll-research/Mage.glb",
+      "sha256": "cf898585da33fab50c724d31605fb931eb2912e6d2280092141e98ca81ad507d",
+      "author": "Kay Lousberg / KayKit",
+      "source": "https://kaylousberg.itch.io/kaykit-adventurers",
+      "licenseFile": "work/roll-research/LICENSE.txt",
+      "licenseText": "\n\tKayKit : Adventurers Character Pack (1.0)\n\n\tCreated/distributed by Kay Lousberg (www.kaylousberg.com)\n\tCreation date: 13/03/2023 09:00\n\n\t\t\t------------------------------\n\n\tLicense: (Creative Commons Zero, CC0)\n\thttp://creativecommons.org/publicdomain/zero/1.0/\n\n\tThis content is free to use in personal, educational and commercial projects.\n\n\tSupport me by using a brand resource provided in this pack or by crediting Kay Lousberg, www.kaylousberg.com (this is not mandatory)\n\n\t\t\t------------------------------\n\n    This asset pack is here thanks to all the wonderful people who support KayKit on Patreon and those who buy our EXTRA or SOURCE packs on itch.io.\n\n\tAnd a big, special thank you to my Super Supporters:\n\n\t- Brian McBarron\n\t- Silva\n\n\n\n\t\t\t------------------------------\n\n\n\tPatreon:  http://patreon.com/kaylousberg\n\n\tFollow on Twitter for updates:\n\thttp://twitter.com/KayLousberg"
+    },
+    "ual1": {
+      "file": "work/roll-research/quaternius/Universal Animation Library[Standard]/Unreal-Godot/UAL1_Standard.glb",
+      "sha256": "69591853d817488edaa8fd9bf8fc1d821eaeaf789f8627b3cd23b41c4ed67997",
+      "author": "Quaternius",
+      "source": "https://quaternius.com/packs/universalanimationlibrary.html",
+      "licenseFile": "work/roll-research/quaternius/Universal Animation Library[Standard]/README.txt",
+      "licenseText": "The Universal Animation Library comes in two files: the one ending in _RM has root motion baked into every animation, while the other has root motion disabled.\r\n\r\nExplore all the animations in the Animation Viewer!\r\nhttps://quaternius.com/animviewer.html\r\n-------------------------------------------------------\r\nLicense:\r\nCC0 1.0 Universal (CC0 1.0) \r\nPublic Domain Dedication\r\nhttps://creativecommons.org/publicdomain/zero/1.0/\r\n\r\n------------------------------------------------------\r\nModels by @Quaternius\r\nConsider supporting me on Patreon!\r\n\r\nhttps://www.patreon.com/quaternius\r\n\r\n-------------------------------------------------------\r\nJoin the Discord Server:\r\nhttps://discord.gg/vJqnRUYRfT\r\n"
+    },
+    "ual2": {
+      "file": "work/fixes1/references/UAL2_Standard.glb",
+      "sha256": "8cee20ab1bc55130092447e810e26df22dd2803eccc54f52137a7d54d7ab88a8",
+      "author": "Quaternius",
+      "source": "https://quaternius.com/packs/universalanimationlibrary2.html",
+      "licenseFile": "work/fixes1/references/README.txt",
+      "licenseText": "The Universal Animation Library comes in two files: the one ending in _RM has root motion baked into every animation, while the other has root motion disabled.\r\n\r\nExplore all the animations in the Animation Viewer!\r\nhttps://quaternius.com/animviewer.html\r\n-------------------------------------------------------\r\nLicense:\r\nCC0 1.0 Universal (CC0 1.0) \r\nPublic Domain Dedication\r\nhttps://creativecommons.org/publicdomain/zero/1.0/\r\n\r\n------------------------------------------------------\r\nModels by @Quaternius\r\nConsider supporting me on Patreon!\r\n\r\nhttps://www.patreon.com/quaternius\r\n\r\n-------------------------------------------------------\r\nJoin the Discord Server:\r\nhttps://discord.gg/vJqnRUYRfT\r\n"
+    }
+  },
+  "adaptations": [
+    "Dedicated KayKit two-handed stab retargeted to full human body in three semantic timing variants",
+    "Quaternius Jab and Cross retain sourced full-body actions with native recovery and shared combo seams",
+    "Quaternius Melee_Hook body windup and weight transfer adapted to an upright human boxing stance with an original analytic right hook arm arc and opposite face guard. This is a proportion and motion adaptation, not an unchanged imported boxing clip.",
+    "KayKit actual directional evades converted to in-place pose and separate normalized short travel curves. Source balancing-arm amplitude reduced to55% for compact weapon-safe movement."
+  ],
+  "noLegacyAssetsModified": true
+}

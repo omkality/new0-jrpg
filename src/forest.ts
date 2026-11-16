@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { Point, Obstacle } from "./world-layout";
+import { forestSupportHeight } from "./terrain-height.ts";
 
 const rand = (i: number) => {
   const n = Math.sin(i * 127.13 + 6.71) * 43758.5453;
@@ -49,7 +50,7 @@ function treeGeometry(variant: number, detailed = true) {
     0.385,
     9.1,
     detailed ? 9 : 8,
-    detailed ? 7 : 3,
+    detailed ? 10 : 6,
   );
   trunk.translate(0, 4.55, 0);
   const p = trunk.getAttribute("position");
@@ -109,6 +110,16 @@ function treeGeometry(variant: number, detailed = true) {
   }
   const geometry = mergeGeometries(pieces)!;
   for (const g of pieces) g.dispose();
+  const positions = geometry.getAttribute("position"),
+    uv = geometry.getAttribute("uv");
+  const colors = new Float32Array(positions.count * 3);
+  for (let i = 0; i < positions.count; i++) {
+    const h = positions.getY(i),
+      shade = 0.67 + 0.26 * Math.min(1, Math.max(0, h / 4));
+    colors.set([shade * 0.98, shade, shade * 0.94], i * 3);
+    uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * 7);
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   return geometry;
 }
 
@@ -126,8 +137,8 @@ function fernGeometry() {
     uv.push(0, 0, 1, 0, 0.5, 1);
     for (let i = 0; i < 3; i++) colors.push(shade * 0.92, shade, shade * 0.82);
   };
-  for (let frond = 0; frond < 7; frond++) {
-    const angle = (frond * Math.PI * 2) / 7;
+  for (let frond = 0; frond < 6; frond++) {
+    const angle = (frond * Math.PI * 2) / 6;
     const forward = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
     const side = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle));
     const length = 0.55 + rand(frond * 4) * 0.24;
@@ -136,10 +147,20 @@ function fernGeometry() {
         .clone()
         .multiplyScalar(length * t)
         .setY(Math.sin(t * Math.PI * 0.78) * 0.48);
-    for (let leaf = 1; leaf <= 7; leaf++) {
-      const t = leaf / 8;
+    for (let stem = 0; stem < 6; stem++) {
+      const a = point(stem / 7),
+        b = point((stem + 1) / 7),
+        width = 0.008 * (1 - stem / 8);
+      triangle(
+        a.clone().addScaledVector(side, -width),
+        a.clone().addScaledVector(side, width),
+        b,
+        0.7,
+      );
+    }
+    for (let leaf = 1; leaf <= 6; leaf++) {
+      const t = leaf / 7.5;
       const root = point(t);
-      const next = point(t + 0.09);
       const span = Math.sin(t * Math.PI) * 0.2 * (1 - t * 0.4);
       for (const sign of [-1, 1]) {
         const tip = root
@@ -147,7 +168,15 @@ function fernGeometry() {
           .addScaledVector(side, sign * span)
           .addScaledVector(forward, 0.095)
           .add(new THREE.Vector3(0, 0.015, 0));
-        triangle(root, tip, next, 0.7 + t * 0.25);
+        // A tapered curved leaflet, not one large triangular arrowhead.
+        const mid = root
+          .clone()
+          .lerp(tip, 0.55)
+          .addScaledVector(forward, -0.027)
+          .add(new THREE.Vector3(0, 0.018, 0));
+        const rear = mid.clone().addScaledVector(forward, 0.055);
+        triangle(root, mid, tip, 0.69 + t * 0.2);
+        triangle(root, tip, rear, 0.83 + t * 0.13);
       }
     }
   }
@@ -174,10 +203,26 @@ export function createForest(
     roughness: 1,
     alphaTest: 0.48,
     side: THREE.DoubleSide,
+    fog: true,
   });
   const leafGeometry = new THREE.PlaneGeometry(4.2, 3.2);
   const farTree = (t: Point) => Math.abs(t.x) > 12 || t.z < -13.5;
-  const leafCount = trees.reduce((n, t) => n + (farTree(t) ? 6 : 9), 0);
+  const shrubSites = Array.from({ length: 40 }, (_, i) => ({
+    x: (i % 2 ? -1 : 1) * (4.9 + rand(i + 881) * 4.2),
+    z: 11.6 - rand(i + 902) * 24.8,
+  })).filter((p) =>
+    solids.every((o) => {
+      if ((o.minY ?? -Infinity) > 0.8 || (o.maxY ?? Infinity) < 0) return true;
+      return (
+        Math.hypot(
+          Math.max(0, Math.abs(p.x - o.x) - o.hx),
+          Math.max(0, Math.abs(p.z - o.z) - o.hz),
+        ) > 0.8
+      );
+    }),
+  );
+  const leafCount =
+    trees.reduce((n, t) => n + (farTree(t) ? 6 : 9), 0) + shrubSites.length * 4;
   const leaves = new THREE.InstancedMesh(leafGeometry, leafMaterial, leafCount);
   leaves.name = "ForestCanopies";
   const matrix = new THREE.Matrix4(),
@@ -203,7 +248,8 @@ export function createForest(
       const t = selected[j],
         i = t.index;
       const height = 0.86 + rand(i + 100) * 0.42;
-      position.set(t.x, -0.04, t.z);
+      const ground = forestSupportHeight(t.x, t.z);
+      position.set(t.x, ground - 0.07, t.z);
       const yaw = rand(i + 31) * Math.PI * 2,
         width = 0.9 + rand(i + 19) * 0.18;
       q.setFromEuler(new THREE.Euler(0, yaw, 0));
@@ -231,7 +277,7 @@ export function createForest(
         tip.y *= height;
         tip.z *= width;
         tip.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-        position.set(t.x + tip.x, -0.04 + tip.y + 0.24, t.z + tip.z);
+        position.set(t.x + tip.x, ground - 0.07 + tip.y + 0.24, t.z + tip.z);
         q.setFromEuler(
           new THREE.Euler(
             -0.25 + rand(layer + i * 9) * 0.8,
@@ -251,12 +297,31 @@ export function createForest(
     trunks.computeBoundingSphere();
     root.add(trunks);
   }
+  for (let i = 0; i < shrubSites.length; i++) {
+    const site = shrubSites[i],
+      h = 0.42 + rand(i + 983) * 0.38;
+    for (let j = 0; j < 4; j++) {
+      const a = (j * Math.PI) / 2 + rand(i + 91);
+      position.set(
+        site.x + Math.sin(a) * 0.18,
+        forestSupportHeight(site.x, site.z) + h * 0.405,
+        site.z + Math.cos(a) * 0.18,
+      );
+      q.setFromEuler(
+        new THREE.Euler(-0.22 + (j % 2) * 0.42, a, 0.08 * Math.sin(i + j)),
+      );
+      scale.set(0.28 + rand(i + j + 8) * 0.09, h / 3.2, 1);
+      matrix.compose(position, q, scale);
+      leaves.setMatrixAt(leafCursor++, matrix);
+    }
+  }
   leaves.computeBoundingSphere();
   root.add(leaves);
   const fernMaterial = new THREE.MeshStandardMaterial({
     map: fern,
     color: 0x909e78,
     roughness: 1,
+    fog: true,
     side: THREE.DoubleSide,
     vertexColors: true,
   });
@@ -284,7 +349,11 @@ export function createForest(
   ferns.name = "ForestUnderstory";
   for (let i = 0; i < plants.length; i++) {
     const plant = plants[i];
-    position.set(plant.x, 0.025, plant.z);
+    position.set(
+      plant.x,
+      forestSupportHeight(plant.x, plant.z) + 0.015,
+      plant.z,
+    );
     q.setFromEuler(new THREE.Euler(0, plant.yaw, 0));
     scale.setScalar(plant.scale);
     matrix.compose(position, q, scale);

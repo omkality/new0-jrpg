@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { humanHead } from "./human-head.ts";
 
 export type AppearanceKind = "pilgrim" | "effigy" | "watcher" | "gaoler";
 type Palette = {
@@ -12,8 +12,8 @@ type Palette = {
 };
 const palettes: Record<Exclude<AppearanceKind, "gaoler">, Palette> = {
   pilgrim: {
-    skin: 0xc5ab9a,
-    lips: 0x916863,
+    skin: 0xd5b6a2,
+    lips: 0xa5716e,
     hair: 0x352820,
     iris: 0x645a3c,
     jaw: 0.7,
@@ -37,367 +37,12 @@ const palettes: Record<Exclude<AppearanceKind, "gaoler">, Palette> = {
   },
 };
 const lerp = THREE.MathUtils.lerp;
-const gaussian = (a: number, b: number, width: number) =>
-  Math.exp(-(((a - b) / width) ** 2));
-const colour = (hex: number) => new THREE.Color(hex);
-
-function paint(
-  geometry: THREE.BufferGeometry,
-  paintVertex: (p: THREE.Vector3) => THREE.Color,
-) {
-  const position = geometry.getAttribute("position"),
-    colours = new Float32Array(position.count * 3);
-  const point = new THREE.Vector3();
-  for (let i = 0; i < position.count; i++)
-    paintVertex(point.fromBufferAttribute(position, i)).toArray(colours, i * 3);
-  geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
-  geometry.deleteAttribute("uv");
-  return geometry;
-}
-function solid(geometry: THREE.BufferGeometry, hex: number) {
-  const c = colour(hex);
-  return paint(geometry, () => c);
-}
-function tube(
-  points: THREE.Vector3[],
-  radius: number,
-  hex: number,
-  segments = 8,
-) {
-  return solid(
-    new THREE.TubeGeometry(
-      new THREE.CatmullRomCurve3(points),
-      segments,
-      radius,
-      5,
-      false,
-    ),
-    hex,
-  );
-}
-
-// This is an original model, authored in the same metre-scale bind space as
-// the licensed body. The source head, rig, skin attributes and clips stay intact.
 export function createCharacterHead(
   kind: Exclude<AppearanceKind, "gaoler"> = "pilgrim",
 ) {
-  const palette = palettes[kind],
-    hero = kind === "pilgrim";
-  const parts: THREE.BufferGeometry[] = [],
-    group = new THREE.Group();
-  group.name = `fixes1_${kind}_face`;
-  const rx = hero ? 0.083 : kind === "effigy" ? 0.079 : 0.087;
-  const cy = 1.591,
-    ry = hero ? 0.115 : 0.119,
-    rz = 0.085;
-  const skin = colour(palette.skin),
-    lip = colour(palette.lips),
-    shade = colour(0x5e5a50);
-  const frontSurface = (x: number, y: number) => {
-    let sy = (y - cy) / ry;
-    if (sy < -0.75) sy = -0.75 + (sy + 0.75) / 0.35;
-    const jaw = lerp(
-      palette.jaw,
-      1,
-      THREE.MathUtils.smoothstep(sy, -0.92, -0.1),
-    );
-    const sz = Math.sqrt(Math.max(0, 1 - sy * sy - (x / (rx * jaw)) ** 2));
-    const cheeks =
-      (gaussian(x, -0.045, 0.025) + gaussian(x, 0.045, 0.025)) *
-      gaussian(y, 1.583, 0.029) *
-      0.009;
-    const sockets =
-      (gaussian(x, -0.032, 0.019) + gaussian(x, 0.032, 0.019)) *
-      gaussian(y, 1.614, 0.014) *
-      -0.006;
-    const bridge =
-      gaussian(x, 0, 0.011) * gaussian(y, 1.601, 0.033) * (hero ? 0.01 : 0.014);
-    const tip =
-      gaussian(x, 0, 0.014) *
-      gaussian(y, 1.579, 0.012) *
-      (hero ? 0.017 : 0.022);
-    const lips = gaussian(x, 0, 0.027) * gaussian(y, 1.543, 0.01) * 0.009;
-    const chin = gaussian(x, 0, 0.029) * gaussian(y, 1.513, 0.018) * 0.007;
-    const brow =
-      (gaussian(x, -0.033, 0.024) + gaussian(x, 0.033, 0.024)) *
-      gaussian(y, 1.634, 0.011) *
-      (0.003 + 0.004 * palette.age);
-    return (
-      sz * rz -
-      0.003 +
-      (cheeks + sockets + bridge + tip + lips + chin + brow) *
-        Math.min(1, sz * 4)
-    );
-  };
-  const face = new THREE.SphereGeometry(1, 48, 32);
-  const p = face.getAttribute("position");
-  for (let i = 0; i < p.count; i++) {
-    const sx = p.getX(i),
-      sy = p.getY(i),
-      sz = p.getZ(i);
-    const jaw = lerp(
-      palette.jaw,
-      1,
-      THREE.MathUtils.smoothstep(sy, -0.92, -0.1),
-    );
-    const chin = sy < -0.75 ? -0.75 + (sy + 0.75) * 0.35 : sy;
-    const x = sx * rx * jaw,
-      y = cy + chin * ry;
-    let z = sz * rz - 0.003;
-    if (sz > 0) {
-      z = frontSurface(x, y);
-    }
-    p.setXYZ(i, x, y, z);
-  }
-  face.computeVertexNormals();
-  parts.push(
-    paint(face, (v) => {
-      const c = skin.clone();
-      const front = THREE.MathUtils.smoothstep(v.z, 0.015, 0.07);
-      const blush =
-        (gaussian(v.x, -0.048, 0.025) + gaussian(v.x, 0.048, 0.025)) *
-        gaussian(v.y, 1.577, 0.028) *
-        front;
-      c.lerp(lip, blush * (hero ? 0.18 : 0.05));
-      const underEye =
-        (gaussian(v.x, -0.032, 0.022) + gaussian(v.x, 0.032, 0.022)) *
-        gaussian(v.y, 1.605, 0.008) *
-        front;
-      c.lerp(shade, underEye * (0.12 + palette.age * 0.22));
-      const side =
-        0.96 + 0.04 * Math.sin(v.y * 270 + v.x * 139) * Math.sin(v.z * 331);
-      return c.multiplyScalar(side);
-    }),
-  );
-
-  for (const side of [-1, 1]) {
-    const eyeX = side * 0.032,
-      eyeY = 1.614;
-    const positions: number[] = [],
-      colours: number[] = [],
-      indices: number[] = [];
-    const nx = 20,
-      ny = 6,
-      white = colour(hero ? 0xb8b3a6 : 0xa3a18e),
-      iris = colour(palette.iris),
-      pupil = colour(0x171b18);
-    for (let j = 0; j <= ny; j++)
-      for (let i = 0; i <= nx; i++) {
-        const u = (i / nx) * 2 - 1,
-          v = (j / ny) * 2 - 1;
-        const x = eyeX + u * 0.0143;
-        const y = eyeY + v * 0.0047 * (1 - u * u) + side * u * 0.0012;
-        const z =
-          frontSurface(x, y) + 0.0018 + 0.0024 * (1 - u * u) * (1 - v * v);
-        positions.push(x, y, z);
-        const distance = Math.hypot(u * 0.0143, (y - eyeY) * 0.93);
-        const c = distance < 0.0025 ? pupil : distance < 0.0053 ? iris : white;
-        colours.push(c.r, c.g, c.b);
-        if (i < nx && j < ny) {
-          const a = j * (nx + 1) + i,
-            b = a + nx + 1;
-          indices.push(a, a + 1, b, b, a + 1, b + 1);
-        }
-      }
-    const eye = new THREE.BufferGeometry();
-    eye.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(positions, 3),
-    );
-    eye.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
-    eye.setIndex(indices);
-    eye.computeVertexNormals();
-    parts.push(eye);
-    const lid: THREE.Vector3[] = [],
-      lower: THREE.Vector3[] = [],
-      brow: THREE.Vector3[] = [];
-    for (let i = 0; i <= 10; i++) {
-      const u = (i / 10) * 2 - 1;
-      const x = eyeX + u * 0.0146,
-        upperY = eyeY + 0.0051 * (1 - u * u) + side * u * 0.0012,
-        lowerY = eyeY - 0.0045 * (1 - u * u) + side * u * 0.0012;
-      lid.push(new THREE.Vector3(x, upperY, frontSurface(x, upperY) + 0.0026));
-      lower.push(new THREE.Vector3(x, lowerY, frontSurface(x, lowerY) + 0.002));
-      const bx = eyeX + u * 0.019,
-        by = 1.634 + 0.003 * (1 - u * u) + side * u * 0.002;
-      brow.push(new THREE.Vector3(bx, by, frontSurface(bx, by) + 0.0012));
-    }
-    parts.push(
-      tube(lid, hero ? 0.00065 : 0.0009, hero ? 0x4b3930 : 0x514f41, 12),
-    );
-    parts.push(tube(lower, 0.00065, palette.skin, 12));
-    parts.push(tube(brow, hero ? 0.0015 : 0.002, palette.hair, 10));
-    // Nostrils are recessed small openings, not a round bead attached to a face.
-    const nostril = new THREE.SphereGeometry(1, 8, 5);
-    nostril.scale(0.0031, 0.0015, 0.0012);
-    nostril.translate(
-      side * 0.0076,
-      1.574,
-      frontSurface(side * 0.0076, 1.574) + 0.0005,
-    );
-    parts.push(solid(nostril, 0x6b574b));
-    const ear = new THREE.SphereGeometry(1, 10, 8);
-    ear.scale(0.0108, 0.022, 0.011);
-    ear.translate(side * 0.081, 1.583, -0.003);
-    parts.push(solid(ear, palette.skin));
-  }
-  // Separate volumetric closed lips, with a cupid's bow and a narrow seam.
-  for (const upper of [true, false]) {
-    const positions: number[] = [],
-      indices: number[] = [];
-    for (let row = 0; row <= 4; row++)
-      for (let i = 0; i <= 20; i++) {
-        const u = (i / 20) * 2 - 1,
-          width = Math.max(0, 1 - u * u),
-          v = row / 4;
-        const cupid = 0.0015 * gaussian(Math.abs(u), 0.32, 0.23);
-        const y =
-          1.542 +
-          (upper ? 1 : -1) * v * (upper ? 0.0032 + cupid : 0.0036) * width;
-        const x = u * (hero ? 0.021 : 0.023),
-          z =
-            frontSurface(x, y) +
-            0.0007 +
-            0.0035 * width * Math.sin(v * Math.PI * 0.78);
-        positions.push(x, y, z);
-        if (i < 20 && row < 4) {
-          const a = row * 21 + i,
-            b = a + 21;
-          indices.push(a, a + 1, b, b, a + 1, b + 1);
-        }
-      }
-    const mouth = new THREE.BufferGeometry();
-    mouth.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(positions, 3),
-    );
-    mouth.setIndex(indices);
-    mouth.computeVertexNormals();
-    parts.push(solid(mouth, palette.lips));
-  }
-  parts.push(
-    tube(
-      [-0.019, 0, 0.019].map(
-        (x) => new THREE.Vector3(x, 1.542, frontSurface(x, 1.542) + 0.0015),
-      ),
-      0.0006,
-      0x624e49,
-      12,
-    ),
-  );
-
-  const hair = new THREE.BufferGeometry(),
-    hp: number[] = [],
-    hi: number[] = [];
-  const rings = 12,
-    sides = 48;
-  for (let j = 0; j <= rings; j++)
-    for (let i = 0; i <= sides; i++) {
-      const theta = (i / sides) * Math.PI * 2,
-        u = j / rings;
-      const wrapped = Math.atan2(Math.sin(theta), Math.cos(theta));
-      const front = Math.cos(theta);
-      const fringe = hero ? 0.022 * gaussian(wrapped, -0.37, 0.42) : 0.008;
-      const lowerHair = hero
-        ? 1.501 + 0.004 * Math.cos(theta * 7)
-        : 1.544 + 0.015 * Math.cos(theta * 3);
-      const bottom = lerp(
-        lowerHair,
-        1.669 - fringe,
-        THREE.MathUtils.smoothstep(front, 0.35, 0.86),
-      );
-      const y = lerp(1.716, bottom, Math.pow(u, 1.22));
-      const crownHeight = (Math.max(1.591, y) - 1.591) / 0.125;
-      const radius = Math.sqrt(Math.max(0, 1 - crownHeight * crownHeight));
-      const wave = 1 + 0.018 * Math.cos(theta * 7 + u * 5);
-      hp.push(
-        Math.sin(theta) * (rx + 0.011) * radius * wave,
-        y,
-        Math.cos(theta) * (front > 0 ? 0.091 : 0.107) * radius * wave - 0.006,
-      );
-      if (i < sides && j < rings) {
-        const a = j * (sides + 1) + i,
-          b = a + sides + 1;
-        hi.push(a, b, a + 1, b, b + 1, a + 1);
-      }
-    }
-  hair.setAttribute("position", new THREE.Float32BufferAttribute(hp, 3));
-  hair.setIndex(hi);
-  hair.computeVertexNormals();
-  const hairColour = colour(palette.hair);
-  parts.push(
-    paint(hair, (v) =>
-      hairColour
-        .clone()
-        .multiplyScalar(
-          0.89 + (0.12 * (1 + Math.sin(v.x * 127 + v.z * 61))) / 2,
-        ),
-    ),
-  );
-  // A few independently shaped locks break the cap silhouette at the cheeks.
-  for (const side of [-1, 1])
-    for (let strand = 0; strand < 3; strand++) {
-      const theta = side * (0.76 + strand * 0.12),
-        x = Math.sin(theta) * (rx + 0.012),
-        z = Math.cos(theta) * 0.09 - 0.004;
-      parts.push(
-        tube(
-          [
-            new THREE.Vector3(x * 0.92, 1.672, z * 0.75),
-            new THREE.Vector3(x * 1.04, 1.591, z),
-            new THREE.Vector3(
-              x * 0.91,
-              hero ? 1.504 + strand * 0.005 : 1.55,
-              z * 0.79,
-            ),
-          ],
-          0.006 - strand * 0.0008,
-          palette.hair,
-          10,
-        ),
-      );
-    }
-  if (!hero) {
-    const scar = [
-      [-0.05, 1.633],
-      [-0.04, 1.607],
-      [-0.029, 1.584],
-    ].map(([x, y]) => new THREE.Vector3(x, y, frontSurface(x, y) + 0.0008));
-    parts.push(
-      tube(scar, 0.0009, kind === "watcher" ? 0x685b50 : 0x826d61, 12),
-    );
-    for (const y of [1.65, 1.656])
-      parts.push(
-        tube(
-          [-0.029, 0, 0.029].map(
-            (x) => new THREE.Vector3(x, y, frontSurface(x, y) + 0.0007),
-          ),
-          0.00055,
-          0x777969,
-          10,
-        ),
-      );
-  }
-  // All facial components share one draw call and smooth physical lighting.
-  const geometry = mergeGeometries(parts)!;
-  for (const part of parts) part.dispose();
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.91,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = "fixes1_sculpted_head";
-  mesh.userData.fixes1OwnedGeometry = true;
-  group.add(mesh);
-  const mouthMarker = new THREE.Object3D();
-  mouthMarker.name = "fixes1_mouth";
-  mouthMarker.position.set(0, 1.542, frontSurface(0, 1.542) + 0.003);
-  group.add(mouthMarker);
-  return group;
+  const head = humanHead(kind, palettes[kind]);
+  head.position.y = -0.025;
+  return head;
 }
 
 function indexView(source: THREE.BufferGeometry) {
@@ -423,6 +68,8 @@ type AppearanceState = {
   matrices: THREE.Matrix4[];
   enabled: { value: number };
   strapPath: { value: THREE.Vector2[] };
+  strapSurface: { value: THREE.Vector3[] };
+  strapNormals: { value: THREE.Vector2[] };
 };
 const states = new WeakMap<THREE.Object3D, AppearanceState>();
 const garmentShaders = new WeakMap<
@@ -484,6 +131,8 @@ function coverageShader(mesh: THREE.Mesh, state: AppearanceState) {
       shader.uniforms.new0ArmourEnabled = state.enabled;
       shader.uniforms.new0ArmourMatrices = { value: state.matrices };
       shader.uniforms.new0StrapPath = state.strapPath;
+      shader.uniforms.new0StrapSurface = state.strapSurface;
+      shader.uniforms.new0StrapNormals = state.strapNormals;
       shader.vertexShader =
         `attribute float fixes1Coverage;\nuniform mat4 new0ArmourMatrices[4];\nvarying float vArmourCoverage;\nvarying vec3 vArmourLocal;\nvarying vec3 vCapLocalL;\nvarying vec3 vCapLocalR;\nvarying vec3 vFauldLocal;\n` +
         shader.vertexShader;
@@ -498,20 +147,24 @@ function coverageShader(mesh: THREE.Mesh, state: AppearanceState) {
         vFauldLocal=(new0ArmourMatrices[3]*coveredWorld).xyz;`,
       );
       shader.fragmentShader =
-        `uniform float new0ArmourEnabled;\nuniform vec2 new0StrapPath[9];\nvarying float vArmourCoverage;\nvarying vec3 vArmourLocal;\nvarying vec3 vCapLocalL;\nvarying vec3 vCapLocalR;\nvarying vec3 vFauldLocal;
-        bool beneathCap(vec3 p){return p.y>-.009&&p.y<.071&&dot(p.xz/vec2(.109,.119),p.xz/vec2(.109,.119))<1.0;}
-        bool beneathPlate(vec3 p){float top=.195+.045*clamp(abs(p.x)/.2005,0.0,1.0);float t=clamp((p.y+.090)/(top+.090),0.0,1.0);float w=.176+.048*sin(t*3.14159265*.83);return abs(p.x)<w+.009&&p.y>-.098&&p.y<top+.009&&p.z>-.194&&p.z<.204;}
-        bool beneathFauld(vec3 p){float front=max(0.0,(p.z/.155)/max(length(p.xz/vec2(.184,.155)),.001));return p.y>-.168+.065*front&&p.y<-.077&&dot(p.xz/vec2(.195,.165),p.xz/vec2(.195,.165))<1.0;}
+        `uniform float new0ArmourEnabled;\nuniform vec2 new0StrapPath[9];uniform vec3 new0StrapSurface[21];uniform vec2 new0StrapNormals[21];\nvarying float vArmourCoverage;\nvarying vec3 vArmourLocal;\nvarying vec3 vCapLocalL;\nvarying vec3 vCapLocalR;\nvarying vec3 vFauldLocal;
+        bool beneathCap(vec3 p,float side){if(dot(p,p)>.0289)return false;vec3 axis=normalize(vec3(.16*side,-.24,-.01));vec3 outer=normalize(vec3(0.,1.,0.)-axis*axis.y);float t=dot(p,axis);if(t<-.001||t>.145)return false;vec3 radial=p-axis*t;float angle=atan(dot(radial,normalize(cross(axis,outer))),dot(radial,outer));for(int layer=0;layer<3;layer++){float start=.003+float(layer)*.041;float radius=.068-.107*t+(2.-float(layer))*.001;if(t>start-.0001&&t<start+.0571&&abs(angle)<1.502&&abs(length(radial)-radius)<.0011)return true;}vec3 across=normalize(cross(axis,outer));for(int i=0;i<3;i++){float end=.060+float(i)*.041;float radius=.068-.107*end+(2.-float(i))*.001;if(abs(t-end)<.0017){for(int k=0;k<16;k++){float a0=-1.5+float(k)*3./16.,a1=-1.5+float(k+1)*3./16.;vec3 q0=axis*end+(outer*cos(a0)+across*sin(a0))*radius,q1=axis*end+(outer*cos(a1)+across*sin(a1))*radius;vec3 v=q1-q0;float u=clamp(dot(p-q0,v)/dot(v,v),0.,1.);if(distance(p,q0+v*u)<.0017)return true;}}float rivetT=.018+float(i)*.041;float rivetR=.068-.107*rivetT+(3.-float(i))*.001;vec3 middle=axis*rivetT+outer*cos(1.24)*rivetR;vec3 offset=across*sin(1.24)*rivetR;if(distance(p,middle+offset)<.0027||distance(p,middle-offset)<.0027)return true;}return false;}
+        bool beneathPlate(vec3 p){if(p.y<-.0931||p.y>.2431||abs(p.x)>.195||p.z<-.163||p.z>.160)return false;float t=.5,w=.1738,top=.23;for(int i=0;i<3;i++){w=.156+.035*sin(t*3.14159265*.83);top=.195+.045*clamp(abs(p.x)/w,0.,1.);t=clamp((p.y+.090)/(top+.090),0.,1.);}w=.156+.035*sin(t*3.14159265*.83);float d=p.z<0.?.159-t*.009:.130+sin(t*3.14159265)*.016;float keel=p.z<0.?0.:.01*exp(-((p.x/w/.23)*(p.x/w/.23)))*sin(t*3.14159265);float radius=length(vec2(p.x/w,(p.z-keel)/d));return p.y>-.0931&&p.y<top+.0031&&abs(radius-1.)*min(w,d)<.0031;}
+        bool beneathRim(vec3 p){if(!((p.y>.190&&p.y<.245)||(p.y>-.094&&p.y<-.086)))return false;float upper=step(0.,p.y);float w=mix(.156,.156+.035*sin(3.14159265*.83),upper);float back=mix(.159,.150,upper);float a=atan(p.x/w,p.z/(p.z<0.?back:.130));for(int i=0;i<3;i++){float s=sin(a),c=cos(a),d=c<0.?back:.130;vec3 q=vec3(w*s,mix(-.09,.195+.045*abs(s),upper),d*c);vec3 tangent=vec3(w*c,upper*.045*sign(s)*c,-d*s);vec3 second=vec3(-w*s,-upper*.045*abs(s),-d*c);a-=dot(q-p,tangent)/max(dot(tangent,tangent)+dot(q-p,second),.000001);}float s=sin(a),c=cos(a);vec3 q=vec3(w*s,mix(-.09,.195+.045*abs(s),upper),(c<0.?back:.130)*c);return distance(p,q)<.0031;}
+        bool beneathFauld(vec3 p){float front=max(0.0,(p.z/.155)/max(length(p.xz/vec2(.163,.155)),.001));return p.y>-.168+.065*front&&p.y<-.077&&dot(p.xz/vec2(.172,.165),p.xz/vec2(.172,.165))<1.0;}
         float strapDistanceSquared(vec2 p,vec2 a,vec2 b){vec2 v=b-a;vec2 d=p-a-v*clamp(dot(p-a,v)/dot(v,v),0.0,1.0);return dot(d,d);}
-        bool beneathStrap(vec3 p){if(abs(abs(p.x)-.172)>.022||p.y<.17||p.y>.28||p.z<-.17||p.z>.145)return false;for(int i=1;i<9;i++){if(strapDistanceSquared(p.yz,new0StrapPath[i-1],new0StrapPath[i])<.000036)return true;}return false;}
+        bool beneathStrap(vec3 p){if(abs(p.x)<.1129||abs(p.x)>.1581||p.y<.1674||p.y>.2396||p.z<-.1256||p.z>.1146)return false;vec3 q=vec3(abs(p.x),p.yz);for(int i=1;i<21;i++){vec3 a=new0StrapSurface[i-1],b=new0StrapSurface[i],v=b-a;vec2 na=new0StrapNormals[i-1],dn=new0StrapNormals[i]-na;float t=dot(q.yz-a.yz,v.yz)/dot(v.yz,v.yz),h=0.;if(t<-.2||t>1.2)continue;for(int k=0;k<2;k++){vec2 n=na+dn*t,j=v.yz+dn*h,f=a.yz+v.yz*t+n*h-q.yz;float det=j.x*n.y-j.y*n.x;t-=(f.x*n.y-f.y*n.x)/det;h-=(j.x*f.y-j.y*f.x)/det;}float margin=.0001/length(v.yz);if(t < -margin||t>1.+margin)continue;t=clamp(t,0.,1.);if(abs(q.x-a.x-v.x*t)<.0131&&abs(h)<.0026)return true;}return false;}
+        bool beneathBuckle(vec3 p){if(abs(p.y-.169)>.021||abs(p.z-.116)>.0031||abs(abs(p.x)-.126)>.0161)return false;vec3 q=vec3(abs(p.x)-.126,(p.y-.169)/1.3,p.z-.116);return length(vec2(length(q.xy)-.013,q.z))<.0031;}
+        bool beneathRivet(vec3 p){if(abs(abs(p.x)-.13)>.025||p.y<-.08||p.y>.175||p.z<.08||p.z>.13)return false;for(int i=0;i<3;i++){float y=i==0?-.075:(i==1?.045:.17);float t=clamp((y+.09)/(.195+.045*.72+.09),0.,1.);float w=.156+.035*sin(t*3.14159265*.83),d=.130+sin(t*3.14159265)*.016;vec3 q=vec3(abs(p.x)-.72*w,p.y-y,(p.z-sqrt(1.-.72*.72)*d-.0005)/.55);if(length(q)<.0049)return true;}return false;}
         ` + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <clipping_planes_fragment>",
         `#include <clipping_planes_fragment>
-        if(new0ArmourEnabled>.5&&vArmourCoverage>.99&&(beneathPlate(vArmourLocal)||beneathCap(vCapLocalL)||beneathCap(vCapLocalR)||beneathStrap(vArmourLocal)||beneathFauld(vFauldLocal)))discard;`,
+        if(new0ArmourEnabled>.5&&vArmourCoverage>.99&&(beneathPlate(vArmourLocal)||beneathRim(vArmourLocal)||beneathCap(vCapLocalL,-1.)||beneathCap(vCapLocalR,1.)||beneathStrap(vArmourLocal)||beneathBuckle(vArmourLocal)||beneathRivet(vArmourLocal)||beneathFauld(vFauldLocal)))discard;`,
       );
     };
-    m.customProgramCacheKey = () => key + "_fixes1_armour_layer";
+    m.customProgramCacheKey = () =>
+      key + "_fixes2_fitted_armour_metal_details_layer";
     m.needsUpdate = true;
   }
   const previous = mesh.onBeforeRender;
@@ -549,7 +202,7 @@ function fittedNeck(
     const rings = 8,
       sides = 24,
       base = 1.376,
-      top = 1.525;
+      top = 1.5;
     const c = new THREE.Color(palettes[kind].skin);
     for (let j = 0; j <= rings; j++)
       for (let i = 0; i <= sides; i++) {
@@ -563,7 +216,7 @@ function fittedNeck(
           y,
           Math.cos(a) * rz - lerp(0.006, 0.02, t),
         );
-        const headWeight = THREE.MathUtils.smoothstep(y, 1.474, 1.525),
+        const headWeight = THREE.MathUtils.smoothstep(y, 1.452, 1.5),
           chestWeight =
             (1 - THREE.MathUtils.smoothstep(y, 1.376, 1.424)) * 0.35;
         joints.push(neck, head, chest, 0);
@@ -680,7 +333,7 @@ function fittedNeck(
       }
     if (!previous.has(edge.a)) continue;
     const loop = [edge.a];
-    for (let at = edge.a; at !== edge.b; ) {
+    for (let at = edge.a; at !== edge.b;) {
       at = previous.get(at)!;
       loop.push(at);
     }
@@ -823,6 +476,12 @@ export function applyCharacterAppearance(
     matrices: Array.from({ length: 4 }, () => new THREE.Matrix4()),
     enabled: { value: 0 },
     strapPath: { value: Array.from({ length: 9 }, () => new THREE.Vector2()) },
+    strapSurface: {
+      value: Array.from({ length: 21 }, () => new THREE.Vector3()),
+    },
+    strapNormals: {
+      value: Array.from({ length: 21 }, () => new THREE.Vector2()),
+    },
   };
   let sourceBody: THREE.SkinnedMesh | undefined;
   rig.traverse((o) => {
@@ -951,6 +610,12 @@ export function registerArmourShoulders(
   if (state && armour?.userData.fixes1StrapPath)
     for (let i = 0; i < 9; i++)
       state.strapPath.value[i].copy(armour.userData.fixes1StrapPath[i]);
+  if (state && armour?.userData.fixes2StrapSurface)
+    for (let i = 0; i < 21; i++)
+      state.strapSurface.value[i].copy(armour.userData.fixes2StrapSurface[i]);
+  if (state && armour?.userData.fixes2StrapNormals)
+    for (let i = 0; i < 21; i++)
+      state.strapNormals.value[i].copy(armour.userData.fixes2StrapNormals[i]);
 }
 export function setArmourCoverage(rig: THREE.Object3D, equipped: boolean) {
   const state = states.get(rig);
@@ -960,57 +625,218 @@ export function setArmourCoverage(rig: THREE.Object3D, equipped: boolean) {
   for (const shoulder of state.shoulders) shoulder.visible = equipped;
   if (state.fauld) state.fauld.visible = equipped;
 }
+// The rolled rim rises towards the shoulders, so a vertical y margin does not
+// describe its round section. Match the actual 3 mm rim using the nearest
+// point on its curved centreline, including only a 0.1 mm sampling tolerance.
+function beneathArmourRim(p: THREE.Vector3) {
+  if (!((p.y > 0.19 && p.y < 0.245) || (p.y > -0.094 && p.y < -0.086)))
+    return false;
+  const upper = p.y > 0 ? 1 : 0,
+    width = upper ? 0.156 + 0.035 * Math.sin(Math.PI * 0.83) : 0.156;
+  const back = upper ? 0.15 : 0.159;
+  let angle = Math.atan2(p.x / width, p.z / (p.z < 0 ? back : 0.13));
+  for (let i = 0; i < 3; i++) {
+    const s = Math.sin(angle),
+      c = Math.cos(angle),
+      d = c < 0 ? back : 0.13;
+    const x = width * s - p.x,
+      y = (upper ? 0.195 + 0.045 * Math.abs(s) : -0.09) - p.y,
+      z = d * c - p.z;
+    const tx = width * c,
+      ty = upper * 0.045 * Math.sign(s) * c,
+      tz = -d * s;
+    const denominator =
+      tx * tx +
+      ty * ty +
+      tz * tz -
+      x * width * s -
+      y * upper * 0.045 * Math.abs(s) -
+      z * d * c;
+    angle -= (x * tx + y * ty + z * tz) / Math.max(denominator, 0.000001);
+  }
+  const s = Math.sin(angle),
+    c = Math.cos(angle);
+  return (
+    Math.hypot(
+      width * s - p.x,
+      (upper ? 0.195 + 0.045 * Math.abs(s) : -0.09) - p.y,
+      (c < 0 ? back : 0.13) * c - p.z,
+    ) < 0.0031
+  );
+}
 // Same coverage rule as the material, exposed for the offline layer test.
 export function armourCoverageAt(rig: THREE.Object3D, point: THREE.Vector3) {
   const state = states.get(rig);
   if (!state?.armoured || !state.armour) return false;
   updateArmourMatrices(state);
-  const p = point.clone().applyMatrix4(state.matrices[0]),
-    top = 0.195 + 0.045 * THREE.MathUtils.clamp(Math.abs(p.x) / 0.2005, 0, 1),
+  const p = point.clone().applyMatrix4(state.matrices[0]);
+  let t = 0.5,
+    width = 0.1738,
+    top = 0.23;
+  for (let i = 0; i < 3; i++) {
+    width = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83);
+    top = 0.195 + 0.045 * THREE.MathUtils.clamp(Math.abs(p.x) / width, 0, 1);
     t = THREE.MathUtils.clamp((p.y + 0.09) / (top + 0.09), 0, 1);
-  const width = 0.176 + 0.048 * Math.sin(t * Math.PI * 0.83);
+  }
+  width = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83);
+  const depth =
+      p.z < 0 ? 0.159 - t * 0.009 : 0.13 + Math.sin(t * Math.PI) * 0.016,
+    keel =
+      p.z < 0
+        ? 0
+        : 0.01 * Math.exp(-((p.x / width / 0.23) ** 2)) * Math.sin(t * Math.PI),
+    radius = Math.hypot(p.x / width, (p.z - keel) / depth);
   if (
-    Math.abs(p.x) < width + 0.009 &&
-    p.y > -0.098 &&
-    p.y < top + 0.009 &&
-    p.z > -0.194 &&
-    p.z < 0.204
+    p.y > -0.0931 &&
+    p.y < top + 0.0031 &&
+    Math.abs(radius - 1) * Math.min(width, depth) < 0.0031
   )
     return true;
-  if (Math.abs(Math.abs(p.x) - 0.172) < 0.022) {
-    for (let i = 1; i < 9; i++) {
-      const a = state.strapPath.value[i - 1],
-        b = state.strapPath.value[i],
-        dy = b.x - a.x,
-        dz = b.y - a.y,
-        u = THREE.MathUtils.clamp(
-          ((p.y - a.x) * dy + (p.z - a.y) * dz) / (dy * dy + dz * dz),
-          0,
-          1,
-        );
-      if (Math.hypot(p.y - a.x - dy * u, p.z - a.y - dz * u) < 0.006)
+  if (beneathArmourRim(p)) return true;
+  // The buckle torus is actual solid hardware, distinct from the curved
+  // leather strap and breastplate. Match its existing 1.3 vertical scale.
+  if (
+    Math.hypot(
+      Math.hypot(Math.abs(p.x) - 0.126, (p.y - 0.169) / 1.3) - 0.013,
+      p.z - 0.116,
+    ) < 0.0031
+  )
+    return true;
+  for (const y of [-0.075, 0.045, 0.17]) {
+    const t = THREE.MathUtils.clamp(
+        (y + 0.09) / (0.195 + 0.045 * 0.72 + 0.09),
+        0,
+        1,
+      ),
+      w = 0.156 + 0.035 * Math.sin(t * Math.PI * 0.83),
+      d = 0.13 + Math.sin(t * Math.PI) * 0.016;
+    if (
+      Math.hypot(
+        Math.abs(p.x) - 0.72 * w,
+        p.y - y,
+        (p.z - Math.sqrt(1 - 0.72 ** 2) * d - 0.0005) / 0.55,
+      ) < 0.0049
+    )
+      return true;
+  }
+  if (
+    Math.abs(p.x) > 0.1129 &&
+    Math.abs(p.x) < 0.1581 &&
+    p.y > 0.1674 &&
+    p.y < 0.2396 &&
+    p.z > -0.1256 &&
+    p.z < 0.1146
+  ) {
+    for (let i = 1; i < 21; i++) {
+      const a = state.strapSurface.value[i - 1],
+        b = state.strapSurface.value[i],
+        na = state.strapNormals.value[i - 1],
+        nb = state.strapNormals.value[i],
+        dy = b.y - a.y,
+        dz = b.z - a.z,
+        dny = nb.x - na.x,
+        dnz = nb.y - na.y;
+      let u = ((p.y - a.y) * dy + (p.z - a.z) * dz) / (dy * dy + dz * dz),
+        h = 0;
+      if (u < -0.2 || u > 1.2) continue;
+      for (let k = 0; k < 2; k++) {
+        const ny = na.x + dny * u,
+          nz = na.y + dnz * u,
+          jy = dy + dny * h,
+          jz = dz + dnz * h,
+          fy = a.y + dy * u + ny * h - p.y,
+          fz = a.z + dz * u + nz * h - p.z,
+          det = jy * nz - jz * ny;
+        u -= (fy * nz - fz * ny) / det;
+        h -= (jy * fz - jz * fy) / det;
+      }
+      const margin = 0.0001 / Math.hypot(dy, dz);
+      if (u < -margin || u > 1 + margin) continue;
+      u = THREE.MathUtils.clamp(u, 0, 1);
+      if (
+        Math.abs(Math.abs(p.x) - a.x - (b.x - a.x) * u) < 0.0131 &&
+        Math.abs(h) < 0.0026
+      )
         return true;
     }
   }
   for (let i = 1; i < 3; i++) {
     p.copy(point).applyMatrix4(state.matrices[i]);
-    if (
-      p.y > -0.009 &&
-      p.y < 0.071 &&
-      (p.x / 0.109) ** 2 + (p.z / 0.119) ** 2 < 1
-    )
-      return true;
+    if (p.lengthSq() > 0.0289) continue;
+    const axis = new THREE.Vector3(
+      0.16 * (i === 1 ? -1 : 1),
+      -0.24,
+      -0.01,
+    ).normalize();
+    const outer = new THREE.Vector3(0, 1, 0)
+      .addScaledVector(axis, -axis.y)
+      .normalize();
+    const along = p.dot(axis);
+    if (along < -0.001 || along > 0.145) continue;
+    const radial = p.clone().addScaledVector(axis, -along);
+    const capAngle = Math.atan2(
+      radial.dot(new THREE.Vector3().crossVectors(axis, outer).normalize()),
+      radial.dot(outer),
+    );
+    for (let layer = 0; layer < 3; layer++) {
+      const start = 0.003 + layer * 0.041,
+        capRadius = 0.068 - 0.107 * along + (2 - layer) * 0.001;
+      if (
+        along > start - 0.0001 &&
+        along < start + 0.0571 &&
+        Math.abs(capAngle) < 1.502 &&
+        Math.abs(radial.length() - capRadius) < 0.0011
+      )
+        return true;
+    }
+    const across = new THREE.Vector3().crossVectors(axis, outer).normalize();
+    for (let layer = 0; layer < 3; layer++) {
+      const end = 0.06 + layer * 0.041,
+        radius = 0.068 - 0.107 * end + (2 - layer) * 0.001;
+      if (Math.abs(along - end) < 0.0017)
+        for (let k = 0; k < 16; k++) {
+          const a0 = -1.5 + (k * 3) / 16,
+            a1 = -1.5 + ((k + 1) * 3) / 16,
+            q0 = axis
+              .clone()
+              .multiplyScalar(end)
+              .addScaledVector(outer, Math.cos(a0) * radius)
+              .addScaledVector(across, Math.sin(a0) * radius),
+            q1 = axis
+              .clone()
+              .multiplyScalar(end)
+              .addScaledVector(outer, Math.cos(a1) * radius)
+              .addScaledVector(across, Math.sin(a1) * radius),
+            v = q1.sub(q0),
+            u = THREE.MathUtils.clamp(
+              p.clone().sub(q0).dot(v) / v.lengthSq(),
+              0,
+              1,
+            );
+          if (p.distanceTo(q0.addScaledVector(v, u)) < 0.0017) return true;
+        }
+      const rivetT = 0.018 + layer * 0.041,
+        rivetR = 0.068 - 0.107 * rivetT + (3 - layer) * 0.001;
+      for (const angle of [-1.24, 1.24]) {
+        const rivet = axis
+          .clone()
+          .multiplyScalar(rivetT)
+          .addScaledVector(outer, Math.cos(angle) * rivetR)
+          .addScaledVector(across, Math.sin(angle) * rivetR);
+        if (p.distanceTo(rivet) < 0.0027) return true;
+      }
+    }
   }
   if (state.fauld) {
     p.copy(point).applyMatrix4(state.matrices[3]);
     const front = Math.max(
       0,
-      p.z / 0.155 / Math.max(Math.hypot(p.x / 0.184, p.z / 0.155), 0.001),
+      p.z / 0.155 / Math.max(Math.hypot(p.x / 0.163, p.z / 0.155), 0.001),
     );
     if (
       p.y > -0.168 + 0.065 * front &&
       p.y < -0.077 &&
-      (p.x / 0.195) ** 2 + (p.z / 0.165) ** 2 < 1
+      (p.x / 0.172) ** 2 + (p.z / 0.165) ** 2 < 1
     )
       return true;
   }

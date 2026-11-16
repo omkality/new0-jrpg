@@ -3,6 +3,8 @@ import { Campaign, type ScenarioId } from "./campaign.ts";
 import { ENEMIES, type MoveInput } from "./game.ts";
 import { RouteNavigation } from "./route-navigation.ts";
 import { WEAPONS } from "./weapon-spec.ts";
+import { bodyPenetration } from "./body-collision.ts";
+import { floorHeight } from "./world-layout.ts";
 
 const rest: MoveInput = { x: 0, z: 0, guard: false };
 type Step =
@@ -157,6 +159,7 @@ export class CampaignShowcase {
   private healthAtStep = 100;
   private navigation: RouteNavigation;
   private frameDt = 1 / 60;
+  private walkTargets = new WeakMap<object, Point>();
   constructor(game: Campaign, scenario: ScenarioId) {
     this.g = game;
     this.navigation = new RouteNavigation(game);
@@ -297,8 +300,6 @@ export class CampaignShowcase {
     }
     if (this.target !== e) {
       this.target = e;
-      this.fightStage = 0;
-      this.attackBegan = this.dodged = false;
     }
     const dx = e.x - p.x,
       dz = e.z - p.z,
@@ -309,7 +310,7 @@ export class CampaignShowcase {
     if (p.mode === "heal") return rest;
     if (p.hp < 62 && g.flasks > 0) {
       this.label = "Отходим от врагов, чтобы выпить зелье";
-      if (d < 5.2) return { x: -dx / d, z: -dz / d, guard: false };
+      if (d < 5.2) return this.backOff();
       g.heal();
       return rest;
     }
@@ -325,8 +326,11 @@ export class CampaignShowcase {
     if (this.fightStage === 1) {
       this.label = "Читаемый замах и блок";
       if (p.recoil > 0) this.fightStage = 2;
-      if (d > profile.reach - 0.1) return { ...approach(), guard: true };
-      return { ...rest, guard: true };
+      if (d > profile.reach - 0.1) return approach();
+      const imminent =
+        (e.mode === "windup" && e.time > profile.windup - 0.22) ||
+        e.mode === "attack";
+      return { ...rest, guard: imminent && g.guardCooldown <= 0 };
     }
     if (this.fightStage === 2) {
       if (!this.attackBegan) {
@@ -342,7 +346,7 @@ export class CampaignShowcase {
       this.label =
         e.kind === "mimic"
           ? "Выпад пастью / уходим от укуса"
-          : "Перекат под ударом";
+          : "Уходим с линии удара";
       const moment =
         e.kind === "mimic"
           ? e.mode === "attack" && e.time > 0.04
@@ -364,21 +368,54 @@ export class CampaignShowcase {
       else if (p.chain === 2 && p.time > 0.34) g.attack();
       return rest;
     }
-    const cost = 16 * weapon.cost + 18 * weapon.cost + 24 * weapon.cost;
-    if (p.stamina < cost + 2) {
+    const cost =
+      Math.ceil(16 * weapon.cost) +
+      Math.ceil(18 * weapon.cost) +
+      Math.ceil(24 * weapon.cost);
+    if (p.stamina < Math.min(100, cost)) {
       this.label = "Отходим и восстанавливаем выносливость";
-      return d < profile.reach + 1.3
-        ? { x: -dx / d, z: -dz / d, guard: false }
-        : rest;
+      return d < profile.reach + 1.3 ? this.backOff() : rest;
     }
     if (d > weapon.reach - 0.28) return approach();
     if (
       (e.mode === "windup" && e.time > profile.windup * 0.55) ||
       e.mode === "attack"
     )
-      return { ...rest, guard: true };
+      return { ...rest, guard: g.guardCooldown <= 0 };
     g.attack();
     return rest;
+  }
+  // Choose an open escape direction before issuing normal movement input.
+  // Fleeing directly away from the nearest foe can pin the hero against a
+  // second fighter, a chest or the wall. This never changes actor state.
+  private backOff(): MoveInput {
+    const g = this.g,
+      p = g.player;
+    let best = rest,
+      bestScore = -Infinity;
+    for (let i = 0; i < 16; i++) {
+      const angle = (i * Math.PI) / 8,
+        x = Math.sin(angle),
+        z = Math.cos(angle);
+      let clear = true;
+      for (const s of [0.18, 0.36, 0.65])
+        if (!g.walkable(p.x + x * s, p.z + z * s, p.x, p.z, true)) {
+          clear = false;
+          break;
+        }
+      if (!clear) continue;
+      let score = 0;
+      for (const foe of g.foes) {
+        const before = Math.hypot(p.x - foe.x, p.z - foe.z),
+          after = Math.hypot(p.x + x * 0.65 - foe.x, p.z + z * 0.65 - foe.z);
+        score += 1 / Math.max(0.25, before) - 1 / Math.max(0.25, after);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = { x, z, guard: false };
+      }
+    }
+    return best;
   }
   update(dt: number): MoveInput {
     this.frameDt = dt;
@@ -413,11 +450,49 @@ export class CampaignShowcase {
     this.cameraPitch =
       "pitch" in step && step.pitch !== undefined ? step.pitch : 0.08;
     if (step.type === "walk") {
-      if (Math.hypot(step.x - p.x, step.z - p.z) < 0.28) {
+      const next = this.steps[this.index + 1];
+      if (
+        next?.type === "fight" &&
+        Math.hypot(step.x - p.x, step.z - p.z) < 1.4 &&
+        g.foes.some(
+          (e) => Math.hypot(e.x - p.x, e.z - p.z) < ENEMIES[e.kind].reach + 0.5,
+        )
+      ) {
         this.next();
         return rest;
       }
-      const move = this.towards(step, 0.25, true);
+      let goal = this.walkTargets.get(step);
+      if (!goal) {
+        goal = step;
+        const at = { ...p, y: floorHeight(step.x, step.z) },
+          occupied = [...g.enemies.values()].some(
+            (e) => e.hp <= 0 && bodyPenetration(at, step.x, step.z, e) > 0,
+          );
+        if (occupied) {
+          let score = Infinity;
+          for (const radius of [0.8, 1.1, 1.4])
+            for (let i = 0; i < 16; i++) {
+              const x = step.x + Math.sin((i * Math.PI) / 8) * radius,
+                z = step.z + Math.cos((i * Math.PI) / 8) * radius;
+              if (
+                Math.abs(floorHeight(x, z) - at.y) > 0.15 ||
+                !g.walkable(x, z, x, z, true)
+              )
+                continue;
+              const value = radius + Math.hypot(p.x - x, p.z - z) * 0.1;
+              if (value < score) {
+                score = value;
+                goal = { x, z };
+              }
+            }
+        }
+        this.walkTargets.set(step, goal);
+      }
+      if (Math.hypot(goal.x - p.x, goal.z - p.z) < 0.28) {
+        this.next();
+        return rest;
+      }
+      const move = this.towards(goal, 0.25, true);
       if (g.scenario === "escape") {
         const threat = g.foes.find(
           (e) =>

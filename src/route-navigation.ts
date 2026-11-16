@@ -5,7 +5,7 @@ import type { Point } from "./world-layout.ts";
 // actor position, doors, damage or outcomes. The game remains the collision owner.
 export class RouteNavigation {
   private path: Point[] = [];
-  private target = "";
+  private targetPoint?: Point;
   private age = 0;
   private last: Point = { x: NaN, z: NaN };
   private stalled = 0;
@@ -31,26 +31,30 @@ export class RouteNavigation {
   }
   next(goal: Point, dt: number, avoidLiving = false): Point {
     this.avoidLiving = avoidLiving;
-    const p = this.game.player,
-      key = `${goal.x.toFixed(2)}:${goal.z.toFixed(2)}`;
+    const p = this.game.player;
     this.age += dt;
     if (Math.hypot(p.x - this.last.x, p.z - this.last.z) < 0.002)
       this.stalled += dt;
     else this.stalled = 0;
     this.last = { x: p.x, z: p.z };
-    const changed = key !== this.target;
+    // Moving fighters must not restart a partially searched path each 120 Hz
+    // tick. Complete the bounded search, then refresh once the goal moved a
+    // useful distance. A wall-clock budget made routes depend on CPU speed.
+    const changed =
+      !this.targetPoint ||
+      Math.hypot(goal.x - this.targetPoint.x, goal.z - this.targetPoint.z) >
+        0.48;
     if (changed || (!this.search && (this.age > 0.8 || this.stalled > 0.4))) {
       this.direct = this.clear(p, goal);
       this.search = this.direct ? undefined : this.plan(p, goal);
       if (changed) this.path = [];
-      this.target = key;
+      this.targetPoint = { ...goal };
       this.age = 0;
       this.stalled = 0;
     }
     if (this.direct) return goal;
     if (this.search) {
-      const deadline = performance.now() + 1;
-      do {
+      for (let expanded = 0; expanded < 32; expanded++) {
         const result = this.search.next();
         if (result.done) {
           this.path = result.value;
@@ -63,7 +67,7 @@ export class RouteNavigation {
             }
           break;
         }
-      } while (performance.now() < deadline);
+      }
     }
     while (
       this.path.length > 1 &&

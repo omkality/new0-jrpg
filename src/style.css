@@ -242,6 +242,17 @@ a {
 .touch-actions #guard.locked {
   opacity: 0.42;
 }
+.touch-actions #guard::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    #dce5e56b calc(var(--cooldown, 0) * 360deg),
+    transparent 0
+  );
+  pointer-events: none;
+}
 .touch-actions button:active {
   background: #c9d5e663;
   transform: scale(0.96);
