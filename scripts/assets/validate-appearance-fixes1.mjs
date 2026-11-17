@@ -766,7 +766,11 @@ if (!weaponFilter || weaponFilter.includes("unarmed"))
       kind: "pilgrim",
       armour: 0,
     });
-    assert.equal(name, `Evade${side}`, "Empty hands must use a grounded source step");
+    assert.equal(
+      name,
+      `Evade${side}`,
+      "Empty hands must use a grounded source step",
+    );
     if (clipFilter && !clipFilter.includes(name)) continue;
     const clip = clips.get(name),
       duration = Math.max(

@@ -1,4 +1,5 @@
 """Read local demo diagnostics without exposing Telegram identities or sessions."""
+
 import argparse
 import json
 import time
@@ -22,7 +23,13 @@ def main():
     if not row:
         print("Свежих отчётов пока нет")
         return
-    print(json.dumps({"id": row["id"], "created_at": row["created_at"], **json.loads(row["report"])}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"id": row["id"], "created_at": row["created_at"], **json.loads(row["report"])},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -37,7 +37,10 @@ class Settings:
             url = urlparse(value)
             if url.scheme != "https" or not url.hostname or url.username or url.password:
                 raise RuntimeError("SHOP_URL and DROP_URL must be HTTPS URLs without credentials")
-        if min(self.auth_max_age, self.session_ttl, self.run_ttl, self.diagnostic_ttl) <= 0 or self.min_action_interval < 0:
+        if (
+            min(self.auth_max_age, self.session_ttl, self.run_ttl, self.diagnostic_ttl) <= 0
+            or self.min_action_interval < 0
+        ):
             raise RuntimeError("Session/auth/run lifetimes must be positive, action interval non-negative")
         if not 1000 <= self.client_timeout_ms <= 120000 or not 1 <= self.client_bootstrap_attempts <= 3:
             raise RuntimeError("Client request timeout must be 1000..120000 ms and bootstrap attempts 1..3")
