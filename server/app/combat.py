@@ -1,18 +1,27 @@
 """Authoritative prototype rules. A rules change requires a new leaderboard version."""
+
 RULESET = "archive-001"
 MAX_HP = 24
 ENEMY_HP = 32
 INTENTS = ("strike", "heavy", "recover", "strike", "heavy", "recover")
 SECRETS = {
     "inscription": {
-        "title": "Надпись без имени", "text": "До первого шага. После последнего. Какое число остаётся?",
+        "title": "Надпись без имени",
+        "text": "До первого шага. После последнего. Какое число остаётся?",
         "options": [{"id": "zero", "text": "Ноль"}, {"id": "one", "text": "Один"}, {"id": "three", "text": "Три"}],
-        "answer": "zero", "points": 120,
+        "answer": "zero",
+        "points": 120,
     },
     "echo": {
-        "title": "Тихое эхо", "text": "Страж замолчал. Прислушайся: что связывает этот зал с выходом?",
-        "options": [{"id": "gold", "text": "Золото"}, {"id": "signal", "text": "Сигнал"}, {"id": "dust", "text": "Пыль"}],
-        "answer": "signal", "points": 120,
+        "title": "Тихое эхо",
+        "text": "Страж замолчал. Прислушайся: что связывает этот зал с выходом?",
+        "options": [
+            {"id": "gold", "text": "Золото"},
+            {"id": "signal", "text": "Сигнал"},
+            {"id": "dust", "text": "Пыль"},
+        ],
+        "answer": "signal",
+        "points": 120,
     },
 }
 
@@ -22,9 +31,18 @@ class RuleError(ValueError):
 
 
 def initial_state():
-    return {"phase": "explore", "hp": MAX_HP, "enemy_hp": ENEMY_HP, "charge": 0,
-            "turn": 0, "guards": 0, "damage_taken": 0, "secrets": [],
-            "battle_score": 0, "log": "Найди стража у северной арки."}
+    return {
+        "phase": "explore",
+        "hp": MAX_HP,
+        "enemy_hp": ENEMY_HP,
+        "charge": 0,
+        "turn": 0,
+        "guards": 0,
+        "damage_taken": 0,
+        "secrets": [],
+        "battle_score": 0,
+        "log": "Найди стража у северной арки.",
+    }
 
 
 def intent(state):
@@ -36,9 +54,14 @@ def total_score(state):
 
 
 def public_state(state):
-    return {**state, "intent": intent(state), "max_hp": MAX_HP,
-            "enemy_max_hp": ENEMY_HP, "score": total_score(state),
-            "secret_total": len(SECRETS)}
+    return {
+        **state,
+        "intent": intent(state),
+        "max_hp": MAX_HP,
+        "enemy_max_hp": ENEMY_HP,
+        "score": total_score(state),
+        "secret_total": len(SECRETS),
+    }
 
 
 def act(state, action):

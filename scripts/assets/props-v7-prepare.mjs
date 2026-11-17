@@ -1084,21 +1084,17 @@ async function save(name, doc) {
     ),
     materials: root.listMaterials().length,
     primitives: primitives.length,
-    nodes: root
-      .listNodes()
-      .map((n) => ({
-        name: n.getName(),
-        translation: n.getTranslation(),
-        rotation: n.getRotation(),
-      })),
-    clips: root
-      .listAnimations()
-      .map((a) => ({
-        name: a.getName(),
-        duration: Math.max(
-          ...a.listSamplers().map((s) => s.getInput().getMaxNormalized([0])[0]),
-        ),
-      })),
+    nodes: root.listNodes().map((n) => ({
+      name: n.getName(),
+      translation: n.getTranslation(),
+      rotation: n.getRotation(),
+    })),
+    clips: root.listAnimations().map((a) => ({
+      name: a.getName(),
+      duration: Math.max(
+        ...a.listSamplers().map((s) => s.getInput().getMaxNormalized([0])[0]),
+      ),
+    })),
     images: await Promise.all(
       root.listTextures().map(async (t) => {
         const x = await sharp(t.getImage()).metadata();

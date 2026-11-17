@@ -966,20 +966,18 @@ function bake(doc, ctx, d) {
       ),
     ].sort((a, b) => a - b),
     poses = times.map((t) => d.poseAt(t));
-  const a = doc
-    .createAnimation(d.name)
-    .setExtras({
-      license: "CC0-1.0",
-      fullBody: true,
-      retargeted: true,
-      source: d.source.clip,
-      sourceLibrary: d.source.source,
-      semanticDuration: d.duration,
-      contact: d.contact ?? null,
-      link: d.link ?? null,
-      phaseMapping: d.phaseMapping,
-      controllerOwnsHorizontalTravel: true,
-    });
+  const a = doc.createAnimation(d.name).setExtras({
+    license: "CC0-1.0",
+    fullBody: true,
+    retargeted: true,
+    source: d.source.clip,
+    sourceLibrary: d.source.source,
+    semanticDuration: d.duration,
+    contact: d.contact ?? null,
+    link: d.link ?? null,
+    phaseMapping: d.phaseMapping,
+    controllerOwnsHorizontalTravel: true,
+  });
   const buffer = doc.getRoot().listBuffers()[0],
     input = doc
       .createAccessor(d.name + "_time")

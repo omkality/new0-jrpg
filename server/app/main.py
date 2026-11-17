@@ -58,9 +58,18 @@ class StageMetrics(Body):
 
 
 CostKey = Literal[
-    "raf_ms", "callback_cpu_ms", "simulation_cpu_ms", "world_cpu_ms",
-    "environment_cpu_ms", "player_cpu_ms", "props_cpu_ms", "camera_cpu_ms",
-    "npc_cpu_ms", "render_submit_cpu_ms", "hud_cpu_ms", "grain_cpu_ms",
+    "raf_ms",
+    "callback_cpu_ms",
+    "simulation_cpu_ms",
+    "world_cpu_ms",
+    "environment_cpu_ms",
+    "player_cpu_ms",
+    "props_cpu_ms",
+    "camera_cpu_ms",
+    "npc_cpu_ms",
+    "render_submit_cpu_ms",
+    "hud_cpu_ms",
+    "grain_cpu_ms",
 ]
 
 
@@ -128,8 +137,11 @@ def create_app(settings=None):
             raise HTTPException(401, "Открой игру заново")
         digest = hashlib.sha256(authorization[7:].encode()).hexdigest()
         with db.connect() as c:
-            row = c.execute("""SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-                               WHERE s.token_hash=? AND s.expires_at>?""", (digest, time.time())).fetchone()
+            row = c.execute(
+                """SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
+                               WHERE s.token_hash=? AND s.expires_at>?""",
+                (digest, time.time()),
+            ).fetchone()
         if not row:
             raise HTTPException(401, "Сессия закончилась. Открой игру заново")
         return dict(row)
@@ -141,8 +153,10 @@ def create_app(settings=None):
         now = time.time()
         c.execute("DELETE FROM sessions WHERE expires_at<?", (now,))
         token = secrets.token_urlsafe(32)
-        c.execute("INSERT INTO sessions VALUES(?,?,?)", (
-            hashlib.sha256(token.encode()).hexdigest(), user["id"], now + settings.session_ttl))
+        c.execute(
+            "INSERT INTO sessions VALUES(?,?,?)",
+            (hashlib.sha256(token.encode()).hexdigest(), user["id"], now + settings.session_ttl),
+        )
         return {"token": token, "user": identity(user)}
 
     def owned_run(c, run_id, user):
@@ -152,8 +166,13 @@ def create_app(settings=None):
         return dict(row)
 
     def view(row):
-        return {"id": row["id"], "version": row["version"], "revision": row["revision"],
-                "status": row["status"], "state": combat.public_state(json.loads(row["state"]))}
+        return {
+            "id": row["id"],
+            "version": row["version"],
+            "revision": row["revision"],
+            "status": row["status"],
+            "state": combat.public_state(json.loads(row["state"])),
+        }
 
     def mutate(run_id, user, command, payload, transform):
         try:
@@ -163,8 +182,9 @@ def create_app(settings=None):
         with db.connect(write=True) as c:
             row = owned_run(c, run_id, user)
             fingerprint = encode({"payload": payload, "revision": command.expected_revision})
-            previous = c.execute("SELECT * FROM commands WHERE run_id=? AND request_id=?",
-                                 (run_id, command.request_id)).fetchone()
+            previous = c.execute(
+                "SELECT * FROM commands WHERE run_id=? AND request_id=?", (run_id, command.request_id)
+            ).fetchone()
             if previous:
                 if previous["payload"] != fingerprint:
                     raise HTTPException(409, "Это действие уже использовано")
@@ -184,8 +204,10 @@ def create_app(settings=None):
             except combat.RuleError as exc:
                 raise HTTPException(400, str(exc))
             row.update(state=encode(state), revision=row["revision"] + 1, updated_at=time.time())
-            c.execute("UPDATE runs SET state=?,revision=?,updated_at=? WHERE id=?",
-                      (row["state"], row["revision"], row["updated_at"], run_id))
+            c.execute(
+                "UPDATE runs SET state=?,revision=?,updated_at=? WHERE id=?",
+                (row["state"], row["revision"], row["updated_at"], run_id),
+            )
             result = view(row)
             c.execute("INSERT INTO commands VALUES(?,?,?,?)", (run_id, command.request_id, fingerprint, encode(result)))
             return result
@@ -198,24 +220,42 @@ def create_app(settings=None):
 
     @app.get("/api/config")
     def config():
-        return {"version": settings.version, "title": settings.title, "allow_guest": settings.allow_guest,
-                "bot_username": settings.bot_username, "shop_url": settings.shop_url, "drop_url": settings.drop_url,
-                "request_timeout_ms": settings.client_timeout_ms, "bootstrap_attempts": settings.client_bootstrap_attempts,
-                "competition_open": settings.competition_open, "attempt_limit": settings.attempt_limit,
-                "ruleset": combat.RULESET, "rules": {"victory": 1000, "hp": 25, "heavy_guard": 40,
-                "turn_cost": 30, "secret": 120, "tie": "shared_place"}}
+        return {
+            "version": settings.version,
+            "title": settings.title,
+            "allow_guest": settings.allow_guest,
+            "bot_username": settings.bot_username,
+            "shop_url": settings.shop_url,
+            "drop_url": settings.drop_url,
+            "request_timeout_ms": settings.client_timeout_ms,
+            "bootstrap_attempts": settings.client_bootstrap_attempts,
+            "competition_open": settings.competition_open,
+            "attempt_limit": settings.attempt_limit,
+            "ruleset": combat.RULESET,
+            "rules": {
+                "victory": 1000,
+                "hp": 25,
+                "heavy_guard": 40,
+                "turn_cost": 30,
+                "secret": 120,
+                "tie": "shared_place",
+            },
+        }
 
     @app.post("/api/auth/telegram")
     def telegram_login(body: Login):
         try:
-            profile = validate_init_data(body.init_data, settings.bot_id, settings.bot_token,
-                                         max_age=settings.auth_max_age)
+            profile = validate_init_data(
+                body.init_data, settings.bot_id, settings.bot_token, max_age=settings.auth_max_age
+            )
         except AuthError as exc:
             raise HTTPException(401, str(exc))
         with db.connect(write=True) as c:
-            c.execute("""INSERT INTO users(telegram_id,display_name,is_guest) VALUES(?,?,0)
+            c.execute(
+                """INSERT INTO users(telegram_id,display_name,is_guest) VALUES(?,?,0)
                          ON CONFLICT(telegram_id) DO UPDATE SET display_name=excluded.display_name""",
-                      (profile["telegram_id"], profile["display_name"]))
+                (profile["telegram_id"], profile["display_name"]),
+            )
             user = c.execute("SELECT * FROM users WHERE telegram_id=?", (profile["telegram_id"],)).fetchone()
             return session(c, dict(user))
 
@@ -227,17 +267,28 @@ def create_app(settings=None):
         report_id = str(uuid4())
         with db.connect(write=True) as c:
             c.execute("DELETE FROM device_reports WHERE created_at<?", (now - settings.diagnostic_ttl,))
-            recent = c.execute("SELECT created_at FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 1", (user["id"],)).fetchone()
+            recent = c.execute(
+                "SELECT created_at FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 1", (user["id"],)
+            ).fetchone()
             if recent and now - recent["created_at"] < 10:
                 raise HTTPException(429, "Подожди немного перед повторной проверкой")
-            c.execute("INSERT INTO device_reports VALUES(?,?,?,?)", (report_id, user["id"], now, encode(body.model_dump(exclude_unset=True))))
-            c.execute("DELETE FROM device_reports WHERE user_id=? AND id NOT IN (SELECT id FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 5)", (user["id"], user["id"]))
+            c.execute(
+                "INSERT INTO device_reports VALUES(?,?,?,?)",
+                (report_id, user["id"], now, encode(body.model_dump(exclude_unset=True))),
+            )
+            c.execute(
+                "DELETE FROM device_reports WHERE user_id=? AND id NOT IN (SELECT id FROM device_reports WHERE user_id=? ORDER BY created_at DESC LIMIT 5)",
+                (user["id"], user["id"]),
+            )
         return {"id": report_id}
 
     @app.get("/api/diagnostics/{report_id}")
     def diagnostic_view(report_id: str, user=Depends(current_user)):
         with db.connect() as c:
-            row = c.execute("SELECT report FROM device_reports WHERE id=? AND user_id=? AND created_at>?", (report_id, user["id"], time.time() - settings.diagnostic_ttl)).fetchone()
+            row = c.execute(
+                "SELECT report FROM device_reports WHERE id=? AND user_id=? AND created_at>?",
+                (report_id, user["id"], time.time() - settings.diagnostic_ttl),
+            ).fetchone()
         if not row:
             raise HTTPException(404, "Отчёт не найден")
         return json.loads(row["report"])
@@ -261,18 +312,23 @@ def create_app(settings=None):
     def start_run(body: Body, user=Depends(current_user)):
         now = time.time()
         with db.connect(write=True) as c:
-            completed = c.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND version=? AND status='finished'",
-                                  (user["id"], settings.version)).fetchone()[0]
+            completed = c.execute(
+                "SELECT COUNT(*) FROM runs WHERE user_id=? AND version=? AND status='finished'",
+                (user["id"], settings.version),
+            ).fetchone()[0]
             if settings.attempt_limit and completed >= settings.attempt_limit:
                 raise HTTPException(403, "Зачётные попытки в этой версии закончились")
-            recent = c.execute("SELECT COUNT(*) FROM runs WHERE user_id=? AND created_at>?",
-                               (user["id"], now - 3600)).fetchone()[0]
+            recent = c.execute(
+                "SELECT COUNT(*) FROM runs WHERE user_id=? AND created_at>?", (user["id"], now - 3600)
+            ).fetchone()[0]
             if recent >= 60:
                 raise HTTPException(429, "Слишком много новых прохождений. Попробуй позже")
             c.execute("UPDATE runs SET status='abandoned' WHERE user_id=? AND status='active'", (user["id"],))
             run_id = str(uuid4())
-            c.execute("INSERT INTO runs(id,user_id,version,state,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                      (run_id, user["id"], settings.version, encode(combat.initial_state()), now, now - 1))
+            c.execute(
+                "INSERT INTO runs(id,user_id,version,state,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                (run_id, user["id"], settings.version, encode(combat.initial_state()), now, now - 1),
+            )
             return view(owned_run(c, run_id, user))
 
     @app.get("/api/runs/{run_id}")
@@ -295,8 +351,13 @@ def create_app(settings=None):
 
     @app.post("/api/runs/{run_id}/secrets/{secret_id}")
     def answer_secret(run_id: str, secret_id: str, body: SecretAnswer, user=Depends(current_user)):
-        return mutate(run_id, user, body, {"secret": secret_id, "answer": body.answer},
-                      lambda s: combat.solve(s, secret_id, body.answer))
+        return mutate(
+            run_id,
+            user,
+            body,
+            {"secret": secret_id, "answer": body.answer},
+            lambda s: combat.solve(s, secret_id, body.answer),
+        )
 
     @app.post("/api/runs/{run_id}/finish")
     def finish(run_id: str, body: Body, user=Depends(current_user)):
@@ -312,14 +373,17 @@ def create_app(settings=None):
             if state["phase"] != "won":
                 raise HTTPException(400, "Сначала одолей стража")
             score = combat.total_score(state)
-            c.execute("UPDATE runs SET status='finished',score=?,finished_at=? WHERE id=?",
-                      (score, time.time(), run_id))
+            c.execute(
+                "UPDATE runs SET status='finished',score=?,finished_at=? WHERE id=?", (score, time.time(), run_id)
+            )
             return view(owned_run(c, run_id, user))
 
     @app.get("/api/versions")
     def versions(user=Depends(current_user)):
         with db.connect() as c:
-            rows = c.execute("SELECT version,title,prize FROM versions ORDER BY created_at DESC,version DESC").fetchall()
+            rows = c.execute(
+                "SELECT version,title,prize FROM versions ORDER BY created_at DESC,version DESC"
+            ).fetchall()
         return [{**dict(r), "current": r["version"] == settings.version} for r in rows]
 
     @app.get("/api/leaderboard")
@@ -330,9 +394,14 @@ def create_app(settings=None):
             if not info:
                 raise HTTPException(404, "Версия не найдена")
             entries = db.leaderboard(c, version, user["is_guest"], user["id"])
-        return {"version": version, "title": info["title"], "prize": bool(info["prize"]),
-                "is_guest_board": bool(user["is_guest"]), "entries": entries,
-                "tie_rule": "При равных очках место общее. Правило выдачи приза ещё не установлено."}
+        return {
+            "version": version,
+            "title": info["title"],
+            "prize": bool(info["prize"]),
+            "is_guest_board": bool(user["is_guest"]),
+            "entries": entries,
+            "tie_rule": "При равных очках место общее. Правило выдачи приза ещё не установлено.",
+        }
 
     return app
 

@@ -85,3 +85,7 @@
 - Keep README, CHANGELOG and owner documentation in Russian. Commit subjects use English.
 - Record new ideas as issues with acceptance criteria and blockers. Do not introduce a larger
   architecture or extra services without a concrete need in the current game.
+
+- Install the pinned pre-commit environment from requirements-dev.txt and run all hooks
+  before a commit. Python uses Ruff lint + Ruff format, without Black. Web text uses
+  the locked Prettier. Preserve the generated/third-party asset formatting exclusions.

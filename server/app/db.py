@@ -67,15 +67,20 @@ class Database:
         with self.connect(write=True) as c:
             existing = c.execute("SELECT * FROM versions WHERE version=?", (s.version,)).fetchone()
             if existing and (existing["ruleset"], existing["prize"], existing["attempt_limit"]) != (
-                RULESET, int(s.competition_open), s.attempt_limit
+                RULESET,
+                int(s.competition_open),
+                s.attempt_limit,
             ):
                 raise RuntimeError("Rules changed: choose a new LEADERBOARD_VERSION")
-            c.execute("INSERT OR IGNORE INTO versions(version,title,ruleset,prize,attempt_limit) VALUES(?,?,?,?,?)",
-                      (s.version, s.title, RULESET, int(s.competition_open), s.attempt_limit))
+            c.execute(
+                "INSERT OR IGNORE INTO versions(version,title,ruleset,prize,attempt_limit) VALUES(?,?,?,?,?)",
+                (s.version, s.title, RULESET, int(s.competition_open), s.attempt_limit),
+            )
 
     @staticmethod
     def leaderboard(c, version, guest, user_id):
-        rows = c.execute("""
+        rows = c.execute(
+            """
             WITH best AS (
                 SELECT r.*, u.display_name,
                        ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.score DESC, r.finished_at, r.id) AS best_n
@@ -86,9 +91,13 @@ class Database:
                        RANK() OVER (ORDER BY score DESC) AS place
                 FROM best WHERE best_n=1
             ) SELECT * FROM places ORDER BY score DESC, finished_at, user_id LIMIT 50
-        """, (version, int(guest))).fetchall()
-        entries = [{"rank": r["place"], "name": r["display_name"], "score": r["score"],
-                    "is_me": r["user_id"] == user_id} for r in rows]
+        """,
+            (version, int(guest)),
+        ).fetchall()
+        entries = [
+            {"rank": r["place"], "name": r["display_name"], "score": r["score"], "is_me": r["user_id"] == user_id}
+            for r in rows
+        ]
         return entries
 
 

@@ -1,0 +1,6 @@
+# Third-party and generated assets retain their original bytes.
+public/
+licenses/
+scripts/assets/seeds/
+src/human-head-data.json
+src/evade-motion-data.json
