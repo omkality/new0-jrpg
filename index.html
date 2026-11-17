@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#253442" />
+    <link
+      rel="preload"
+      href="/fonts/Ebbe-Black.ttf"
+      as="font"
+      type="font/ttf"
+      crossorigin
+    />
+    <title>new0 / демо fixes3</title>
+    <script src="https://telegram.org/js/telegram-web-app.js?65"></script>
+  </head>
+  <body>
+    <div id="app">
+      <canvas
+        id="world"
+        tabindex="0"
+        aria-label="Трёхмерная сцена new0"
+      ></canvas>
+      <canvas id="hud" aria-hidden="true"></canvas>
+      <h1 class="sr-only">new0</h1>
+      <section id="intro" class="overlay">
+        <div class="start-card">
+          <button id="autoplay" class="primary" disabled>Подготовка…</button>
+          <output id="check-result" class="hidden" aria-live="polite"></output>
+        </div>
+        <footer class="credits">
+          fixes3 / 16.11<br />
+          Персонажи:
+          <a
+            href="https://patch.gg/create/toolbox"
+            target="_blank"
+            rel="noopener"
+            >Patch</a
+          >, CC0, AI.<br />
+          Текстуры:
+          <a
+            href="https://goblinatron.itch.io/psx-dungeon"
+            target="_blank"
+            rel="noopener"
+            >PSX Dungeon / Goblinatron</a
+          >,
+          <a
+            href="https://creativecommons.org/licenses/by/4.0/"
+            target="_blank"
+            rel="noopener"
+            >CC BY 4.0</a
+          >, тонирование.<br />
+          Движения:
+          <a
+            href="https://quaternius.itch.io/universal-animation-library"
+            target="_blank"
+            rel="noopener"
+            >Quaternius</a
+          >, CC0, адаптация.<br />
+          Сундуки и материалы:
+          <a
+            href="https://polyhaven.com/a/treasure_chest"
+            target="_blank"
+            rel="noopener"
+            >Poly Haven</a
+          >, CC0. <br />Шрифт: Ebbe Black,
+          <a href="/fonts/OFL.txt" target="_blank" rel="noopener">OFL</a>.
+        </footer>
+      </section>
+      <div id="touch-controls" class="hidden">
+        <div id="joystick" aria-label="Экранный стик">
+          <div id="joystick-knob"></div>
+        </div>
+        <div class="touch-actions">
+          <button id="guard" aria-label="Блокировать" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2 21 6v6c0 5-9 10-9 10S3 17 3 12V6Z" /></svg
+            ><small>БЛОК</small>
+          </button>
+          <button id="dodge" aria-label="Уклониться">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 10a8 8 0 1 0-1 9M20 3v7h-7" /></svg
+            ><small>УВОРОТ</small>
+          </button>
+          <button id="attack" aria-label="Атаковать">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m7 17 13-13v5L10 19M5 14l6 6M3 21l4-4" /></svg
+            ><small>УДАР</small>
+          </button>
+        </div>
+      </div>
+      <button id="drop" class="hidden">Сбросить оружие</button>
+      <button id="heal" class="hidden">Выпить зелье</button>
+      <button id="interact" class="hidden">Исследовать</button>
+      <div id="toast" role="status" class="sr-only hidden"></div>
+      <div id="review" class="hidden">
+        <select id="review-scenario" aria-label="Сценарий демо">
+          <option value="journey">Весь маршрут / четыре локации</option>
+          <option value="forest">Лес / секира и ключ</option>
+          <option value="roofs">Воротный двор / копьё</option>
+          <option value="chapel">Собор / верхняя галерея</option>
+          <option value="crypt">Мимик / победа</option>
+          <option value="defeat">Мимик / поражение</option>
+          <option value="ambush">Удар во время осмотра сундука</option>
+          <option value="healing">Зелье / риск и прерывание</option>
+          <option value="locked">Ризница / без ключа и с ключом</option>
+          <option value="unarmoured">Поспешность / два противника</option>
+          <option value="escape">Короткий путь / без брони и мимика</option>
+        </select>
+        <button id="showcase">Показать проход</button>
+        <button id="manual">Ручная проверка</button>
+        <button id="record">Записать проход</button>
+        <button id="soak">Шесть полных повторов / ресурсы</button>
+        <a id="soak-download" class="hidden" download="new0-resource-soak.json"
+          >Отчёт ресурсов</a
+        >
+        <a id="download" class="hidden" download>Скачать запись</a>
+        <a id="record-timeline" class="hidden" download>Метки записи</a>
+        <a id="check-download" class="hidden" download="new0-device-check.json"
+          >Технический отчёт</a
+        >
+        <output id="performance" aria-label="Производительность"></output>
+      </div>
+      <div id="fatal" class="overlay hidden">
+        <div class="start-card">
+          <p id="fatal-text"></p>
+          <button id="reload" class="primary">Повторить загрузку</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

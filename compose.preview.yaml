@@ -1,0 +1,19 @@
+# Temporary HTTPS preview. A separate project keeps player/test data isolated.
+name: ${PREVIEW_PROJECT_NAME:-new0-preview}
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:${PREVIEW_PUBLISH_PORT:-0}:${WEB_PORT:-80}"
+  api:
+    environment:
+      LEADERBOARD_VERSION: ${PREVIEW_LEADERBOARD_VERSION:-preview-001}
+      COMPETITION_OPEN: "false"
+      ALLOW_GUEST: "true"
+  tunnel:
+    profiles: [preview]
+    image: ${TUNNEL_IMAGE:-cloudflare/cloudflared:2026.11.0@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344}
+    command: [tunnel, --no-autoupdate, --protocol, http2, --url, 'http://web:${WEB_PORT:-80}']
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy

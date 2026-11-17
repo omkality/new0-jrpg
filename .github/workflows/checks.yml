@@ -1,0 +1,38 @@
+name: Prototype checks
+on:
+  push:
+    branches: [dev, master, 'feat/**', 'fix/**']
+  pull_request:
+    branches: [dev, master]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      WEB_PUBLISH_PORT: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/assets/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+      - run: npm ci --prefix scripts/assets --no-audit --no-fund
+      - run: npm --prefix scripts/assets run check
+      - run: python3 scripts/update_badges.py --check
+      - run: docker compose --profile test run --build --rm tests
+      - run: docker compose up -d --build --wait
+      - run: |
+          base="http://$(docker compose port web "${WEB_PORT:-80}")"
+          curl --fail "$base/api/health"
+          curl --fail "$base/" > /dev/null
+      - run: python3 scripts/verify_compose.py
+      - if: always()
+        run: |
+          docker compose down

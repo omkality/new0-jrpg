@@ -1,0 +1,365 @@
+@font-face {
+  font-family: "Ebbe Black";
+  src: url("/fonts/Ebbe-Black.ttf") format("truetype");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
+:root {
+  font-family: "Ebbe Black", serif;
+  color: #e4e9ef;
+  background: #253442;
+  font-synthesis: none;
+  --safe-top: var(
+    --tg-content-safe-area-inset-top,
+    env(safe-area-inset-top, 0px)
+  );
+  --safe-bottom: var(
+    --tg-content-safe-area-inset-bottom,
+    env(safe-area-inset-bottom, 0px)
+  );
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+input,
+select,
+textarea,
+option {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline: 2px solid #c9d9ed;
+  outline-offset: 4px;
+}
+a {
+  color: inherit;
+}
+.hidden {
+  display: none !important;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+}
+#world,
+#hud {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+#world {
+  outline: none;
+  touch-action: none;
+}
+#hud {
+  pointer-events: none;
+}
+#hud {
+  z-index: 3;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(0deg, #1522326e, transparent 65%);
+}
+.start-card {
+  width: min(300px, calc(100vw - 52px));
+  text-align: center;
+}
+.primary {
+  width: 100%;
+  border: 1px solid #dae4ed;
+  border-radius: 2px;
+  background: #dbe3e9;
+  color: #24313d;
+  padding: 17px 20px;
+  font-size: 19px;
+  font-weight: 600;
+  box-shadow: 0 4px 28px #101a283d;
+}
+#check-result {
+  display: block;
+  margin-top: 18px;
+  white-space: pre-line;
+  font: 15px/1.6 "Ebbe Black";
+  color: #e0e7f0;
+  text-shadow: 0 1px 6px #101a28;
+}
+.credits {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: calc(14px + var(--safe-bottom));
+  text-align: center;
+  color: #c2cbd6;
+  font: 12px/1.6 "Ebbe Black";
+  text-shadow: 0 1px 5px #172330;
+}
+.credits a {
+  text-decoration-color: #c2cbd666;
+  text-underline-offset: 2px;
+}
+#fatal {
+  background: #1a2736e6;
+}
+#fatal p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+#touch-controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+/* Keep the real touch layout measurable during the input-driven device tour. */
+.measure-only {
+  visibility: hidden;
+}
+#joystick {
+  position: absolute;
+  left: 24px;
+  bottom: calc(44px + var(--safe-bottom));
+  width: 112px;
+  height: 112px;
+  border: 1px solid #e1e8f363;
+  border-radius: 50%;
+  background: #2c394947;
+  touch-action: none;
+  pointer-events: auto;
+}
+#joystick:before {
+  content: "";
+  position: absolute;
+  inset: 28px;
+  border: 1px solid #e5ecda4a;
+  border-radius: 50%;
+}
+#joystick-knob {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  left: 34px;
+  top: 34px;
+  border: 1px solid #d9e3ef99;
+  background: #c9d4e335;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.touch-actions {
+  position: absolute;
+  right: 20px;
+  bottom: calc(46px + var(--safe-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.touch-actions button {
+  pointer-events: auto;
+  border: 1px solid #dce5ef77;
+  border-radius: 50%;
+  background: #2937466e;
+  color: #e0e7f0;
+  width: 78px;
+  height: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.touch-actions button span {
+  font: 34px/1 "Ebbe Black";
+}
+.touch-actions svg {
+  width: 27px;
+  height: 27px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.touch-actions small {
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.touch-actions #dodge {
+  width: 61px;
+  height: 61px;
+  margin-bottom: 3px;
+}
+.touch-actions #guard {
+  position: absolute;
+  right: 5px;
+  bottom: 98px;
+  width: 59px;
+  height: 59px;
+}
+.touch-actions #guard[aria-pressed="true"] {
+  background: #bbccdf60;
+}
+.touch-actions #guard.locked {
+  opacity: 0.42;
+}
+.touch-actions #guard::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    #dce5e56b calc(var(--cooldown, 0) * 360deg),
+    transparent 0
+  );
+  pointer-events: none;
+}
+.touch-actions button:active {
+  background: #c9d5e663;
+  transform: scale(0.96);
+}
+#interact {
+  position: absolute;
+  bottom: calc(208px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: #293b4ee3;
+  color: #e3eaf3;
+  border: 1px solid #d6e2f088;
+  padding: 12px 18px;
+  font-size: 13px;
+  white-space: nowrap;
+  min-height: 44px;
+}
+#toast {
+  position: absolute;
+  bottom: calc(66px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: #25384bd9;
+  color: #e4ebf4;
+  border: 1px solid #bdcede55;
+  padding: 9px 16px;
+  font-size: 11px;
+  text-align: center;
+  max-width: 85vw;
+  pointer-events: none;
+}
+#review {
+  position: absolute;
+  right: 20px;
+  top: calc(18px + var(--safe-top));
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  max-width: 470px;
+  justify-content: flex-end;
+}
+#review button,
+#review a,
+#review select {
+  font: 14px "Ebbe Black";
+  background: #25374bdb;
+  border: 1px solid #b8cadb66;
+  padding: 7px;
+  color: #e0e8f2;
+}
+#performance {
+  flex-basis: 100%;
+  font: 13px/1.6 "Ebbe Black";
+  text-align: right;
+  text-shadow: 0 1px 4px #132133;
+}
+.recording #review {
+  visibility: hidden;
+}
+@media (max-width: 700px) {
+  #review {
+    top: 58px;
+    right: 12px;
+    max-width: 270px;
+  }
+  #review button,
+  #review select,
+  #review a {
+    font-size: 13px;
+    padding: 6px;
+  }
+}
+@media (max-height: 500px) {
+  #joystick {
+    bottom: 20px;
+  }
+  .touch-actions {
+    bottom: 20px;
+  }
+  .credits {
+    font-size: 11px;
+    bottom: 8px;
+  }
+}
+
+#drop {
+  position: absolute;
+  left: 20px;
+  bottom: calc(260px + var(--safe-bottom));
+  z-index: 6;
+  color: #e1e6eb;
+  background: #263445d9;
+  border: 1px solid #adbcc888;
+  padding: 9px;
+  font-size: 13px;
+  min-height: 44px;
+}
+#heal {
+  position: absolute;
+  right: 20px;
+  bottom: calc(260px + var(--safe-bottom));
+  z-index: 6;
+  color: #dce8e3;
+  background: #263d3ad9;
+  border: 1px solid #b8ccc888;
+  padding: 9px;
+  font-size: 13px;
+  min-height: 44px;
+}
+#heal:disabled {
+  opacity: 0.5;
+}

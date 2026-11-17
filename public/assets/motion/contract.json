@@ -1,0 +1,47 @@
+{
+  "version": 3,
+  "attacks": {
+    "Attack1": {
+      "duration": 0.74,
+      "contact": 0.3,
+      "link": 0.52
+    },
+    "Attack2": {
+      "duration": 0.7,
+      "contact": 0.27,
+      "link": 0.51
+    },
+    "Attack3": {
+      "duration": 1,
+      "contact": 0.42,
+      "link": null
+    }
+  },
+  "dodges": 0.82,
+  "dodgeTravel": {
+    "start": 0.14,
+    "end": 0.65,
+    "distance": 2.25
+  },
+  "hits": {
+    "HitFront": 0.4,
+    "HitLeft": 0.42,
+    "HitRight": 0.46
+  },
+  "Guard": 0.8,
+  "BlockHit": 0.32,
+  "Death": 1.6,
+  "DeathFront": 1.75,
+  "DeathBack": 1.85,
+  "DeathSide": 1.7,
+  "provenance": {
+    "author": "Quaternius",
+    "license": "CC0-1.0",
+    "source": "https://quaternius.itch.io/universal-animation-library",
+    "originalClips": {
+      "Roll": 1.4666667,
+      "Death01": 2.4
+    },
+    "research": "KayKit Adventure Mage directional Dodges were evaluated and rejected because they do not invert the torso. No KayKit data is shipped."
+  }
+}

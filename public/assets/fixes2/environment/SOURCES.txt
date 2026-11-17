@@ -1,0 +1,32 @@
+new0 fixes2 environment, 2026-11-16
+
+All runtime environment geometry and the iron, wax, oak and weathered funerary stone textures added in
+this revision were authored in TypeScript specifically for this project.
+No extracted game assets, foreign texture pixels or downloaded models are used.
+Existing first-party fixes1 materials and the existing fire atlas are retained.
+
+Reference research, geometry only:
+
+The Metropolitan Museum of Art, Chandelier, French, ca.1500, wrought iron.
+Object 471025, accession 25.120.909, Public Domain / Open Access.
+https://www.metmuseum.org/art/collection/search/471025
+https://collectionapi.metmuseum.org/public/collection/v1/objects/471025
+Reviewed the museum photograph for supported central suspension, swept iron
+arms, candle sockets and drip pans. The museum photograph is not shipped.
+
+Isabella Stewart Gardner Museum, Iron and Light, 2026-01-06.
+https://www.gardnermuseum.org/blog/iron-light-1.6.26
+Reviewed curatorial descriptions of candle sockets and drip pans.
+No text or museum image is reproduced in the runtime asset.
+
+Crypt furnishings are original modular meshes: stone sarcophagi, urn shelves,
+memorial altars, supply chests and a barrel. They occupy floor space and share
+explicit collision footprints with the world layout. The former freestanding
+fenced arches have been removed.
+
+Forest trunk bases are grounded to the exact rendered triangulated terrain.
+Bark, leaves, understory, candles, iron and other meshes use scene fog.
+Shrubs share the existing instanced foliage draw call. All candle flames share
+a single instanced mesh with GPU deformation and no per-frame matrix upload.
+No additional dynamic light pool has been introduced.
+

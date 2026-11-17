@@ -1,0 +1,44 @@
+name: Whole-world browser resources
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, master]
+    paths:
+      - "src/**"
+      - "public/assets/**"
+      - "public/fonts/**"
+      - "scripts/performance/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/assets/package*.json"
+      - "vite.config.ts"
+      - ".github/workflows/browser-resources.yml"
+permissions:
+  contents: read
+concurrency:
+  group: browser-resources-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  resource-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEW0_RESOURCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run constrained software-rendered whole-World soak
+        run: node scripts/performance/run-docker.mjs
+      - name: Preserve resource evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-resource-report
+          path: scripts/performance/results/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean up only the named test container
+        if: always()
+        run: docker rm --force "new0-resources-${NEW0_RESOURCE_RUN_ID}" 2>/dev/null || true

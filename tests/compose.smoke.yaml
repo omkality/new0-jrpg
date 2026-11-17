@@ -1,0 +1,9 @@
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:${SMOKE_PUBLISH_PORT:-0}:${WEB_PORT:-80}"
+  api:
+    environment:
+      LEADERBOARD_VERSION: smoke-001
+      ALLOW_GUEST: "true"
+      COMPETITION_OPEN: "false"
