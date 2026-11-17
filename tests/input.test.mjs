@@ -174,3 +174,81 @@ test("touch guard is independent of the movement stick and releases on lost capt
   dispatch(joystick, "pointerup", { pointerId: 1 });
   assert.deepEqual(input.axis(), { x: 0, y: 0 });
 });
+
+test("a second shield finger cannot steal guard from the finger still holding it", () => {
+  const { input } = setup(),
+    shield = new FakeElement();
+  input.bindGuard(shield);
+  dispatch(shield, "pointerdown", { pointerId: 10 });
+  dispatch(shield, "pointerdown", { pointerId: 11 });
+  dispatch(shield, "pointerup", { pointerId: 11 });
+  assert.equal(input.guarding, true, "the first shield finger is still down");
+  dispatch(shield, "pointerup", { pointerId: 10 });
+  assert.equal(input.guarding, false);
+});
+
+test("releasing the guard key does not release a held shield finger", () => {
+  const { input } = setup(),
+    shield = new FakeElement();
+  input.bindGuard(shield);
+  dispatch(shield, "pointerdown", { pointerId: 10 });
+  dispatch(window, "keydown", { code: "KeyF", repeat: false });
+  dispatch(window, "keyup", { code: "KeyF" });
+  assert.equal(
+    input.guarding,
+    true,
+    "touch guard must survive keyboard release",
+  );
+  dispatch(shield, "pointerup", { pointerId: 10 });
+  assert.equal(input.guarding, false);
+});
+
+test("releasing the shield finger does not release a held guard key", () => {
+  const { input } = setup(),
+    shield = new FakeElement();
+  input.bindGuard(shield);
+  dispatch(window, "keydown", { code: "KeyF", repeat: false });
+  dispatch(shield, "pointerdown", { pointerId: 10 });
+  dispatch(shield, "pointercancel", { pointerId: 10 });
+  assert.equal(
+    input.guarding,
+    true,
+    "keyboard guard must survive touch cancellation",
+  );
+  dispatch(window, "keyup", { code: "KeyF" });
+  assert.equal(input.guarding, false);
+});
+
+test("canvas and shield share one pointer owner without cancelling keyboard guard", () => {
+  const { input } = setup(),
+    shield = new FakeElement(),
+    canvas = new FakeElement();
+  input.bindGuard(shield);
+  input.bindLook(canvas);
+  dispatch(shield, "pointerdown", { pointerId: 10 });
+  dispatch(canvas, "pointerdown", { pointerId: 11, button: 2 });
+  dispatch(canvas, "pointerup", { pointerId: 11, button: 2 });
+  assert.equal(input.guarding, true);
+  dispatch(window, "keydown", { code: "KeyF", repeat: false });
+  dispatch(shield, "lostpointercapture", { pointerId: 10 });
+  assert.equal(input.guarding, true);
+  dispatch(window, "keyup", { code: "KeyF" });
+  assert.equal(input.guarding, false);
+});
+
+test("disabled input and focus loss cannot leave guard active or restore a stale hold", () => {
+  const { input } = setup(),
+    shield = new FakeElement();
+  input.bindGuard(shield);
+  dispatch(shield, "pointerdown", { pointerId: 10 });
+  dispatch(window, "keydown", { code: "KeyF", repeat: false });
+  input.enabled = false;
+  assert.equal(input.guarding, false);
+  dispatch(window, "blur", {});
+  dispatch(shield, "pointerdown", { pointerId: 11 });
+  dispatch(window, "keydown", { code: "KeyF", repeat: false });
+  input.enabled = true;
+  assert.equal(input.guarding, false);
+  dispatch(shield, "pointerup", { pointerId: 10 });
+  assert.equal(input.guarding, false);
+});

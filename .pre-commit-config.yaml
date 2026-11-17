@@ -1,0 +1,58 @@
+minimum_pre_commit_version: "4.4.0"
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: &authored '^(public/|licenses/|scripts/assets/seeds/|src/(human-head|evade-motion)-data\.json$)'
+      - id: end-of-file-fixer
+        exclude: *authored
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: *authored
+      - id: check-yaml
+        # Docker Compose использует !override. Его семантику отдельно проверяет CI.
+        args: [--unsafe]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: detect-private-key
+      - id: debug-statements
+      - id: check-added-large-files
+        # Крупнейшая текущая GLB-модель занимает около 2,3 МБ.
+        args: [--maxkb=3072, --enforce-all]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: prettier
+        name: Prettier (package-lock.json)
+        entry: node node_modules/prettier/bin/prettier.cjs
+        args: [--write, --ignore-unknown]
+        language: unsupported
+        types: [text]
+        files: '\.(?:[cm]?js|ts|css|html|json|ya?ml|md)$'
+        exclude: *authored
+      - id: typescript
+        name: TypeScript type check
+        entry: node node_modules/typescript/bin/tsc --noEmit
+        language: unsupported
+        pass_filenames: false
+        files: '(^src/.*\.ts$|^vite\.config\.ts$|^tsconfig\.json$|^package(-lock)?\.json$)'
+      - id: technology-badges
+        name: Technology badges match project files
+        entry: python scripts/update_badges.py --check
+        language: unsupported
+        pass_filenames: false
+        files: '(^README\.md$|^package(-lock)?\.json$|^server/(requirements\.txt|Dockerfile)$|^scripts/update_badges\.py$)'

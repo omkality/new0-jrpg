@@ -12,7 +12,15 @@ services:
   tunnel:
     profiles: [preview]
     image: ${TUNNEL_IMAGE:-cloudflare/cloudflared:2026.11.0@sha256:b94b96edf2c9c4360f8879c8580cfaa99077f19c849ec595ca2f711b27d4f344}
-    command: [tunnel, --no-autoupdate, --protocol, http2, --url, 'http://web:${WEB_PORT:-80}']
+    command:
+      [
+        tunnel,
+        --no-autoupdate,
+        --protocol,
+        http2,
+        --url,
+        "http://web:${WEB_PORT:-80}",
+      ]
     restart: unless-stopped
     depends_on:
       web:
