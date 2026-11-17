@@ -1,5 +1,7 @@
 # new0 · 3D-демо
 
+<!-- prettier-ignore-start -->
+
 <!-- technologies:start -->
 [![Проверки](https://github.com/omkality/new0-jrpg/actions/workflows/checks.yml/badge.svg?branch=dev)](https://github.com/omkality/new0-jrpg/actions/workflows/checks.yml)
 [![TypeScript 5.9.3](https://img.shields.io/badge/TypeScript-5.9.3-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -10,6 +12,8 @@
 [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Telegram Mini App](https://img.shields.io/badge/Telegram-Mini%20App-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots/webapps)
 <!-- technologies:end -->
+
+<!-- prettier-ignore-end -->
 
 Короткая 3D-промо-игра для **Telegram на телефоне**. Мрачное фэнтези, зерно,
 туман, свободное движение и простой бой в реальном времени. Целевой минимум
@@ -235,6 +239,37 @@ API проверяет подписанный Telegram `initData`. Отдель�
 скачиваний, звёзд и неподтверждённые статусы релиза не показываются.
 
 ## Проверки разработки
+
+Для локальных хуков нужны Python 3.12+ и Node.js 24+. В PowerShell:
+
+```powershell
+npm ci
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe -m pre_commit install --install-hooks
+.venv/Scripts/python.exe -m pre_commit run --all-files
+```
+
+В Linux/macOS использовать `.venv/bin/python` вместо `.venv/Scripts/python.exe`.
+Каждому новому клону нужна одна установка Git-хука. При коммите проверяются
+подготовленные файлы. Если форматтер что-то исправил, просмотреть изменения,
+повторить `git add` и коммит.
+
+В `.pre-commit-config.yaml` зафиксированы версии общих хуков и Ruff.
+`ruff-check` проверяет ошибки Python и порядок импортов, `ruff-format`
+форматирует Python. Prettier из `package-lock.json` форматирует TypeScript,
+JavaScript, CSS, HTML, JSON, YAML и Markdown. Дополнительно проверяются
+типы TypeScript, бейджи, синтаксис данных, конфликты слияния, регистр путей,
+символьные ссылки, приватные ключи и предел 3 МиБ на файл.
+
+Compose-файлы используют `!override`, поэтому YAML-хук проверяет их синтаксис
+с поддержкой нестандартного тега. Семантику Compose и запуск сервисов проверяет CI.
+Исходные ассеты, лицензии и сгенерированные данные исключены из форматирования,
+но остаются под проверками JSON, конфликтов и размера. Локальные `work/`, `.env`,
+сборки и зависимости исключены Git. Тяжёлые проверки ассетов и Docker остаются
+в CI, который также запускает все хуки по отслеживаемым файлам.
+
+Полные проверки приложения:
 
 Для хостовой сборки нужен Node.js 24+, для служебных скриптов Python 3.10+.
 
