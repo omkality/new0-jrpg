@@ -161,12 +161,19 @@ export class API {
       );
     try {
       this.token = sessionStorage.getItem("new0-guest-session") ?? "";
-      if (this.token) {
-        this.user = await this.request<User>("/me");
-        return;
-      }
     } catch {
       this.token = "";
+    }
+    if (this.token) {
+      try {
+        this.user = await this.bootstrap(() => this.request<User>("/me"));
+        return;
+      } catch (error) {
+        // Only a rejected session permits a new identity. Network failures and
+        // other HTTP errors must preserve the saved guest for a later retry.
+        if (!(error instanceof APIError) || error.status !== 401) throw error;
+        this.token = "";
+      }
     }
     const auth = await this.bootstrap(() =>
       this.request<{ token: string; user: User }>("/auth/guest", {}, "POST"),
