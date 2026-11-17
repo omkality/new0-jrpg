@@ -13,8 +13,11 @@ export class Input {
   onAttack = () => {};
   onDodge = () => {};
   onLock = () => {};
-  guarding = false;
+  private guardKey = false;
   private guardPointer: number | null = null;
+  get guarding() {
+    return this.enabled && (this.guardKey || this.guardPointer !== null);
+  }
   private lookPointer: number | null = null;
   private pointer: number | null = null;
   private joystick: HTMLElement;
@@ -51,14 +54,14 @@ export class Input {
       if (key === "KeyJ") this.onAttack();
       if (["Space", "ShiftLeft", "ShiftRight", "KeyK"].includes(key))
         this.onDodge();
-      if (key === "KeyF") this.guarding = true;
+      if (key === "KeyF") this.guardKey = true;
       if (key === "KeyQ") this.onLock();
       if (["Digit1", "Digit2", "Digit3"].includes(key))
         this.onAction(Number(key.slice(-1)));
     });
     window.addEventListener("keyup", (e) => {
       this.keys.delete(e.code);
-      if (e.code === "KeyF") this.guarding = false;
+      if (e.code === "KeyF") this.guardKey = false;
     });
     window.addEventListener("blur", () => this.reset());
     this.joystick.addEventListener("pointerdown", (e) => {
@@ -96,7 +99,7 @@ export class Input {
     element.addEventListener("contextmenu", (e) => e.preventDefault());
     element.addEventListener("pointerdown", (e) => {
       if (e.button === 2 && this.enabled) {
-        this.guarding = true;
+        if (this.guardPointer !== null) return;
         this.guardPointer = e.pointerId;
         element.setPointerCapture(e.pointerId);
         return;
@@ -118,7 +121,6 @@ export class Input {
     for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
       element.addEventListener(type, (e) => {
         if ((e as PointerEvent).pointerId === this.guardPointer) {
-          this.guarding = false;
           this.guardPointer = null;
         }
         if (
@@ -135,8 +137,7 @@ export class Input {
   }
   bindGuard(element: HTMLElement) {
     element.addEventListener("pointerdown", (e) => {
-      if (!this.enabled) return;
-      this.guarding = true;
+      if (!this.enabled || this.guardPointer !== null) return;
       this.guardPointer = e.pointerId;
       element.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -144,7 +145,6 @@ export class Input {
     for (const name of ["pointerup", "pointercancel", "lostpointercapture"])
       element.addEventListener(name, (e) => {
         if ((e as PointerEvent).pointerId === this.guardPointer) {
-          this.guarding = false;
           this.guardPointer = null;
         }
       });
@@ -175,7 +175,7 @@ export class Input {
   reset() {
     this.keys.clear();
     this.lookPointer = null;
-    this.guarding = false;
+    this.guardKey = false;
     this.guardPointer = null;
     this.resetStick();
   }
