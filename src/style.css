@@ -340,6 +340,11 @@ a {
   }
 }
 @media (max-height: 500px) {
+  #intro {
+    grid-template-rows: minmax(min-content, 1fr) auto;
+    overflow-y: auto;
+    padding: calc(8px + var(--safe-top)) 0 calc(8px + var(--safe-bottom));
+  }
   #joystick {
     bottom: 20px;
   }
@@ -347,8 +352,9 @@ a {
     bottom: 20px;
   }
   .credits {
+    position: static;
+    margin-inline: 24px;
     font-size: 11px;
-    bottom: 8px;
   }
 }
 

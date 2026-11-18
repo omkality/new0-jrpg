@@ -57,6 +57,18 @@ test("asset failure shows a reload action and keeps autoplay disabled", async ({
   expect(errors).toEqual([]);
 });
 
+test("attribution does not cover the start button in a short viewport", async ({
+  page,
+}) => {
+  await mockGuestApi(page);
+  await page.setViewportSize({ width: 320, height: 200 });
+  await page.goto("/index.html");
+  const start = page.locator("#autoplay");
+  await expect(start).toBeEnabled({ timeout: 60_000 });
+  await start.tap();
+  await expect(page.locator("#intro")).toBeHidden();
+});
+
 async function point(locator, id, offset = 0) {
   const { x, y, width, height } = await locator.boundingBox();
   return { x: x + width / 2 + offset, y: y + height / 2, id };
