@@ -46,7 +46,7 @@ const game = new Campaign(),
   input = new Input(),
   sound = new Sound(),
   api = new API();
-const world = new World($<HTMLCanvasElement>("#world"), game);
+let world: World;
 const hud = $<HTMLCanvasElement>("#hud"),
   h = hud.getContext("2d")!;
 const hudText = new HUDTextCache();
@@ -88,7 +88,11 @@ let frames: number[] = [],
 let toastUntil = 0,
   toastValue = "";
 let capture: FrameCapture | null = null,
-  recording = false;
+  recording = false,
+  preparingRecording = false,
+  finishingRecording: Promise<void> | null = null;
+const recordingBusy = () =>
+  recording || preparingRecording || !!finishingRecording;
 let captureMarks: {
   seconds: number;
   label: string;
@@ -119,6 +123,8 @@ const captureLimit = () =>
       ? 160
       : 90;
 let raf = 0;
+let leaving = false;
+let reviewEnabled = false;
 let soak: {
   runs: number;
   snapshots: ResourceMetrics[];
@@ -149,6 +155,9 @@ function startScenario(id: ScenarioId, auto = true) {
   for (const selector of ["#drop", "#heal", "#interact"])
     $(selector).classList.toggle("measure-only", auto);
   visible("#intro", false);
+  visible("#review", false);
+  visible("#review-menu", reviewEnabled);
+  visible("#check-result", false);
   visible("#toast", false);
   toastValue = "";
   $("#world").focus({ preventScroll: true });
@@ -156,10 +165,28 @@ function startScenario(id: ScenarioId, auto = true) {
   accumulator = 0;
   finishedTail = 0;
   last = performance.now();
+  requestFrame();
 }
 function beginShowcase() {
-  if (!loaded || deviceCheck || soak) return;
+  if (!loaded || deviceCheck || soak || recordingBusy()) return;
   startScenario(selected);
+}
+function showMenu() {
+  paused = true;
+  input.reset();
+  input.enabled = false;
+  sound.suspend();
+  for (const selector of [
+    "#touch-controls",
+    "#drop",
+    "#heal",
+    "#interact",
+    "#review-menu",
+  ])
+    visible(selector, false);
+  visible("#intro", true);
+  visible("#review", reviewEnabled);
+  requestFrame();
 }
 function pause() {
   if (!loaded || game.phase === "intro" || paused) return;
@@ -167,11 +194,13 @@ function pause() {
     void finishDeviceCheck(true);
     return;
   }
-  paused = true;
-  input.reset();
-  input.enabled = false;
-  sound.suspend();
-  visible("#intro", true);
+  if (soak) {
+    soak = null;
+    $("#check-result").textContent = "Проверка ресурсов прервана.";
+    visible("#check-result", true);
+  }
+  showMenu();
+  void stopRecording();
 }
 input.onPause = pause;
 input.onAttack = () => game.attack();
@@ -183,45 +212,52 @@ input.onLock = () => {
 input.onLook = (x, y) => world.orbit(x, y);
 input.bindLook($("#world"));
 input.bindGuard($("#guard"));
-$("#attack").onclick = () => game.attack();
-$("#dodge").onclick = () => game.dodge(world.moveAxis(input.axis()));
-$("#interact").onclick = () => game.interact();
+input.bindAction($("#attack"), input.onAttack);
+input.bindAction($("#dodge"), input.onDodge);
+input.bindAction($("#interact"), input.onInteract);
 $("#review-scenario").onchange = () =>
   chooseScenario($<HTMLSelectElement>("#review-scenario").value as ScenarioId);
 $("#showcase").onclick = beginShowcase;
 $("#manual").onclick = () => {
-  if (deviceCheck || recording || soak) return;
+  if (!loaded || deviceCheck || recordingBusy() || soak) return;
   startScenario(selected, false);
 };
-$("#drop").onclick = () => game.dropWeapon();
-$("#heal").onclick = () => game.heal();
+input.bindAction($("#drop"), () => game.dropWeapon());
+input.bindAction($("#heal"), () => game.heal());
+$("#review-menu").onclick = pause;
 $("#soak").onclick = () => {
-  if (!loaded || recording || deviceCheck || soak) return;
+  if (!loaded || recordingBusy() || deviceCheck || soak) return;
   soak = { runs: 0, snapshots: [], completed: [] };
   visible("#soak-download", false);
   startScenario("journey");
 };
 $("#reload").onclick = () => location.reload();
 function fatal(text: string) {
+  loaded = false;
+  input.reset();
+  input.enabled = false;
+  $<HTMLButtonElement>("#autoplay").disabled = true;
+  visible("#review", false);
+  visible("#review-menu", false);
   $("#fatal-text").textContent = text;
   visible("#fatal", true);
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     pause();
-    void stopRecording();
-  }
+  } else requestFrame();
 });
 window.addEventListener("error", () => errors++);
 window.addEventListener("unhandledrejection", () => errors++);
 window.addEventListener("game-context-lost", () => {
   contextLosses++;
-  if (deviceCheck) void finishDeviceCheck(true);
+  pause();
   fatal("Графика приостановлена. Перезагрузи демку.");
 });
 function resizeHUD() {
   hud.width = innerWidth;
   hud.height = innerHeight;
+  requestFrame();
 }
 window.addEventListener("resize", resizeHUD);
 resizeHUD();
@@ -326,7 +362,7 @@ function drawHUD() {
 }
 function measureControlFit() {
   if (!input.touch) return;
-  const boxes = [
+  const controls = [
     "#joystick",
     "#guard",
     "#dodge",
@@ -335,8 +371,9 @@ function measureControlFit() {
     "#heal",
     "#interact",
   ]
-    .filter((s) => !$(s).classList.contains("hidden"))
-    .map((s) => $(s).getBoundingClientRect());
+    .map((s) => $(s))
+    .filter((control) => !control.classList.contains("hidden"));
+  const boxes = controls.map((control) => control.getBoundingClientRect());
   const inside = boxes.every(
     (r) =>
       r.width > 0 &&
@@ -354,10 +391,29 @@ function measureControlFit() {
         Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top),
     ),
   );
-  controlsFit = controlsFit && inside && !overlap;
+  const group = $("#touch-controls");
+  const concealed = [group, ...controls].filter((control) =>
+    control.classList.contains("measure-only"),
+  );
+  // Expose the manual layout only for this synchronous hit test, before paint.
+  const wasInert = group.inert;
+  group.inert = false;
+  for (const element of concealed) element.classList.remove("measure-only");
+  try {
+    const reachable = controls.every((control, index) => {
+      const r = boxes[index];
+      return control.contains(
+        document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2),
+      );
+    });
+    controlsFit = controlsFit && inside && !overlap && reachable;
+  } finally {
+    for (const element of concealed) element.classList.add("measure-only");
+    group.inert = wasInert;
+  }
 }
 function beginDeviceCheck() {
-  if (!loaded || recording || deviceCheck || soak) return;
+  if (!loaded || recordingBusy() || deviceCheck || soak) return;
   errorBaseline = errors;
   contextBaseline = contextLosses;
   controlsFit = true;
@@ -381,9 +437,7 @@ async function finishDeviceCheck(interrupted: boolean) {
       world.resources(),
     );
   deviceCheck = null;
-  paused = true;
-  input.reset();
-  input.enabled = false;
+  showMenu();
   const tg = window.Telegram?.WebApp;
   lastDeviceReport = {
     protocol: "device-check-3",
@@ -422,9 +476,7 @@ async function finishDeviceCheck(interrupted: boolean) {
     ),
   ];
   $("#check-result").textContent = summary.join("\n");
-  visible("#intro", true);
   visible("#check-result", true);
-  visible("#touch-controls", false);
   const a = $<HTMLAnchorElement>("#check-download");
   if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
   a.href = URL.createObjectURL(
@@ -441,17 +493,28 @@ async function finishDeviceCheck(interrupted: boolean) {
       "\nОтчёт не отправлен. Повтори автопрохождение после проверки соединения.";
   }
 }
-async function stopRecording() {
+function stopRecording() {
+  if (finishingRecording) return finishingRecording;
   const current = capture;
   if (!current) return;
   capture = null;
   recording = false;
-  paused = true;
+  showMenu();
   document.body.classList.remove("recording");
   $("#record").textContent = "Сохраняю…";
+  finishingRecording = finishRecording(current).finally(() => {
+    finishingRecording = null;
+    recordCtx = null;
+    recordCanvas = null;
+    $("#record").textContent = "Записать проход";
+  });
+  return finishingRecording;
+}
+async function finishRecording(current: FrameCapture) {
   try {
-    const blob = await current.finish(),
-      a = $<HTMLAnchorElement>("#download");
+    const blob = await current.finish();
+    if (leaving) return;
+    const a = $<HTMLAnchorElement>("#download");
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
     a.href = URL.createObjectURL(blob);
     a.download = `new0-fixes3-${selected}-60fps.mp4`;
@@ -482,26 +545,37 @@ async function stopRecording() {
     timeline.download = `new0-fixes3-${selected}-timeline.json`;
     visible("#record-timeline", true);
   } catch (error) {
-    toast(error instanceof Error ? error.message : "Запись прервана");
+    if (!leaving) reportRecordingError(error);
   }
-  $("#record").textContent = "Записать проход";
+}
+function reportRecordingError(error: unknown) {
+  $("#check-result").textContent =
+    error instanceof Error ? error.message : "Запись прервана";
+  visible("#check-result", true);
 }
 async function beginRecording() {
-  if (recording || deviceCheck || soak || !loaded) return;
+  if (recordingBusy() || deviceCheck || soak || !loaded) return;
   if (!("VideoEncoder" in window)) {
-    toast("Для записи нужен браузер с WebCodecs");
+    reportRecordingError(new Error("Для записи нужен браузер с WebCodecs"));
     return;
   }
+  preparingRecording = true;
   $("#record").textContent = "Подготовка…";
   try {
     const { FrameCapture } = await import("./recording");
+    if (leaving || document.hidden || !loaded) return;
     recordCanvas = document.createElement("canvas");
     const scale = Math.min(1, 1280 / hud.width, 720 / hud.height);
     recordCanvas.width = Math.floor((hud.width * scale) / 2) * 2;
     recordCanvas.height = Math.floor((hud.height * scale) / 2) * 2;
     recordCtx = recordCanvas.getContext("2d", { alpha: false });
-    capture = new FrameCapture(recordCanvas);
-    await capture.start();
+    const next = new FrameCapture(recordCanvas);
+    await next.start();
+    if (leaving || document.hidden || !loaded) {
+      await next.cancel();
+      return;
+    }
+    capture = next;
     startScenario(selected);
     captureMarks = [];
     captureMarkKey = "";
@@ -511,67 +585,82 @@ async function beginRecording() {
     visible("#download", false);
     visible("#record-timeline", false);
   } catch (error) {
+    await capture?.cancel();
     capture = null;
     recording = false;
     document.body.classList.remove("recording");
-    $("#record").textContent = "Записать проход";
-    toast(error instanceof Error ? error.message : "Кодек недоступен");
+    if (!leaving) reportRecordingError(error);
+  } finally {
+    preparingRecording = false;
+    if (!recording) {
+      recordCtx = null;
+      recordCanvas = null;
+      $("#record").textContent = "Записать проход";
+    }
   }
 }
 $("#record").onclick = () => void beginRecording();
+function requestFrame() {
+  if (!raf && loaded && !leaving && !document.hidden)
+    raf = requestAnimationFrame(frame);
+}
 function frame(now: number) {
+  raf = 0;
+  if (!loaded || leaving || document.hidden) return;
+  if (paused || game.phase === "intro" || settled()) {
+    world.render(0);
+    drawHUD();
+    return;
+  }
   const profile = deviceCheck ? frameCost : null;
   const cpuStart = profile ? performance.now() : 0;
   const profileArea = game.location;
   if (profile) profileLayers(profile.mode(now));
   let stamp = cpuStart;
   const costs: FrameCosts | null = profile ? {} : null;
-  raf = requestAnimationFrame(frame);
   const raw = (now - last) / 1000;
   const dt = recording
     ? capture && !capture.busy && now - lastCapture >= 1000 / 60
       ? 1 / 60
       : 0
-    : Math.min(raw, 0.06);
+    : Math.max(0, Math.min(raw, 0.06));
   last = now;
-  if (loaded && !paused && game.phase !== "intro") {
-    accumulator += dt;
-    while (accumulator >= 1 / 120) {
-      const move = autoplay
-        ? demonstration!.update(1 / 120)
-        : { ...world.moveAxis(input.axis()), guard: input.guarding };
-      game.update(1 / 120, move);
-      accumulator -= 1 / 120;
-    }
-    if (autoplay && demonstration) {
-      const a = 1 - Math.exp(-dt * 3.6);
-      const delta = demonstration.cameraYaw - world.yaw;
-      world.yaw += Math.atan2(Math.sin(delta), Math.cos(delta)) * a;
-      world.pitch += (demonstration.cameraPitch - world.pitch) * a;
-    }
-    for (const e of game.events) {
-      world.event(e);
-      sound.play(
-        e.type === "hit"
-          ? "hit"
-          : e.type === "block"
-            ? "guard"
-            : e.type === "win"
-              ? "win"
-              : e.type === "secret" || e.type === "weapon"
-                ? "secret"
-                : e.type === "dodge"
-                  ? "step"
-                  : "click",
-      );
-      if (e.label) toast(e.label);
-    }
-    game.events.length = 0;
-    frames.push(raw * 1000);
-    if (frames.length > 300) frames.shift();
-    frameNumber++;
-    if (demonstration?.done) finishedTail += dt;
+  accumulator += dt;
+  while (accumulator >= 1 / 120) {
+    const move = autoplay
+      ? demonstration!.update(1 / 120)
+      : { ...world.moveAxis(input.axis()), guard: input.guarding };
+    game.update(1 / 120, move);
+    accumulator -= 1 / 120;
   }
+  if (autoplay && demonstration) {
+    const a = 1 - Math.exp(-dt * 3.6);
+    const delta = demonstration.cameraYaw - world.yaw;
+    world.yaw += Math.atan2(Math.sin(delta), Math.cos(delta)) * a;
+    world.pitch += (demonstration.cameraPitch - world.pitch) * a;
+  }
+  for (const e of game.events) {
+    world.event(e);
+    sound.play(
+      e.type === "hit"
+        ? "hit"
+        : e.type === "block"
+          ? "guard"
+          : e.type === "win"
+            ? "win"
+            : e.type === "secret" || e.type === "weapon"
+              ? "secret"
+              : e.type === "dodge"
+                ? "step"
+                : "click",
+    );
+    if (e.label) toast(e.label);
+  }
+  game.events.length = 0;
+  frames.push(raw * 1000);
+  if (frames.length > 300) frames.shift();
+  frameNumber++;
+  if (demonstration?.done || game.phase === "finished") finishedTail += dt;
   if (costs) {
     costs.simulation_cpu_ms = performance.now() - stamp;
     stamp = performance.now();
@@ -631,9 +720,8 @@ function frame(now: number) {
         }),
       );
       soak = null;
-      paused = true;
+      showMenu();
       visible("#soak-download", true);
-      visible("#intro", true);
       $("#check-result").textContent =
         "Шесть полных повторов завершены. Отчёт ресурсов готов.";
       visible("#check-result", true);
@@ -700,8 +788,7 @@ function frame(now: number) {
         )
           void stopRecording();
       })
-      .catch((error) => {
-        toast(error instanceof Error ? error.message : "Запись прервана");
+      .catch(() => {
         void stopRecording();
       });
   }
@@ -725,10 +812,8 @@ function frame(now: number) {
         !["intro", "lost", "finished"].includes(game.phase) &&
         game.player.weapon !== "unarmed",
     );
-    visible(
-      "#interact",
-      !!game.nearby && (!autoplay || !!deviceCheck) && !paused,
-    );
+    const nearby = game.nearby;
+    visible("#interact", !!nearby && (!autoplay || !!deviceCheck) && !paused);
     visible(
       "#heal",
       input.touch &&
@@ -741,7 +826,7 @@ function frame(now: number) {
       game.player.hp >= game.player.maxHp ||
       !["idle", "move", "guard"].includes(game.player.mode);
     $("#heal").textContent = `Выпить зелье / ${game.flasks}`;
-    $("#interact").textContent = game.nearby;
+    $("#interact").textContent = nearby;
     if (deviceCheck && game.phase !== "finished") measureControlFit();
     $("#guard").setAttribute(
       "aria-pressed",
@@ -801,9 +886,16 @@ function frame(now: number) {
       world.renderer.info.render.triangles,
     );
   }
+  if (!settled() && !paused) requestFrame();
+}
+function settled() {
+  if (deviceCheck || soak || recording) return false;
+  return (
+    finishedTail >= 1.2 || (game.phase === "lost" && game.player.time > 3.2)
+  );
 }
 async function boot() {
-  let connecting = true;
+  let stage: "connection" | "graphics" | "assets" = "connection";
   try {
     const tg = window.Telegram?.WebApp?.initData
       ? window.Telegram.WebApp
@@ -820,12 +912,16 @@ async function boot() {
     }
     $("#autoplay").textContent = "Подключение…";
     await api.connect(tg?.initData ?? "");
-    connecting = false;
+    if (leaving) return;
+    stage = "graphics";
+    world = new World($<HTMLCanvasElement>("#world"), game);
+    stage = "assets";
     $("#autoplay").textContent = "Загрузка сцены…";
     const [, faces] = await Promise.all([
       world.load(),
       document.fonts.load('16px "Ebbe Black"'),
     ]);
+    if (leaving) return;
     if (!faces.length) throw new Error("Не удалось загрузить шрифт игры");
     world.resetView();
     hudText.clear();
@@ -833,25 +929,37 @@ async function boot() {
     $("#performance").title = world.device;
     $<HTMLButtonElement>("#autoplay").disabled = false;
     $("#autoplay").textContent = "Автопрохождение";
-    visible("#review", review && api.user.is_guest);
+    reviewEnabled = review && api.user.is_guest;
+    visible("#review", reviewEnabled);
+    requestFrame();
   } catch (error) {
+    if (leaving) return;
     fatal(
-      connecting
+      stage === "connection"
         ? `Не удалось завершить вход. ${error instanceof Error ? error.message : "Повтори подключение"}`
-        : "Не удалось загрузить 3D-сцену. Проверь соединение и повтори загрузку.",
+        : stage === "graphics"
+          ? "Не удалось запустить 3D. Для игры нужен WebGL 2. Открой игру в поддерживаемом браузере или повтори загрузку."
+          : "Не удалось загрузить 3D-сцену. Проверь соединение и повтори загрузку.",
     );
   }
 }
-raf = requestAnimationFrame(frame);
+const booting = boot();
 window.addEventListener("pagehide", () => {
+  leaving = true;
   cancelAnimationFrame(raf);
-  void stopRecording().finally(() => world.dispose());
-  for (const id of ["#download", "#check-download", "#soak-download"]) {
+  void Promise.allSettled([booting, stopRecording()]).then(() =>
+    world?.dispose(),
+  );
+  for (const id of [
+    "#download",
+    "#record-timeline",
+    "#check-download",
+    "#soak-download",
+  ]) {
     const a = $<HTMLAnchorElement>(id);
     if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);
   }
 });
-void boot();
 
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) location.reload();

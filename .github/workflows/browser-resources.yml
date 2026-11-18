@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [dev, master]
     paths:
+      - "index.html"
       - "src/**"
       - "public/assets/**"
       - "public/fonts/**"

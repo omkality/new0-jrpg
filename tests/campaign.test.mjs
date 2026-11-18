@@ -2,12 +2,44 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Campaign, SCENARIOS } from "../src/campaign.ts";
 import { CampaignShowcase } from "../src/journey.ts";
-import { CHESTS, DOORS, floorHeight } from "../src/world-layout.ts";
+import { AREAS, CHESTS, DOORS, floorHeight } from "../src/world-layout.ts";
 import { WEAPONS } from "../src/weapon-spec.ts";
 const still = { x: 0, z: 0, guard: false };
 const advance = (g, s) => {
   for (let i = 0; i < Math.ceil(s * 120); i++) g.update(1 / 120, still);
 };
+
+test("the escape route can finish using only advertised interactions", () => {
+  const g = new Campaign();
+  g.startScenario("escape");
+  const driver = new CampaignShowcase(g, "escape");
+  const interact = g.interact.bind(g);
+  g.interact = () => {
+    if (g.nearby) interact();
+  };
+  for (let step = 0; !driver.done && step < 120 * 300; step++)
+    g.update(1 / 120, driver.update(1 / 120));
+  assert.equal(g.phase, "finished");
+  assert.ok(g.enemy.hp > 0);
+  assert.equal(g.mimicAwake, false);
+  assert.equal(g.nearby, "");
+});
+
+test("an enemy defeat alone does not offer an exit from across the level", () => {
+  const g = new Campaign();
+  g.startScenario("forest");
+  g.enemy.hp = 0;
+  g.completedAreas.add("forest");
+  assert.equal(g.nearby, "");
+  g.interact();
+  assert.equal(g.phase, "playing");
+  g.openDoors.add("gate");
+  const exit = AREAS.forest.exit;
+  Object.assign(g.player, { ...exit, y: floorHeight(exit.x, exit.z) });
+  assert.equal(g.nearby, "Продолжить путь");
+  g.interact();
+  assert.equal(g.phase, "finished");
+});
 
 test("a chest really replaces the held weapon and leaves the previous one on the ground", () => {
   const g = new Campaign();

@@ -15,6 +15,7 @@ export class Input {
   onLock = () => {};
   private guardKey = false;
   private guardPointer: number | null = null;
+  private actionPointers = new Map<HTMLButtonElement, number>();
   get guarding() {
     return this.enabled && (this.guardKey || this.guardPointer !== null);
   }
@@ -149,6 +150,40 @@ export class Input {
         }
       });
   }
+  bindAction(button: HTMLButtonElement, action: () => void) {
+    button.addEventListener("pointerdown", (e) => {
+      if (
+        e.button !== 0 ||
+        !this.enabled ||
+        button.disabled ||
+        this.actionPointers.has(button)
+      )
+        return;
+      button.setPointerCapture(e.pointerId);
+      this.actionPointers.set(button, e.pointerId);
+    });
+    for (const type of [
+      "pointerup",
+      "pointercancel",
+      "lostpointercapture",
+    ] as const)
+      button.addEventListener(type, (e) => {
+        if (this.actionPointers.get(button) !== e.pointerId) return;
+        this.actionPointers.delete(button);
+        if (
+          type === "pointerup" &&
+          this.enabled &&
+          !button.disabled &&
+          button.contains(document.elementFromPoint(e.clientX, e.clientY))
+        )
+          action();
+      });
+    // Pointer activation is handled above, including secondary touch pointers.
+    // Keep native keyboard and assistive-technology activation.
+    button.addEventListener("click", (e) => {
+      if (e.detail === 0 && this.enabled && !button.disabled) action();
+    });
+  }
   axis() {
     if (!this.enabled) return { x: 0, y: 0 };
     let x =
@@ -173,6 +208,7 @@ export class Input {
     this.knob.style.transform = "";
   }
   reset() {
+    this.actionPointers.clear();
     this.keys.clear();
     this.lookPointer = null;
     this.guardKey = false;

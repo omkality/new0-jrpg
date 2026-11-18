@@ -46,10 +46,11 @@ class ResourceMetrics(Body):
 
 class StageMetrics(Body):
     location: Literal["chapel", "roofs", "courtyard", "forest", "crypt"]
-    seconds: float = Field(ge=0, le=180, allow_inf_nan=False)
+    # The final RAF may cross the client timeout, so preserve the measured duration.
+    seconds: float = Field(ge=0, allow_inf_nan=False)
     frames: int = Field(ge=0, le=100000)
     fps: float = Field(ge=0, le=1000, allow_inf_nan=False)
-    p95_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    p95_ms: float = Field(ge=0, allow_inf_nan=False)
     over_25_ms: int = Field(ge=0, le=100000)
     over_50_ms: int = Field(ge=0, le=100000)
     completed: bool
@@ -75,9 +76,9 @@ CostKey = Literal[
 
 class CostMetric(Body):
     samples: int = Field(ge=1, le=100000)
-    mean_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
-    p95_upper_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
-    max_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    mean_ms: float = Field(ge=0, allow_inf_nan=False)
+    p95_upper_ms: float = Field(ge=0, allow_inf_nan=False)
+    max_ms: float = Field(ge=0, allow_inf_nan=False)
 
 
 class CostRow(Body):
@@ -144,6 +145,8 @@ def create_app(settings=None):
             ).fetchone()
         if not row:
             raise HTTPException(401, "Сессия закончилась. Открой игру заново")
+        if row["is_guest"] and not settings.allow_guest:
+            raise HTTPException(403, "Открой игру через Telegram")
         return dict(row)
 
     def identity(user):

@@ -99,13 +99,47 @@ def test_frame_cost_profiles_are_bounded_and_remain_owner_only(client):
     bad["frame_cost"]["rows"][0]["metrics"]["arbitrary_field"] = metric
     assert client.post("/api/diagnostics", headers=headers, json=bad).status_code == 422
     bad = deepcopy(body)
-    bad["frame_cost"]["rows"][0]["metrics"]["callback_cpu_ms"]["max_ms"] = 180001.0
+    bad["frame_cost"]["rows"][0]["metrics"]["callback_cpu_ms"]["max_ms"] = "Infinity"
     assert client.post("/api/diagnostics", headers=headers, json=bad).status_code == 422
     result = client.post("/api/diagnostics", headers=headers, json=body)
     assert result.status_code == 200, result.text
     report_id = result.json()["id"]
     assert client.get("/api/diagnostics/" + report_id, headers=headers).json() == body
     assert client.get("/api/diagnostics/" + report_id, headers=login(client, 43)).status_code == 404
+
+
+def test_slow_device_report_preserves_the_frame_that_crossed_the_timeout(client):
+    body = device_payload()
+    body["stages"][0].update(
+        seconds=312.4, frames=1, fps=0.0032, p95_ms=312400.0, over_25_ms=1, over_50_ms=1, completed=False
+    )
+    metric = {"samples": 1, "mean_ms": 312400.0, "p95_upper_ms": 312400.0, "max_ms": 312400.0}
+    body["protocol"] = "device-check-3"
+    body["frame_cost"] = {
+        "protocol": "frame-cost-1",
+        "cpu_bin_ms": 0.25,
+        "probe_block_ms": 6000,
+        "probe_settle_ms": 500,
+        "probe_complete": False,
+        "rows": [
+            {
+                "phase": "route",
+                "area": "chapel",
+                "mode": "normal",
+                "block": 0,
+                "resolution": 1.0,
+                "frames": 1,
+                "fps": 0.0032,
+                "calls_mean": 180.0,
+                "triangles_mean": 120000.0,
+                "metrics": {"raf_ms": metric},
+            }
+        ],
+    }
+    headers = login(client)
+    result = client.post("/api/diagnostics", headers=headers, json=body)
+    assert result.status_code == 200, result.text
+    assert client.get("/api/diagnostics/" + result.json()["id"], headers=headers).json() == body
 
 
 def test_device_reports_require_identity_and_are_owner_only(client):
@@ -310,6 +344,18 @@ def test_closed_guest_mode_and_competition_guard(settings):
         assert c.post("/api/auth/guest").status_code == 403
     with pytest.raises(RuntimeError, match="ALLOW_GUEST"):
         create_app(replace(settings, competition_open=True))
+
+
+def test_disabling_guest_mode_applies_to_existing_sessions(settings):
+    with TestClient(create_app(settings)) as first:
+        result = first.post("/api/auth/guest")
+        assert result.status_code == 200
+        guest = {"Authorization": "Bearer " + result.json()["token"]}
+        telegram = login(first)
+        assert first.get("/api/me", headers=guest).status_code == 200
+    with TestClient(create_app(replace(settings, allow_guest=False))) as second:
+        assert second.get("/api/me", headers=guest).status_code == 403
+        assert second.get("/api/me", headers=telegram).status_code == 200
 
 
 def test_leaderboard_versions_are_isolated(settings):
