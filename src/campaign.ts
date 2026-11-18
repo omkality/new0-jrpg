@@ -270,6 +270,12 @@ export class Campaign extends CombatGame {
     this.notify("weapon", WEAPONS[weapon].name);
   }
   override interact() {
+    this.contextAction()?.run();
+  }
+  override get nearby() {
+    return this.contextAction()?.label ?? "";
+  }
+  private contextAction(): { label: string; run: () => void } | undefined {
     const p = this.player;
     if (
       p.hp <= 0 ||
@@ -281,75 +287,94 @@ export class Campaign extends CombatGame {
       p.mode === "hit"
     )
       return;
-    for (const c of CHESTS) {
+
+    for (const chest of CHESTS) {
       if (
-        Math.abs(p.y - c.y) > 0.8 ||
-        distance(p, c) > 1.65 ||
-        this.lootedChests.has(c.id)
+        Math.abs(p.y - chest.y) > 0.8 ||
+        distance(p, chest) > 1.65 ||
+        this.lootedChests.has(chest.id)
       )
         continue;
-      const opened = this.openedChests.get(c.id);
-      if (opened === undefined) {
-        this.openedChests.set(c.id, this.elapsed);
-        this.inspecting = c.id;
-        this.inspectionAt = this.elapsed;
-        this.notify("secret", "Сундук открыт");
-        return;
-      }
-      if (this.inspecting !== c.id) {
-        this.inspecting = c.id;
-        this.inspectionAt = this.elapsed;
-        this.notify("secret", "Осматриваем открытый сундук");
-        return;
-      }
+      const opened = this.openedChests.get(chest.id);
+      if (opened === undefined || this.inspecting !== chest.id)
+        return {
+          label: opened === undefined ? "Открыть сундук" : "Осмотреть сундук",
+          run: () => {
+            if (opened === undefined)
+              this.openedChests.set(chest.id, this.elapsed);
+            this.inspecting = chest.id;
+            this.inspectionAt = this.elapsed;
+            this.notify(
+              "secret",
+              opened === undefined
+                ? "Сундук открыт"
+                : "Осматриваем открытый сундук",
+            );
+          },
+        };
       if (this.elapsed - Math.max(opened, this.inspectionAt) < 0.7) return;
-      this.lootedChests.add(c.id);
-      this.inspecting = null;
-      this.equip(c.weapon);
-      if ("armour" in c && c.armour) {
-        p.armour = 1;
-        this.notify("secret", "Кираса хранителя: урон снижен на 28%");
-      }
-      this.secrets.add(c.id);
-      return;
+      return {
+        label: `Взять: ${WEAPONS[chest.weapon].name}`,
+        run: () => {
+          this.lootedChests.add(chest.id);
+          this.inspecting = null;
+          this.equip(chest.weapon);
+          if ("armour" in chest && chest.armour) {
+            p.armour = 1;
+            this.notify("secret", "Кираса хранителя: урон снижен на 28%");
+          }
+          this.secrets.add(chest.id);
+        },
+      };
     }
     for (const key of KEYS)
       if (
         !this.collectedKeys.has(key.id) &&
         Math.abs(p.y - key.y) < 0.8 &&
         distance(p, key) < 1.7
-      ) {
-        this.collectedKeys.add(key.id);
-        this.keys.add(key.id);
-        this.secrets.add("key-" + key.id);
-        this.notify("secret", key.name);
-        return;
-      }
+      )
+        return {
+          label: "Взять ключ",
+          run: () => {
+            this.collectedKeys.add(key.id);
+            this.keys.add(key.id);
+            this.secrets.add("key-" + key.id);
+            this.notify("secret", key.name);
+          },
+        };
     for (const coin of COINS)
       if (
         !this.collectedCoins.has(coin.id) &&
         Math.abs(p.y - coin.y) < 0.8 &&
         distance(p, coin) < 1.65
-      ) {
-        this.collectedCoins.add(coin.id);
-        this.coins += coin.amount;
-        this.notify("secret", `Найдено монет: ${coin.amount}`);
-        return;
-      }
+      )
+        return {
+          label: "Собрать монеты",
+          run: () => {
+            this.collectedCoins.add(coin.id);
+            this.coins += coin.amount;
+            this.notify("secret", `Найдено монет: ${coin.amount}`);
+          },
+        };
     for (const flask of POTIONS)
       if (
         !this.collectedPotions.has(flask.id) &&
         Math.abs(p.y - flask.y) < 0.8 &&
         distance(p, flask) < 1.4
       ) {
-        if (this.flasks >= Campaign.FLASK_CAPACITY) {
-          this.notify("secret", "Все три места для зелий заняты");
-          return;
-        }
-        this.collectedPotions.add(flask.id);
-        this.flasks++;
-        this.notify("secret", "Найдено лечебное зелье");
-        return;
+        if (this.flasks >= Campaign.FLASK_CAPACITY)
+          return {
+            label: "Зелья заполнены",
+            run: () => this.notify("secret", "Все три места для зелий заняты"),
+          };
+        return {
+          label: "Взять лечебное зелье",
+          run: () => {
+            this.collectedPotions.add(flask.id);
+            this.flasks++;
+            this.notify("secret", "Найдено лечебное зелье");
+          },
+        };
       }
     for (const door of DOORS)
       if (
@@ -357,126 +382,84 @@ export class Campaign extends CombatGame {
         Math.abs(p.y - door.y) < 0.8 &&
         distance(p, door) < 2.1
       ) {
-        if (!this.keys.has(door.key)) {
-          this.notify("door", "Нужен ключ");
-          return;
-        }
-        this.keys.delete(door.key);
-        this.openDoors.add(door.id);
-        this.doorOpenedAt.set(door.id, this.elapsed);
-        this.doorSwing.set(door.id, p.z >= door.z ? 1 : -1);
-        this.notify(
-          "door",
-          door.id === "gate"
-            ? "Чёрные ворота открыты"
-            : "Ризница открыта ключом",
-        );
-        return;
+        if (!this.keys.has(door.key))
+          return {
+            label: `Заперто: ${door.name}`,
+            run: () => this.notify("door", "Нужен ключ"),
+          };
+        return {
+          label: `Открыть: ${door.name}`,
+          run: () => {
+            this.keys.delete(door.key);
+            this.openDoors.add(door.id);
+            this.doorOpenedAt.set(door.id, this.elapsed);
+            this.doorSwing.set(door.id, p.z >= door.z ? 1 : -1);
+            this.notify(
+              "door",
+              door.id === "gate"
+                ? "Чёрные ворота открыты"
+                : "Ризница открыта ключом",
+            );
+          },
+        };
       }
     const mimic = this.enemies.get("crypt")!;
     if (
       !this.mimicAwake &&
       this.location === "crypt" &&
       distance(p, mimic) < 1.9
-    ) {
-      this.mimicAwake = true;
-      this.mimicAwokeAt = this.elapsed;
-      this.enemyDormant = false;
-      mimic.mode = "recover";
-      mimic.time = 0;
-      this.notify("secret", "Это не обычный сундук");
-      return;
-    }
+    )
+      return {
+        label: "Открыть сундук",
+        run: () => {
+          this.mimicAwake = true;
+          this.mimicAwokeAt = this.elapsed;
+          this.enemyDormant = false;
+          mimic.mode = "recover";
+          mimic.time = 0;
+          this.notify("secret", "Это не обычный сундук");
+        },
+      };
     for (const drop of this.drops)
       if (
         drop.active &&
         Math.abs(p.y - drop.y) < 0.8 &&
         distance(p, drop) < 1.4
-      ) {
-        const weapon = drop.weapon;
-        drop.active = false;
-        this.equip(weapon);
-        return;
-      }
+      )
+        return {
+          label: `Поднять: ${WEAPONS[drop.weapon].name}`,
+          run: () => {
+            const weapon = drop.weapon;
+            drop.active = false;
+            this.equip(weapon);
+          },
+        };
+    const scenario = this.scenario;
+    const fullRoute = scenario === "journey" || scenario === "escape";
     const destination =
-      this.scenario === "journey" || this.scenario === "escape"
-        ? AREAS.crypt.exit
-        : AREAS[
-            this.scenario === "defeat" || this.scenario === "unarmoured"
-              ? "crypt"
-              : this.scenario === "locked"
-                ? "chapel"
-                : this.scenario === "ambush" || this.scenario === "healing"
-                  ? "forest"
-                  : this.scenario
-          ].exit;
+      AREAS[
+        fullRoute || scenario === "defeat" || scenario === "unarmoured"
+          ? "crypt"
+          : scenario === "locked"
+            ? "chapel"
+            : scenario === "ambush" || scenario === "healing"
+              ? "forest"
+              : scenario
+      ].exit;
     if (
       distance(p, destination) < 1.4 &&
-      (this.scenario === "journey" || this.scenario === "escape"
+      (fullRoute
         ? this.openDoors.has("gate")
         : this.completedAreas.has(areaAt(destination.z)))
-    ) {
-      this.phase = "finished";
-      this.set(p, "idle");
-      p.speed = 0;
-    }
-  }
-  override get nearby() {
-    const p = this.player;
-    if (p.hp <= 0) return "";
-    for (const c of CHESTS)
-      if (
-        !this.lootedChests.has(c.id) &&
-        Math.abs(p.y - c.y) < 0.8 &&
-        distance(p, c) < 1.65
-      )
-        return this.inspecting === c.id
-          ? `Взять: ${WEAPONS[c.weapon].name}`
-          : this.openedChests.has(c.id)
-            ? "Осмотреть сундук"
-            : "Открыть сундук";
-    for (const k of KEYS)
-      if (
-        !this.collectedKeys.has(k.id) &&
-        Math.abs(p.y - k.y) < 0.8 &&
-        distance(p, k) < 1.7
-      )
-        return "Взять ключ";
-    for (const c of COINS)
-      if (
-        !this.collectedCoins.has(c.id) &&
-        Math.abs(p.y - c.y) < 0.8 &&
-        distance(p, c) < 1.65
-      )
-        return "Собрать монеты";
-    for (const d of DOORS)
-      if (
-        !this.openDoors.has(d.id) &&
-        Math.abs(p.y - d.y) < 0.8 &&
-        distance(p, d) < 2.1
-      )
-        return this.keys.has(d.key)
-          ? `Открыть: ${d.name}`
-          : `Заперто: ${d.name}`;
-    for (const f of POTIONS)
-      if (
-        !this.collectedPotions.has(f.id) &&
-        Math.abs(p.y - f.y) < 0.8 &&
-        distance(p, f) < 1.4
-      )
-        return this.flasks < Campaign.FLASK_CAPACITY
-          ? "Взять лечебное зелье"
-          : "Зелья заполнены";
-    if (
-      this.location === "crypt" &&
-      !this.mimicAwake &&
-      distance(p, this.enemy) < 1.9
     )
-      return "Открыть сундук";
-    for (const d of this.drops)
-      if (d.active && Math.abs(p.y - d.y) < 0.8 && distance(p, d) < 1.4)
-        return `Поднять: ${WEAPONS[d.weapon].name}`;
-    return this.enemy.hp <= 0 ? "Продолжить путь" : "";
+      return {
+        label: "Продолжить путь",
+        run: () => {
+          this.phase = "finished";
+          this.set(p, "idle");
+          p.speed = 0;
+        },
+      };
   }
   override update(dt: number, input: MoveInput) {
     if (Math.hypot(input.x, input.z) > 0.12 || input.guard)

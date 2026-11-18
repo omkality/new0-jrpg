@@ -190,6 +190,7 @@ a {
 }
 .touch-actions button {
   pointer-events: auto;
+  touch-action: none;
   border: 1px solid #dce5ef77;
   border-radius: 50%;
   background: #2937466e;
@@ -294,12 +295,26 @@ a {
 }
 #review button,
 #review a,
-#review select {
+#review select,
+#review-menu {
   font: 14px "Ebbe Black";
   background: #25374bdb;
   border: 1px solid #b8cadb66;
   padding: 7px;
   color: #e0e8f2;
+}
+#review-menu {
+  position: absolute;
+  z-index: 7;
+  top: calc(12px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 44px;
+}
+#interact,
+#drop,
+#heal {
+  touch-action: none;
 }
 #performance {
   flex-basis: 100%;
@@ -307,7 +322,8 @@ a {
   text-align: right;
   text-shadow: 0 1px 4px #132133;
 }
-.recording #review {
+.recording #review,
+.recording #review-menu {
   visibility: hidden;
 }
 @media (max-width: 700px) {
@@ -324,6 +340,11 @@ a {
   }
 }
 @media (max-height: 500px) {
+  #intro {
+    grid-template-rows: minmax(min-content, 1fr) auto;
+    overflow-y: auto;
+    padding: calc(8px + var(--safe-top)) 0 calc(8px + var(--safe-bottom));
+  }
   #joystick {
     bottom: 20px;
   }
@@ -331,8 +352,9 @@ a {
     bottom: 20px;
   }
   .credits {
+    position: static;
+    margin-inline: 24px;
     font-size: 11px;
-    bottom: 8px;
   }
 }
 

@@ -51,6 +51,7 @@ export class World {
   private impactLife = 0;
   private cameraKick = 0;
   private wasInspecting = false;
+  private disposal?: Promise<void>;
   private resizeHandler = () => this.resize();
   private contextHandler = (e: Event) => {
     e.preventDefault();
@@ -135,11 +136,14 @@ export class World {
     canvas.addEventListener("webglcontextlost", this.contextHandler);
   }
   async load() {
-    await loadProps();
     await Promise.all([
       this.readyTextures,
-      this.player.load(),
-      ...[...this.actors.values()].map((a) => a.load()),
+      loadProps().then(() =>
+        Promise.all([
+          this.player.load(),
+          ...[...this.actors.values()].map((actor) => actor.load()),
+        ]),
+      ),
     ]);
     this.props.build();
     this.atmosphere.apply(this.scene);
@@ -396,7 +400,10 @@ export class World {
   setGrainEnabled(enabled: boolean) {
     this.atmosphere.grain.value = enabled ? 0.022 : 0;
   }
-  async dispose() {
+  dispose() {
+    return (this.disposal ??= this.release());
+  }
+  private async release() {
     window.removeEventListener("resize", this.resizeHandler);
     this.canvas.removeEventListener("webglcontextlost", this.contextHandler);
     this.player.dispose();
@@ -407,6 +414,7 @@ export class World {
       materials = new Set<THREE.Material>(),
       textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
+      if (o instanceof THREE.InstancedMesh) o.dispose();
       if (o instanceof THREE.Mesh) {
         geometries.add(o.geometry);
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {

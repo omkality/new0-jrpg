@@ -9,4 +9,5 @@ RUN npm run build
 
 FROM nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236 AS web
 COPY infra/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY infra/response-headers.conf /etc/nginx/game-response-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html

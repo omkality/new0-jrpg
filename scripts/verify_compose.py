@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from uuid import uuid4
 
@@ -54,6 +55,22 @@ def main():
             assert json.load(response)["ok"] is True
         with urllib.request.urlopen(base + "/", timeout=10) as response:
             assert "<html" in response.read().decode()
+        for path, cache_control, status in [
+            ("/", "no-cache", 200),
+            ("/api/health", "no-store", 200),
+            ("/api/me", "no-store", 401),
+            ("/assets/knight/knight.glb", "max-age=86400", 200),
+        ]:
+            try:
+                result = urllib.request.urlopen(base + path, timeout=10)
+            except urllib.error.HTTPError as exc:
+                result = exc
+            with result:
+                assert result.status == status, path
+                assert result.headers["X-Content-Type-Options"] == "nosniff", path
+                assert result.headers["Referrer-Policy"] == "strict-origin-when-cross-origin", path
+                assert result.headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=()", path
+                assert result.headers["Cache-Control"] == cache_control, path
         for service in ["api", "web"]:
             container = run("ps", "-q", service, capture=True).stdout.strip()
             health = subprocess.check_output(
