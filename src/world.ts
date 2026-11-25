@@ -2,8 +2,8 @@ import * as THREE from "three";
 import { ConnectedEnvironment, LOCATIONS, type LocationId } from "./locations";
 import { Actor } from "./actor";
 import { Campaign } from "./campaign";
-import { ENCOUNTERS, type AreaId } from "./world-layout";
-import type { GameEvent } from "./game";
+import type { AreaId } from "./world-layout";
+import type { Fighter, GameEvent } from "./game";
 import type { FrameCosts } from "./frame-cost";
 import { Atmosphere } from "./atmosphere";
 import { LevelProps } from "./level-props";
@@ -15,18 +15,30 @@ import {
   releaseTexture,
 } from "./asset-store";
 
+import { Blood } from "./chapter/blood";
+import type { Duel } from "./chapter/duel";
+import { dressProcession } from "./chapter/procession";
+
+const winterAir = {
+  forest: [0xe2e7eb, 0.074],
+  roofs: [0xd6dfe5, 0.066],
+  chapel: [0xbcc8d3, 0.05],
+  crypt: [0xa5b3c2, 0.055],
+} as const;
+const restingPitch = 0.08;
+
 export class World {
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(57, 1, 0.08, 165);
-  player = new Actor();
+  player: Actor;
   private actors = new Map<string, Actor>();
   private props: LevelProps;
   private environment: ConnectedEnvironment;
   private atmosphere: Atmosphere;
   private readyTextures: Promise<void>;
   yaw = 0;
-  pitch = 0.08;
+  pitch = restingPitch;
   resolution = 1;
   device = "";
   location: AreaId = "forest";
@@ -47,10 +59,13 @@ export class World {
   private shadows: THREE.Mesh[] = [];
   private settledCorpses = new WeakSet<object>();
   private corpsePoseTime = new WeakMap<object, number>();
+  private blood?: Blood;
   private impact: THREE.Sprite;
   private impactLife = 0;
   private cameraKick = 0;
   private wasInspecting = false;
+  private inDuel = false;
+  private disposal?: Promise<void>;
   private resizeHandler = () => this.resize();
   private contextHandler = (e: Event) => {
     e.preventDefault();
@@ -59,7 +74,11 @@ export class World {
   constructor(
     private canvas: HTMLCanvasElement,
     public game: Campaign,
+    private pixelScale = 1,
+    private winterChapter = false,
   ) {
+    const costume = winterChapter ? dressProcession : undefined;
+    this.player = new Actor(false, undefined, costume);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       // Native low-resolution edges fit the retro presentation and avoid an
@@ -91,23 +110,35 @@ export class World {
     this.environment = new ConnectedEnvironment(
       new THREE.TextureLoader(manager),
     );
-    this.atmosphere = new Atmosphere(this.environment.localLighting);
+    this.atmosphere = new Atmosphere(
+      this.environment.localLighting,
+      winterChapter,
+    );
     this.scene.add(this.environment.root, this.playerFill, this.player.root);
-    for (const spec of ENCOUNTERS)
+    if (winterChapter) {
+      this.blood = new Blood();
+      this.scene.add(this.blood.mesh);
+    }
+    const encounters = [...game.enemies.values()];
+    for (const spec of encounters)
       if (spec.kind !== "mimic") {
         const kind = spec.kind;
-        const actor = new Actor(true, kind);
+        const actor = new Actor(true, kind, costume);
         this.actors.set(spec.id, actor);
         this.scene.add(actor.root);
       }
-    this.props = new LevelProps(game);
+    this.props = new LevelProps(
+      game,
+      this.environment.gateDoors,
+      this.environment.vestryDoor,
+    );
     this.scene.add(this.props.root);
     const shadowTexture = new THREE.CanvasTexture(this.radial("#000000", 0.75));
-    for (let i = 0; i <= ENCOUNTERS.length; i++) {
+    for (let i = 0; i <= encounters.length; i++) {
       const shadow = new THREE.Mesh(
         new THREE.PlaneGeometry(
-          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 2 : 1.35,
-          i > 0 && ENCOUNTERS[i - 1].kind === "mimic" ? 1.7 : 1.2,
+          i > 0 && encounters[i - 1].kind === "mimic" ? 2 : 1.35,
+          i > 0 && encounters[i - 1].kind === "mimic" ? 1.7 : 1.2,
         ),
         new THREE.MeshBasicMaterial({
           map: shadowTexture,
@@ -134,14 +165,18 @@ export class World {
     window.addEventListener("resize", this.resizeHandler);
     canvas.addEventListener("webglcontextlost", this.contextHandler);
   }
-  async load() {
-    await loadProps();
+  async load(dress?: () => void | Promise<void>) {
     await Promise.all([
       this.readyTextures,
-      this.player.load(),
-      ...[...this.actors.values()].map((a) => a.load()),
+      loadProps().then(() =>
+        Promise.all([
+          this.player.load(),
+          ...[...this.actors.values()].map((actor) => actor.load()),
+        ]),
+      ),
     ]);
     this.props.build();
+    await dress?.();
     this.atmosphere.apply(this.scene);
     this.resetView();
     this.render(0.01);
@@ -151,7 +186,7 @@ export class World {
   resetView() {
     const p = this.game.player;
     this.yaw = 0;
-    this.pitch = 0.08;
+    this.pitch = restingPitch;
     this.position.set(p.x + 0.7, p.y + 2.6, p.z + 4.5);
     this.aim.set(p.x, p.y + 1.2, p.z - 0.6);
     this.props.reset();
@@ -193,13 +228,21 @@ export class World {
   resize() {
     const w = this.canvas.clientWidth,
       h = this.canvas.clientHeight;
+    if (!w || !h) return;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const scale = Math.min(1, (w < 700 ? 800 : 1080) / h) * this.resolution;
+    const scale =
+      this.pixelScale > 1
+        ? 1 / this.pixelScale
+        : Math.min(1, (w < 700 ? 800 : 1080) / h) * this.resolution;
     this.renderer.setSize(Math.round(w * scale), Math.round(h * scale), false);
   }
   event(e: GameEvent) {
     if (e.type !== "hit" && e.type !== "hurt" && e.type !== "block") return;
+    if (this.blood && e.type !== "block") {
+      if (e.wound) this.blood.strike(e.x, e.z, e.wound);
+      return;
+    }
     this.cameraKick =
       e.type === "block" ? 0.015 : this.game.player.combo === 3 ? 0.045 : 0.025;
     this.impact.position.set(
@@ -211,13 +254,28 @@ export class World {
     this.impact.visible = true;
     this.impactLife = 0.13;
   }
-  render(dt: number) {
+  render(
+    dt: number,
+    portrait?: Fighter,
+    view?: {
+      eye: { x: number; y: number; z: number };
+      target: { x: number; y: number; z: number };
+    },
+    duel?: Duel,
+  ) {
+    if (duel) view = duel;
     const costs = this.frameCosts;
     let stamp = costs ? performance.now() : 0;
     this.elapsed += dt;
     this.atmosphere.time.value = this.elapsed;
-    this.atmosphere.veil.value = this.location === "forest" ? 0.1 : 0.075;
-    const p = this.game.player;
+    this.atmosphere.veil.value = this.winterChapter
+      ? this.game.location === "chapel"
+        ? 0.095
+        : 0.11
+      : this.location === "forest"
+        ? 0.1
+        : 0.075;
+    const p = duel?.hero ?? this.game.player;
     this.location = this.game.location;
     this.environment.update(
       this.elapsed,
@@ -230,28 +288,42 @@ export class World {
     const fog = this.scene.fog as THREE.FogExp2,
       spec = LOCATIONS[this.location],
       blend = 1 - Math.exp(-dt * 2.3);
-    fog.color.lerp(this.fogColor.set(spec.fog), blend);
+    const air = this.winterChapter ? winterAir[this.location] : undefined;
+    fog.color.lerp(this.fogColor.set(air?.[0] ?? spec.fog), blend);
     (this.scene.background as THREE.Color).lerp(this.fogColor, blend);
-    fog.density = THREE.MathUtils.lerp(fog.density, spec.density, blend);
+    fog.density = THREE.MathUtils.lerp(
+      fog.density,
+      air?.[1] ?? spec.density,
+      blend,
+    );
     if (costs) {
       costs.environment_cpu_ms = performance.now() - stamp;
       stamp = performance.now();
     }
-    this.player.update(dt, p);
+    this.player.root.visible = this.shadows[0].visible =
+      !!duel || (!portrait && !view);
+    if (this.player.root.visible) this.player.update(dt, p);
     if (costs) {
       costs.player_cpu_ms = performance.now() - stamp;
       stamp = performance.now();
     }
     this.shadows[0].position.set(p.x, p.y + 0.014, p.z);
-    this.props.update(dt, this.elapsed);
+    this.props.update(
+      dt,
+      this.elapsed,
+      duel?.foe.kind === "mimic" ? duel.foe : undefined,
+    );
     if (costs) {
       costs.props_cpu_ms = performance.now() - stamp;
       stamp = performance.now();
     }
     const d = this.camera.aspect < 0.85 ? 4.5 : 3.9;
+    // As the player looks up, lift the sightline while keeping the orbit clear
+    // of the ground. At neutral pitch it still frames the walking character.
+    const lookUp = Math.max(0, restingPitch - this.pitch);
     this.desiredAim.set(
       p.x - Math.sin(this.yaw) * 0.7,
-      p.y + 1.2,
+      p.y + 1.2 + lookUp * 7.5,
       p.z - Math.cos(this.yaw) * 0.7,
     );
     this.desiredPosition.set(
@@ -277,10 +349,26 @@ export class World {
       this.playerFill.intensity = 1.5;
     } else this.playerFill.intensity = this.location === "forest" ? 0.7 : 0.42;
     const alpha = 1 - Math.exp(-dt * 8);
+    if (view) {
+      this.desiredAim.copy(view.target);
+      this.desiredPosition.copy(view.eye);
+      this.playerFill.position.set(
+        view.target.x + 0.5,
+        view.target.y + 0.7,
+        view.target.z + 1.1,
+      );
+      if (duel)
+        this.playerFill.position.set(
+          view.target.x + 0.72,
+          view.target.y + 1.05,
+          view.target.z + 0.85,
+        );
+      this.playerFill.intensity = duel ? 3.6 : 1.2;
+    }
     // Cast from head height so a waist-high chest cannot pull the camera
     // into the hero's shoulder while walking around it.
     this.cameraFocus.set(p.x, p.y + 1.55, p.z);
-    if (inspect) this.cameraFocus.copy(this.desiredAim);
+    if (inspect || view) this.cameraFocus.copy(this.desiredAim);
     this.cameraBounds.minX =
       p.y > 4.9 && this.location === "chapel" ? 3.7 : -7.1;
     this.cameraBounds.maxX =
@@ -306,6 +394,11 @@ export class World {
       this.position.copy(this.desiredPosition);
     }
     this.wasInspecting = !!inspect;
+    if (duel && !this.inDuel) {
+      this.aim.copy(this.desiredAim);
+      this.position.copy(this.desiredPosition);
+    }
+    this.inDuel = !!duel;
     this.aim.lerp(this.desiredAim, alpha);
     this.position.lerp(this.desiredPosition, alpha);
     this.position.lerpVectors(
@@ -320,12 +413,44 @@ export class World {
     );
     if (this.position.distanceTo(this.cameraFocus) < 1.6)
       this.position.copy(this.desiredPosition);
-    this.camera.position.copy(this.position);
+    if (portrait) {
+      const fall =
+        portrait.mode === "dead"
+          ? THREE.MathUtils.smoothstep(portrait.time, 0.1, 0.75)
+          : 0;
+      this.camera.position.set(
+        portrait.x + (this.winterChapter ? -1.16 : 0.7),
+        portrait.y + (this.winterChapter ? 1.72 : 1.48) - 0.28 * fall,
+        portrait.z + (this.winterChapter ? 1.72 : 1.55),
+      );
+      this.cameraFocus.set(
+        portrait.x - 0.1,
+        portrait.y + (this.winterChapter ? 1.43 : 1.3) - 0.85 * fall,
+        portrait.z - 0.1 - 0.3 * fall,
+      );
+      this.camera.position.lerpVectors(
+        this.cameraFocus,
+        this.camera.position,
+        cameraClearance(
+          this.cameraFocus,
+          this.camera.position,
+          this.game.obstacles,
+          this.game.openDoors,
+        ),
+      );
+      this.playerFill.position.set(
+        portrait.x + (this.winterChapter ? -0.62 : 0.45),
+        portrait.y + 1.95,
+        portrait.z + 1.15,
+      );
+      this.playerFill.intensity = this.winterChapter ? 2.45 : 1.35;
+    } else this.camera.position.copy(this.position);
     this.cameraKick *= Math.exp(-dt * 30);
     this.camera.position.x += Math.sin(this.elapsed * 67) * this.cameraKick;
     this.camera.position.y +=
       Math.cos(this.elapsed * 53) * this.cameraKick * 0.45;
-    this.camera.lookAt(this.aim);
+    this.camera.lookAt(portrait ? this.cameraFocus : this.aim);
+    this.blood?.update(dt, this.camera.quaternion);
     if (this.impactLife > 0) {
       this.impactLife -= dt;
       this.impact.scale.setScalar(0.35 + (0.13 - this.impactLife) * 2);
@@ -348,7 +473,8 @@ export class World {
       stamp = performance.now();
     }
     let shadowIndex = 1;
-    for (const [id, e] of this.game.enemies) {
+    for (const [id, actual] of this.game.enemies) {
+      const e = duel && actual === this.game.enemy ? duel.foe : actual;
       const heavy = e.kind === "gaoler";
       this.actorSphere.center.set(e.x, e.y + (heavy ? 1.6 : 1.1), e.z);
       this.actorSphere.radius = heavy ? 3.2 : 2.2;
@@ -362,13 +488,14 @@ export class World {
       if (!actor) continue;
       const appeared = visible && !actor.root.visible;
       actor.root.visible = visible;
-      if (visible && !this.settledCorpses.has(e)) {
+      if (visible && (!this.settledCorpses.has(actual) || !!duel)) {
         if (appeared && e.hp > 0) actor.reset();
         actor.update(dt, e);
         if (e.hp <= 0) {
-          const posed = (this.corpsePoseTime.get(e) ?? 0) + dt;
-          this.corpsePoseTime.set(e, posed);
-          if (e.time > 3.5 && posed > 0.5) this.settledCorpses.add(e);
+          const posed = (this.corpsePoseTime.get(actual) ?? 0) + dt;
+          this.corpsePoseTime.set(actual, posed);
+          if (e.time > 3.5 && posed > 0.5 && !duel)
+            this.settledCorpses.add(actual);
         }
       }
     }
@@ -396,7 +523,10 @@ export class World {
   setGrainEnabled(enabled: boolean) {
     this.atmosphere.grain.value = enabled ? 0.022 : 0;
   }
-  async dispose() {
+  dispose() {
+    return (this.disposal ??= this.release());
+  }
+  private async release() {
     window.removeEventListener("resize", this.resizeHandler);
     this.canvas.removeEventListener("webglcontextlost", this.contextHandler);
     this.player.dispose();
@@ -407,6 +537,7 @@ export class World {
       materials = new Set<THREE.Material>(),
       textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
+      if (o instanceof THREE.InstancedMesh) o.dispose();
       if (o instanceof THREE.Mesh) {
         geometries.add(o.geometry);
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {

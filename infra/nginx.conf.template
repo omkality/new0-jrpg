@@ -6,9 +6,7 @@ server {
     root /usr/share/nginx/html;
     index index.html;
     client_max_body_size 24k;
-    add_header X-Content-Type-Options nosniff always;
-    add_header Referrer-Policy strict-origin-when-cross-origin always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    include /etc/nginx/game-response-headers.conf;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
@@ -20,6 +18,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 15s;
+        include /etc/nginx/game-response-headers.conf;
         add_header Cache-Control no-store always;
     }
     location ~* \.(glb|png|jpg|webp|woff2)$ {
@@ -28,6 +27,7 @@ server {
     }
     location / {
         try_files $uri $uri/ /index.html;
+        include /etc/nginx/game-response-headers.conf;
         add_header Cache-Control no-cache;
     }
 }

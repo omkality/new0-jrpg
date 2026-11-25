@@ -7,6 +7,15 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 const capture = promisify(execFile);
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const suite =
+  process.argv.find((arg) => arg.startsWith("--suite="))?.slice(8) ?? "all";
+if (!["all", "world", "portrait"].includes(suite)) {
+  throw new Error("Expected --suite=world, --suite=portrait or --suite=all");
+}
+// The six-run resource benchmark keeps its original deadline. Rendering full
+// portrait routes in software has a separate budget from measuring resources.
+const suiteMinutes = { world: 20.5, portrait: 30, all: 50.5 };
+const suiteTimeout = suiteMinutes[suite] * 60_000;
 const id = (
   process.env.NEW0_RESOURCE_RUN_ID ?? `local-${Date.now()}-${process.pid}`
 ).replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -65,7 +74,7 @@ try {
       "--network",
       "none",
       "--cpus",
-      "1",
+      suite === "portrait" ? "2" : "1",
       "--memory",
       "1536m",
       "--memory-swap",
@@ -81,6 +90,12 @@ try {
           ]
         : []),
       image,
+      "npm",
+      "test",
+      "--",
+      ...(suite === "all" ? [] : ["--project", suite]),
+      "--global-timeout",
+      String(suiteTimeout),
     ],
     30_000,
     "container.log",
@@ -89,7 +104,7 @@ try {
   created = true;
   code = await docker(
     ["start", "--attach", container],
-    21 * 60_000,
+    suiteTimeout + 30_000,
     "container.log",
   );
   if (code === 124) await capture("docker", ["stop", "--time", "5", container]);
@@ -139,7 +154,8 @@ try {
 }
 console.log(
   JSON.stringify({
-    resource_check_only: true,
+    resource_check_only: suite !== "portrait",
+    suite,
     container,
     results,
     exit_code: code,

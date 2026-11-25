@@ -1,0 +1,87 @@
+<main id="chapter" aria-label="Лес у Чёрных ворот">
+  <div class="scene">
+    <canvas id="world" aria-label="Тропа в лесу у Чёрных ворот"></canvas>
+    <header>
+      <span class="wordmark">new0</span><span id="place">Чёрные ворота</span>
+      <button id="sound" aria-label="Звук" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9h4l5-4v14l-5-4H3z" />
+          <path class="mute" d="m16 9 5 6m0-6-5 6" />
+          <path class="waves" d="M16 8q4 4 0 8m3-11q7 7 0 14" />
+        </svg>
+      </button>
+    </header>
+    <div id="vitals" hidden>
+      <div>
+        <span>Паломница <b id="hero-hp"></b></span
+        ><meter id="hero-meter" aria-label="Здоровье героини"></meter>
+      </div>
+      <div id="enemy-vitals">
+        <span><span id="foe-name">Певчая</span> <b id="foe-hp"></b></span
+        ><meter id="foe-meter" aria-label="Здоровье противника"></meter>
+      </div>
+    </div>
+  </div>
+  <section class="panel" aria-labelledby="panel-title">
+    <div id="panel-top">
+      <span class="sigil" aria-hidden="true">✦</span
+      ><span id="mode-label">Лесная глава</span><span id="stock"></span>
+    </div>
+    <h1 id="panel-title">У Чёрных ворот</h1>
+    <p id="line" aria-live="polite">За поворотом тропы кто-то ждёт.</p>
+    <dl id="weapon-compare" aria-label="Сравнение оружия" hidden>
+      <div>
+        <dt>Находка · <strong id="find-weapon"></strong></dt>
+        <dd id="find-stats"></dd>
+      </div>
+      <div>
+        <dt>В руке · <strong id="held-weapon"></strong></dt>
+        <dd id="held-stats"></dd>
+      </div>
+    </dl>
+    <div id="walk" hidden>
+      <div id="joystick" role="group" aria-label="Стик движения">
+        <i id="joystick-knob"></i>
+      </div>
+      <div class="trail-action">
+        <button id="interact" hidden>Заговорить</button
+        ><span id="walk-help"
+          >Веди стик, чтобы идти.<br />Свайп поворачивает камеру.</span
+        >
+      </div>
+    </div>
+    <div id="choices" hidden>
+      <button id="attack">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m3 21 6-6m-4-3 7 7m-3-6L19 3l2-1-1 5-9 9" /></svg
+        ><strong>Атака</strong><small></small>
+      </button>
+      <button id="item">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3h6m-5 0v6L5 16q-2 5 3 5h8q5 0 3-5l-5-7V3M7 15h10" /></svg
+        ><strong>Зелье</strong><small></small>
+      </button>
+      <button id="skill">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m12 2 2 7 7 3-7 2-2 8-2-8-7-2 7-3z" /></svg
+        ><strong>Тяжёлый удар</strong><small></small>
+      </button>
+    </div>
+    <div id="court-options" hidden></div>
+    <div id="auto-result" hidden role="status">
+      <strong id="auto-save"></strong>
+      <p id="auto-fps"></p>
+      <button id="retry-report" hidden>Повторить отправку</button>
+    </div>
+    <button id="advance" class="primary" disabled>Подключение…</button>
+    <a id="report" hidden download="new0-forest-report.json">Сохранить замер</a>
+    <details id="credits"><summary>Авторы и лицензии</summary></details>
+  </section>
+</main>
+<section id="orientation" role="status" hidden>
+  <div>
+    <span class="wordmark">new0</span>
+    <h2 id="orientation-title"></h2>
+    <button id="expand" hidden>Развернуть</button>
+  </div>
+</section>

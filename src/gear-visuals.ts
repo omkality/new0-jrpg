@@ -4,7 +4,8 @@ import { registerArmourShoulders } from "./character-appearance.ts";
 
 // Small original meshes. They share geometry/materials when cloned and have no
 // decoder, network, animation-mixer or per-frame allocation cost.
-export function flaskModel() {
+export const FLASK_COLORS = { healing: 0x753e45, regeneration: 0x659e7f };
+export function flaskModel(liquidColor = FLASK_COLORS.healing) {
   const root = new THREE.Group();
   const profile = [
     [0.035, 0],
@@ -29,7 +30,7 @@ export function flaskModel() {
   const liquid = new THREE.Mesh(
     liquidGeometry(),
     new THREE.MeshStandardMaterial({
-      color: 0x753e45,
+      color: liquidColor,
       roughness: 0.3,
       metalness: 0,
     }),
@@ -118,9 +119,17 @@ function liquidGeometry() {
 }
 // Fill changes volume and a horizontal surface. The liquid never contracts into
 // a separate ball, and no geometry or material is allocated during a drink.
-export function setFlaskFill(root: THREE.Object3D, fraction: number) {
+export function setFlaskFill(
+  root: THREE.Object3D,
+  fraction: number,
+  color?: number,
+) {
   const liquid = root.getObjectByName("FlaskLiquid") as THREE.Mesh | undefined;
   if (!liquid) return;
+  if (color !== undefined && liquid.userData.liquidColor !== color) {
+    (liquid.material as THREE.MeshStandardMaterial).color.setHex(color);
+    liquid.userData.liquidColor = color;
+  }
   const fill = THREE.MathUtils.clamp(fraction, 0, 1);
   if (liquid.userData.fill === fill) return;
   liquid.userData.fill = fill;
@@ -599,65 +608,6 @@ export function armourModel(rig?: THREE.Object3D) {
   if (rig) registerArmourShoulders(rig, shoulders, root, fauldRoot);
   batchStatic(root);
   root.name = "ArmourGuardianCuirass";
-  return root;
-}
-
-export function blackGate() {
-  const root = new THREE.Group();
-  const metal = new THREE.MeshStandardMaterial({
-    color: 0x161d22,
-    metalness: 0.45,
-    roughness: 0.8,
-  });
-  const edge = new THREE.MeshStandardMaterial({
-    color: 0x737e82,
-    metalness: 0.65,
-    roughness: 0.6,
-  });
-  for (const side of [-1, 1]) {
-    const pivot = new THREE.Group();
-    pivot.name = side < 0 ? "GateLeft" : "GateRight";
-    pivot.position.x = side * 1.52;
-    const leaf = new THREE.Group();
-    leaf.position.x = -side * 0.76;
-    pivot.add(leaf);
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.95, 0.12), metal);
-    panel.position.y = 1.49;
-    leaf.add(panel);
-    for (const y of [0.18, 1, 2.05, 2.82]) {
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.065, 0.18), edge);
-      rib.position.y = y;
-      leaf.add(rib);
-      for (const x of [-0.61, -0.3, 0, 0.3, 0.61]) {
-        const rivet = new THREE.Mesh(
-          new THREE.SphereGeometry(0.022, 6, 4),
-          edge,
-        );
-        rivet.position.set(x, y, 0.11);
-        leaf.add(rivet);
-      }
-    }
-    for (const x of [-0.67, 0.67]) {
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.09, 3, 0.2), edge);
-      rib.position.set(x, 1.5, 0);
-      leaf.add(rib);
-    }
-    const batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
-    for (const mesh of [...leaf.children] as THREE.Mesh[]) {
-      mesh.updateMatrix();
-      const material = mesh.material as THREE.Material;
-      const batch = batches.get(material) ?? [];
-      batch.push(mesh.geometry.clone().applyMatrix4(mesh.matrix));
-      batches.set(material, batch);
-      mesh.geometry.dispose();
-    }
-    leaf.clear();
-    for (const [material, geometries] of batches) {
-      leaf.add(new THREE.Mesh(mergeGeometries(geometries)!, material));
-      for (const g of geometries) g.dispose();
-    }
-    root.add(pivot);
-  }
   return root;
 }
 

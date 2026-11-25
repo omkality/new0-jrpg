@@ -4,6 +4,7 @@ export class Sound {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private ambience: GainNode | null = null;
+  constructor(private ambient = true) {}
 
   async toggle() {
     this.enabled = !this.enabled;
@@ -25,6 +26,7 @@ export class Sound {
     this.master = context.createGain();
     this.master.gain.value = 0;
     this.master.connect(context.destination);
+    if (!this.ambient) return;
     this.ambience = context.createGain();
     this.ambience.gain.value = 0.13;
     this.ambience.connect(this.master);
@@ -88,6 +90,33 @@ export class Sound {
   }
   suspend() {
     void this.context?.suspend();
+  }
+  bell() {
+    if (!this.enabled || !this.context || !this.master) return;
+    const c = this.context,
+      now = c.currentTime;
+    for (const [hz, amplitude, decay] of [
+      [168, 0.47, 2.9],
+      [344, 0.31, 2.1],
+      [421, 0.21, 1.6],
+      [690, 0.13, 1.15],
+      [933, 0.06, 0.48],
+    ]) {
+      const voice = c.createOscillator(),
+        envelope = c.createGain();
+      voice.frequency.value = hz;
+      envelope.gain.setValueAtTime(0, now);
+      envelope.gain.linearRampToValueAtTime(amplitude, now + 0.008);
+      envelope.gain.exponentialRampToValueAtTime(0.0002, now + decay);
+      voice.connect(envelope);
+      envelope.connect(this.master);
+      voice.onended = () => {
+        voice.disconnect();
+        envelope.disconnect();
+      };
+      voice.start(now);
+      voice.stop(now + decay + 0.03);
+    }
   }
   resume() {
     if (this.enabled) void this.context?.resume();

@@ -44,14 +44,18 @@ class ResourceMetrics(Body):
     js_heap_mb: float | None = Field(default=None, ge=0, le=32768, allow_inf_nan=False)
 
 
-class StageMetrics(Body):
-    location: Literal["chapel", "roofs", "courtyard", "forest", "crypt"]
-    seconds: float = Field(ge=0, le=180, allow_inf_nan=False)
+class FrameMetrics(Body):
+    # The final RAF may cross the client timeout, so preserve the measured duration.
+    seconds: float = Field(ge=0, allow_inf_nan=False)
     frames: int = Field(ge=0, le=100000)
     fps: float = Field(ge=0, le=1000, allow_inf_nan=False)
-    p95_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    p95_ms: float = Field(ge=0, allow_inf_nan=False)
     over_25_ms: int = Field(ge=0, le=100000)
     over_50_ms: int = Field(ge=0, le=100000)
+
+
+class StageMetrics(FrameMetrics):
+    location: Literal["chapel", "roofs", "courtyard", "forest", "crypt"]
     completed: bool
     render_scale: float = Field(ge=0.1, le=1, allow_inf_nan=False)
     resources: ResourceMetrics | None = None
@@ -75,9 +79,9 @@ CostKey = Literal[
 
 class CostMetric(Body):
     samples: int = Field(ge=1, le=100000)
-    mean_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
-    p95_upper_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
-    max_ms: float = Field(ge=0, le=180000, allow_inf_nan=False)
+    mean_ms: float = Field(ge=0, allow_inf_nan=False)
+    p95_upper_ms: float = Field(ge=0, allow_inf_nan=False)
+    max_ms: float = Field(ge=0, allow_inf_nan=False)
 
 
 class CostRow(Body):
@@ -119,6 +123,25 @@ class DeviceReport(Body):
     frame_cost: FrameCostReport | None = None
 
 
+class PortraitAutoReport(Body):
+    protocol: Literal["portrait-auto-1"]
+    client_revision: str = Field(pattern=r"^[a-f0-9]{16}$")
+    asset_revision: str = Field(pattern=r"^[a-f0-9]{16}$")
+    platform: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
+    telegram_version: str = Field(max_length=24, pattern=r"^[a-zA-Z0-9_.-]*$")
+    viewport_width: int = Field(ge=100, le=10000)
+    viewport_height: int = Field(ge=100, le=10000)
+    completed: bool
+    weapon: Literal["sword", "spear", "axe"]
+    weapon_swaps: int = Field(ge=0, le=3)
+    mimic_defeated: bool
+    regen_used: bool
+    pauses: int = Field(ge=0, le=100000)
+    movement: FrameMetrics
+    combat: FrameMetrics
+    mimic: FrameMetrics
+
+
 def create_app(settings=None):
     settings = settings or Settings()
     settings.validate()
@@ -144,6 +167,8 @@ def create_app(settings=None):
             ).fetchone()
         if not row:
             raise HTTPException(401, "Сессия закончилась. Открой игру заново")
+        if row["is_guest"] and not settings.allow_guest:
+            raise HTTPException(403, "Открой игру через Telegram")
         return dict(row)
 
     def identity(user):
@@ -260,7 +285,7 @@ def create_app(settings=None):
             return session(c, dict(user))
 
     @app.post("/api/diagnostics")
-    def diagnostic_report(body: DeviceReport, user=Depends(current_user)):
+    def diagnostic_report(body: DeviceReport | PortraitAutoReport, user=Depends(current_user)):
         if settings.competition_open:
             raise HTTPException(403, "Автопроверка доступна в демонстрационном режиме")
         now = time.time()

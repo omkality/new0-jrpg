@@ -26,7 +26,13 @@ export default defineConfig((env) => {
       ...base.build,
       outDir: resolve(project, "scripts/performance/.build"),
       emptyOutDir: true,
-      rolldownOptions: { input: fixture },
+      rolldownOptions: {
+        input: [
+          fixture,
+          resolve(project, "index.html"),
+          resolve(project, "scripts/performance/fixtures/audit-lab.html"),
+        ],
+      },
     },
   };
 });

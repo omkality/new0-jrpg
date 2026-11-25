@@ -18,7 +18,8 @@
     <script src="https://telegram.org/js/telegram-web-app.js?65"></script>
   </head>
   <body>
-    <div id="app">
+    <div id="boot-status" role="status">Загрузка игры…</div>
+    <div id="app" hidden>
       <canvas
         id="world"
         tabindex="0"
@@ -32,7 +33,7 @@
           <output id="check-result" class="hidden" aria-live="polite"></output>
         </div>
         <footer class="credits">
-          fixes3 / 16.11<br />
+          <span class="showcase-build">fixes3 / 16.11<br /></span>
           Персонажи:
           <a
             href="https://patch.gg/create/toolbox"
@@ -96,6 +97,7 @@
       <button id="heal" class="hidden">Выпить зелье</button>
       <button id="interact" class="hidden">Исследовать</button>
       <div id="toast" role="status" class="sr-only hidden"></div>
+      <button id="review-menu" class="hidden">Меню проверки</button>
       <div id="review" class="hidden">
         <select id="review-scenario" aria-label="Сценарий демо">
           <option value="journey">Весь маршрут / четыре локации</option>
@@ -131,6 +133,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/entry.ts"></script>
   </body>
 </html>

@@ -7,14 +7,25 @@ import {
   WALLS,
   DRESSING,
   COURT_COLUMNS,
+  COURT_STAIR,
+  FOREST_GATE,
   CHAPEL_COLUMNS,
+  CHAPEL_THRESHOLD_Z,
   ARCH_PORTALS,
   CRYPT_COLUMNS,
   CRYPT_CEILING_Y,
   OBSTACLES,
+  VESTRY,
+  OSSUARY_PASSAGE,
   type AreaId,
 } from "./world-layout.ts";
 import { createForest } from "./forest.ts";
+import {
+  blackGate,
+  vestryDoor,
+  gateWall,
+  standardTexture,
+} from "./gatehouse.ts";
 import { StaticLightField } from "./static-light.ts";
 import { terrainHeight } from "./terrain-height.ts";
 import { CRYPT_FURNISHINGS } from "./castle-furnishings.ts";
@@ -24,11 +35,11 @@ import {
 } from "./environment-materials.ts";
 
 export const LOCATIONS = {
-  forest: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.057 },
+  forest: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.052 },
   roofs: { name: "Воротный двор", fog: 0xcbd2cc, density: 0.048 },
   chapel: { name: "Собор и верхняя галерея", fog: 0xc7cec8, density: 0.045 },
   crypt: { name: "Зал погребённых", fog: 0xc3cbc5, density: 0.047 },
-  courtyard: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.057 },
+  courtyard: { name: "Лес у Чёрных ворот", fog: 0xd4d9d3, density: 0.052 },
 } as const;
 export type LocationId = keyof typeof LOCATIONS;
 export const LOCATION_IDS = Object.keys(LOCATIONS) as LocationId[];
@@ -69,6 +80,8 @@ const rand = (i: number) => {
 // A continuous map. Geometry, materials and light pools are allocated once.
 export class ConnectedEnvironment {
   root = new THREE.Group();
+  readonly gateDoors: THREE.Group;
+  readonly vestryDoor: THREE.Group;
   readonly localLighting: StaticLightField;
   private sectors = new Map<Sector, THREE.Group>();
   private batches = new Map<
@@ -82,6 +95,8 @@ export class ConnectedEnvironment {
   private dark: THREE.MeshStandardMaterial;
   private bark: THREE.MeshStandardMaterial;
   private earth: THREE.MeshStandardMaterial;
+  private dressedStone: THREE.MeshStandardMaterial;
+  private causeway: THREE.MeshStandardMaterial;
   private torchCloth: THREE.MeshStandardMaterial;
   private iron: THREE.MeshStandardMaterial;
   private wax: THREE.MeshStandardMaterial;
@@ -141,27 +156,39 @@ export class ConnectedEnvironment {
       this.batches.set(sector, new Map());
       this.root.add(group);
     }
-    const tiled = (file: string, tint: number) => {
-      const material = new THREE.MeshStandardMaterial({
-        map: loader.load(assetUrl(`/assets/dungeon/${file}.png`), (t) => {
-          t.colorSpace = THREE.SRGBColorSpace;
-          t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.anisotropy = 2;
-        }),
+    const tile = (path: string, mirrored = false) =>
+      loader.load(assetUrl(path), (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = texture.wrapT = mirrored
+          ? THREE.MirroredRepeatWrapping
+          : THREE.RepeatWrapping;
+        texture.anisotropy = 2;
+      });
+    const tiled = (map: THREE.Texture, tint: number) =>
+      new THREE.MeshStandardMaterial({
+        map,
         color: tint,
         roughness: 1,
         vertexColors: true,
       });
-      return material;
-    };
+    const gateTile = (id: string) => tile(`/assets/gatehouse/${id}.webp`, true);
     this.wall = new THREE.MeshStandardMaterial({
       map: this.pattern("brick"),
       color: 0xc0bcb1,
       roughness: 1,
       vertexColors: true,
     });
-    this.stone = tiled("TEX_Arch_02", 0xb5b8ac);
-    this.floor = tiled("TEX_Ground_04", 0xbbbeb5);
+    this.stone = tiled(tile("/assets/dungeon/TEX_Arch_02.png"), 0xb5b8ac);
+    this.floor = tiled(tile("/assets/dungeon/TEX_Ground_04.png"), 0xbbbeb5);
+    const ashlar = tiled(gateTile("ashlar"), 0xc5ceca);
+    this.dressedStone = tiled(gateTile("dressed-stone"), 0xa0b3bb);
+    this.causeway = tiled(gateTile("causeway"), 0xb8bdb0);
+    const oakMap = gateTile("black-oak");
+    this.vestryDoor = vestryDoor(oakMap);
+    this.group("chapel").add(this.vestryDoor);
+    this.gateDoors = blackGate(oakMap);
+    this.gateDoors.position.set(FOREST_GATE.x, 0, FOREST_GATE.z);
+    this.group("forest").add(this.gateDoors);
     this.metal = new THREE.MeshStandardMaterial({
       color: 0x353e48,
       roughness: 0.87,
@@ -243,8 +270,32 @@ export class ConnectedEnvironment {
           p.area,
         );
       this.arch(0, p.base, p.z, p.radius, p.stem, this.stone, p.area);
+      this.archBacking(
+        0,
+        p.base,
+        p.z,
+        p.radius,
+        p.stem,
+        p.radius,
+        p.wallHeight,
+        p.depth - 0.08,
+        p.area,
+      );
     }
-    for (const w of WALLS)
+    const gateMaterials = {
+      ashlar,
+      dressed: this.dressedStone,
+      recess: this.dark,
+      iron: this.iron,
+      standard: tiled(standardTexture(), 0xe3ddce),
+    };
+    for (const w of WALLS) {
+      if (w.id.startsWith("gate-")) {
+        gateWall(w, gateMaterials, (mesh, scale) =>
+          this.part(mesh, "forest", scale),
+        );
+        continue;
+      }
       this.box(
         w.hx * 2,
         w.height,
@@ -252,13 +303,16 @@ export class ConnectedEnvironment {
         w.x,
         w.base + w.height / 2,
         w.z,
-        w.material === "stone"
-          ? this.stone
-          : w.material === "dark"
-            ? this.dark
-            : this.wall,
+        w.material === "ashlar"
+          ? ashlar
+          : w.material === "stone"
+            ? this.stone
+            : w.material === "dark"
+              ? this.dark
+              : this.wall,
         w.area,
       );
+    }
     this.dressing();
     this.buildFlames();
     this.flush();
@@ -396,6 +450,38 @@ export class ConnectedEnvironment {
     mesh.rotation.y = rotation;
     this.part(mesh, sector);
   }
+  // Continuous masonry between the extrados, supporting piers and the deck above.
+  private archBacking(
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+    stem: number,
+    halfSpan: number,
+    height: number,
+    depth: number,
+    sector: Sector,
+  ) {
+    const crown = new THREE.Shape(),
+      r = radius - 0.035;
+    crown.moveTo(-halfSpan, stem);
+    crown.lineTo(-r, stem);
+    crown.absarc(0, stem, r, Math.PI, 0, true);
+    crown.lineTo(halfSpan, stem);
+    crown.lineTo(halfSpan, height);
+    crown.lineTo(-halfSpan, height);
+    crown.closePath();
+    const masonry = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(crown, {
+        depth,
+        bevelEnabled: false,
+        curveSegments: 20,
+      }),
+      this.wall,
+    );
+    masonry.position.set(x, y, z - depth / 2);
+    this.part(masonry, sector);
+  }
   private ground(
     width: number,
     depth: number,
@@ -514,17 +600,16 @@ export class ConnectedEnvironment {
           );
       }
     }
-    this.arch(0, 0, -14.18, 1.65, 2.6, this.stone, "forest");
-    for (let x = -7; x <= 7; x += 2)
-      this.box(0.8, 1, 1.2, x, 8.5, -14, this.stone, "forest");
     // A supported stone bridge: arch feet meet the court, crowns meet the deck.
     this.box(28, 0.7, 2.6, 0, 7.25, -37, this.stone);
     for (const side of [-1, 1])
       this.box(1, 9.3, 2.6, side * 14, 2.25, -37, this.wall);
     for (const z of [-38.15, -35.85])
       this.box(28, 1.1, 0.3, 0, 8.15, z, this.wall);
-    for (let x = -12; x <= 12; x += 4)
+    for (let x = -12; x <= 12; x += 4) {
       this.arch(x, 2.4, -37.5, 1.9, 2.6, this.wall);
+      this.archBacking(x, 2.4, -37, 1.9, 2.6, 2, 4.56, 2.5, "world");
+    }
     // Beyond the last arch: another inhabited-looking volume, never a floating exit.
     this.box(24, 8, 15, 0, 4, -115, this.wall);
     this.box(25, 0.5, 16, 0, 8.3, -115, this.stone);
@@ -589,6 +674,7 @@ export class ConnectedEnvironment {
     path.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     path.computeVertexNormals();
     this.part(new THREE.Mesh(path, mud), "forest", 0);
+    this.gateApproach();
     for (const side of [-1, 1]) {
       // Only the grounded remnants of the forest ruin survive. Their bounds
       // match the existing shared low piers instead of adding a freestanding arch.
@@ -616,8 +702,8 @@ export class ConnectedEnvironment {
         );
     }
     // Broken root/stone shelves hide the chest and the key in different compositions.
-    this.box(1.2, 0.8, 0.9, -3.8, 0.4, 1.3, this.stone, "forest");
-    this.box(1.5, 0.12, 1.1, -3.8, 0.85, 1.3, this.stone, "forest");
+    this.box(1.2, 0.8, 0.9, -3.8, 0.4, 1.3, this.dressedStone, "forest");
+    this.box(1.5, 0.12, 1.1, -3.8, 0.85, 1.3, this.dressedStone, "forest");
     for (let i = 0; i < 4; i++) {
       const log = new THREE.Mesh(
         new THREE.CylinderGeometry(0.14, 0.3, 3.3, 8),
@@ -628,8 +714,13 @@ export class ConnectedEnvironment {
       log.rotation.y = 0.4;
       this.part(log, "forest");
     }
-    this.torch(-3.3, 1.7, -13.6, "forest");
-    this.torch(3.3, 1.7, -13.6, "forest");
+    for (const side of [-1, 1])
+      this.torch(
+        side * (FOREST_GATE.width / 2 + FOREST_GATE.towerWidth / 2),
+        1.92,
+        FOREST_GATE.z + FOREST_GATE.towerDepth / 2 + 0.15,
+        "forest",
+      );
     this.beam({
       x: -4,
       y: 14,
@@ -642,20 +733,130 @@ export class ConnectedEnvironment {
       area: "forest",
     });
   }
+  private gateApproach() {
+    // The dirt track gradually uncovers a foundation of setts. Keep the top
+    // almost flush with the walking surface and continue it through the tunnel.
+    const p: number[] = [],
+      uv: number[] = [],
+      rows: number[][] = [];
+    for (let i = 0; i <= 13; i++) {
+      const z = FOREST_GATE.z + 9.35 - i * 0.86;
+      const spread = Math.min(1, (i + 0.2) / 6);
+      const half = 0.1 + spread * (FOREST_GATE.width / 2 - 0.18);
+      const center = (1 - spread) * 0.6 * Math.sin(i * 0.85);
+      rows.push([
+        center - half - rand(i + 71) * 0.12,
+        center + half + rand(i + 58) * 0.12,
+        z,
+      ]);
+    }
+    for (let i = 0; i < rows.length - 1; i++) {
+      const [a, b, z] = rows[i],
+        [c, d, next] = rows[i + 1];
+      for (const [x, sz] of [
+        [a, z],
+        [b, z],
+        [d, next],
+        [a, z],
+        [d, next],
+        [c, next],
+      ]) {
+        p.push(x, 0.026, sz);
+        uv.push(x * 0.67, sz * 0.67);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.computeVertexNormals();
+    this.part(new THREE.Mesh(g, this.causeway), "forest", 0);
+    for (const [x, offset, rx, rz] of [
+      [-0.18, 10.5, 0.26, 0.16],
+      [0.06, 10.2, 0.18, 0.14],
+      [0.49, 9.37, 0.28, 0.16],
+      [0.68, 9.05, 0.18, 0.13],
+      [-0.34, 8.7, 0.22, 0.16],
+      [-0.73, 7.55, 0.18, 0.16],
+      [1.46, 5.18, 0.24, 0.17],
+    ]) {
+      const slab = new THREE.Mesh(
+        new THREE.CylinderGeometry(1, 1.12, 0.035, 6),
+        this.causeway,
+      );
+      slab.scale.set(rx, 1, rz);
+      slab.position.set(x, 0.016, FOREST_GATE.z + offset);
+      slab.rotation.y = offset * 1.73;
+      this.part(slab, "forest", 0.79);
+    }
+  }
   private court() {
-    this.ground(15.5, 20, 0, 2.4, -32, "roofs");
-    for (let i = 1; i <= 18; i++) {
-      const h = (i / 18) * 2.4;
+    const s = COURT_STAIR,
+      tread = (s.foot - s.landing) / s.steps,
+      base = -0.45;
+    const courtDepth = s.landing - CHAPEL_THRESHOLD_Z;
+    this.ground(
+      s.width,
+      courtDepth,
+      0,
+      s.rise,
+      s.landing - courtDepth / 2,
+      "roofs",
+    );
+    // The tessellated walking surface above is the sole top face. Leave the
+    // foundation walls at their full height without a second coplanar floor.
+    const foundation = new THREE.BoxGeometry(
+      s.width,
+      s.rise - base,
+      courtDepth,
+    );
+    const normals = foundation.getAttribute("normal");
+    foundation.setIndex(
+      Array.from(foundation.getIndex()!.array).filter(
+        (i) => normals.getY(i) < 0.99,
+      ),
+    );
+    foundation.clearGroups();
+    const body = new THREE.Mesh(foundation, this.wall);
+    body.position.set(0, (s.rise + base) / 2, s.landing - courtDepth / 2);
+    this.part(body, "roofs");
+    for (let i = 1; i <= s.steps; i++) {
+      const top = (i / s.steps) * s.rise;
+      const z = s.foot - (i - 0.5) * tread;
       this.box(
-        5,
-        h,
-        0.34,
+        s.width,
+        top - base,
+        tread,
         0,
-        h / 2,
-        -16 - ((i - 0.5) * 6) / 18,
+        (top + base) / 2,
+        z,
         this.stone,
         "roofs",
       );
+      if (i % 3 === 0) {
+        for (const side of [-1, 1]) {
+          const height = top + 0.8 - base;
+          this.box(
+            0.56,
+            height,
+            3 * tread,
+            side * 7.55,
+            base + height / 2,
+            z + tread,
+            this.wall,
+            "roofs",
+          );
+          this.box(
+            0.63,
+            0.11,
+            3 * tread,
+            side * 7.55,
+            top + 0.855,
+            z + tread,
+            this.dressedStone,
+            "roofs",
+          );
+        }
+      }
     }
     for (const side of [-1, 1]) {
       this.box(0.45, 1.1, 22, side * 7.6, 2.95, -31, this.wall, "roofs");
@@ -663,7 +864,6 @@ export class ConnectedEnvironment {
     }
     for (const { x, z } of COURT_COLUMNS)
       this.cylinder(0.28, 0.43, 4.5, 14, x, 4.65, z, this.stone, "roofs");
-    this.arch(-4.5, 2.4, -26.2, 1.4, 2.1, this.stone, "roofs");
     this.box(2.8, 0.55, 1, -4.6, 2.68, -27.5, this.wall, "roofs");
     this.torch(-6.6, 4.3, -23.4, "roofs");
     this.torch(6.6, 4.3, -35, "roofs");
@@ -682,7 +882,15 @@ export class ConnectedEnvironment {
   private cathedral() {
     const sector: Sector = "chapel",
       base = 2.4;
-    this.ground(15.6, 29, 0, base, -55.5, sector);
+    const farWall = -70;
+    this.ground(
+      15.6,
+      CHAPEL_THRESHOLD_Z - farWall,
+      0,
+      base,
+      (CHAPEL_THRESHOLD_Z + farWall) / 2,
+      sector,
+    );
     // Side walls are built around actual bright apertures rather than a sky image.
     for (const side of [-1, 1]) {
       this.box(0.45, 2.2, 28, side * 7.7, base + 1.1, -55.6, this.wall, sector);
@@ -771,9 +979,70 @@ export class ConnectedEnvironment {
       );
     }
     this.box(3.35, 0.3, 9, 5, 5.05, -63.5, this.stone, sector);
+    for (const x of [3.35, 6.65]) {
+      for (let step = 0; step <= 10; step++) {
+        const top = base + step * 0.28,
+          z = -49 - step;
+        this.box(0.12, 0.86, 0.12, x, top + 0.43, z, this.metal, sector);
+        if (step % 2 === 0)
+          this.box(
+            0.25,
+            0.16,
+            0.25,
+            x,
+            top + 0.08,
+            z,
+            this.dressedStone,
+            sector,
+          );
+      }
+      for (const lift of [0.49, 0.89]) {
+        const rail = new THREE.Mesh(
+          new THREE.BoxGeometry(0.105, 0.09, Math.hypot(10, 2.8)),
+          this.metal,
+        );
+        rail.position.set(x, base + 1.4 + lift, -54);
+        rail.rotation.x = Math.atan2(2.8, 10);
+        this.part(rail, sector);
+      }
+    }
     this.ironFence(3.35, -63.5, 8.7, Math.PI / 2, sector, 5.2);
     this.ironFence(6.65, -63.5, 9, Math.PI / 2, sector, 5.2);
-    this.arch(5, 5.2, -60.4, 1.14, 1.9, this.stone, sector);
+    const { x, y, z, width, clearHeight } = VESTRY;
+    const high = 3.8 - clearHeight;
+    this.box(
+      2.2,
+      high,
+      0.27,
+      x,
+      y + clearHeight + high / 2,
+      z,
+      this.wall,
+      sector,
+    );
+    this.box(
+      2.16,
+      0.16,
+      0.35,
+      x,
+      y + clearHeight + 0.08,
+      z,
+      this.dressedStone,
+      sector,
+    );
+    for (const side of [-1, 1])
+      this.box(
+        0.19,
+        clearHeight,
+        0.27,
+        x + side * (width / 2 + 0.06),
+        y + clearHeight / 2,
+        z,
+        this.stone,
+        sector,
+      );
+    this.arch(x, y, z, 1.14, 1.9, this.stone, sector);
+    this.archBacking(5, 5.2, -60.4, 1.14, 1.9, 1.1, 3.8, 0.38, sector);
     this.box(3.6, 0.3, 8, 5, 9, -64, this.dark, sector);
     this.window(6.43, 6.1, -65, 1.3, 2.1, sector, -Math.PI / 2, true);
     this.chandelier(5, 7.35, -61.9, "chapel");
@@ -783,6 +1052,33 @@ export class ConnectedEnvironment {
     const s: Sector = "crypt",
       b = 2.4;
     this.ground(15.5, 27, 0, b, -89.5, s);
+    // Only the six metres between the two existing floors need paving.
+    // The masonry extends farther and keys into both end walls.
+    const passage = OSSUARY_PASSAGE;
+    this.ground(2 * passage.x, 6, 0, b, -73, "chapel");
+    for (const side of [-1, 1])
+      this.box(
+        passage.wallHalf * 2,
+        passage.height,
+        passage.halfDepth * 2,
+        side * passage.x,
+        b + passage.height / 2,
+        passage.z,
+        this.wall,
+        "chapel",
+      );
+    this.box(
+      2 * (passage.x + passage.wallHalf),
+      0.38,
+      passage.halfDepth * 2,
+      0,
+      b + passage.height,
+      passage.z,
+      this.dark,
+      "chapel",
+    );
+    for (const z of [-70.2, -73.5, -76.7])
+      this.arch(0, b, z, passage.x - 0.03, 1.7, this.stone, "chapel");
     for (const side of [-1, 1]) {
       this.box(0.5, 4.4, 26, side * 7.7, b + 2.2, -89.5, this.wall, s);
     }
@@ -1085,8 +1381,8 @@ export class ConnectedEnvironment {
       x: x - sign * 0.64,
       y: y + 0.68,
       z,
-      power: 46,
-      range: 7,
+      power: sector === "forest" ? 25 : 46,
+      range: sector === "forest" ? 4.8 : 7,
       area: sector,
     });
   }

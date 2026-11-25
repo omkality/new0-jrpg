@@ -3,10 +3,20 @@
 ## Current scene
 
 The current scene uses [Goblinatron PSX Dungeon textures](dungeon/SOURCES.md), CC BY 4.0.
+The forest gatehouse has [four original material maps](gatehouse/SOURCES.md) for
+its masonry, oak doors and cobbled approach.
 It uses the [new cast](cast/SOURCES.md), based on Patch CC0 woman/ogre assets with
 disclosed AI provenance and original skinned garments/masks, plus [authored combat
 motion variants](motion/SOURCES.md) retargeted to their rigs. Room geometry, weapons
-and temporary synthesized audio are original prototype work. The Kenney and knight
+and temporary synthesized audio are original prototype work.
+
+In the portrait chapter the pilgrim's ash cowl, the Thorn Cantor's carved skull
+and plumage, and the Iron Sexton's reliquary helmet, iron plates and chain are
+original bone-mounted models. Their surface patina is generated locally. The
+willow grave, its sliding lid and the four votive holders also ship as original
+geometry. [Costumes](../../src/chapter/procession.ts) · [Bell court](../../src/chapter/court-scenery.ts).
+
+The Kenney and knight
 files are retained from earlier iterations and are not loaded by the current scene.
 
 ## Kenney Graveyard Kit 5.0

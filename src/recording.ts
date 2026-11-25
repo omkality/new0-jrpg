@@ -28,7 +28,15 @@ export class FrameCapture {
     this.output.addVideoTrack(this.source, { frameRate: 60 });
   }
   async start() {
-    await this.output.start();
+    try {
+      await this.output.start();
+    } catch (error) {
+      await this.cancel();
+      throw error;
+    }
+  }
+  cancel() {
+    return this.output.cancel();
   }
   add() {
     this.busy = true;
@@ -43,9 +51,14 @@ export class FrameCapture {
     return this.pending;
   }
   async finish() {
-    await this.pending;
-    this.source.close();
-    await this.output.finalize();
-    return new Blob([this.target.buffer!], { type: "video/mp4" });
+    try {
+      await this.pending;
+      this.source.close();
+      await this.output.finalize();
+      return new Blob([this.target.buffer!], { type: "video/mp4" });
+    } catch (error) {
+      await this.cancel();
+      throw error;
+    }
   }
 }
