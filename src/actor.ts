@@ -6,7 +6,12 @@ import { assetUrl } from "./assets";
 import { heldWeapon, attachWeapon } from "./level-props";
 import { loadModel as load } from "./asset-store";
 import type { WeaponId } from "./world-layout";
-import { armourModel, flaskModel, setFlaskFill } from "./gear-visuals";
+import {
+  armourModel,
+  flaskModel,
+  setFlaskFill,
+  FLASK_COLORS,
+} from "./gear-visuals";
 import { FootContact } from "./foot-contact";
 import { SkeletonContinuity } from "./skeleton-continuity";
 import { GearPose } from "./gear-pose";
@@ -104,6 +109,7 @@ export class Actor {
   constructor(
     private enemy = false,
     private only?: Kind,
+    private costume?: (rig: THREE.Object3D, kind: Kind) => void,
   ) {}
   async load() {
     await loadFloor();
@@ -175,6 +181,8 @@ export class Actor {
           }
         });
         applyCharacterAppearance(rig, kind);
+        this.costume?.(rig, kind);
+        if (this.costume && kind === "watcher") rig.scale.setScalar(1.1);
         if (kind === "effigy") rig.scale.setScalar(1.03);
         const mixer = new THREE.AnimationMixer(rig),
           actions = new Map<string, THREE.AnimationAction>();
@@ -191,6 +199,12 @@ export class Actor {
             kind === "gaoler",
           );
         const weapons = new Map<string, THREE.Group>([["sword", weapon]]);
+        if (this.costume && kind === "watcher") {
+          const axe = heldWeapon("axe");
+          axe.visible = false;
+          weapons.set("axe", axe);
+          weapons.set("unarmed", new THREE.Group());
+        }
         if (kind === "pilgrim") {
           for (const id of ["axe", "spear", "unarmed"] as WeaponId[]) {
             const item = heldWeapon(id);
@@ -311,6 +325,11 @@ export class Actor {
       setFlaskFill(
         s.flask,
         mode === "heal" ? Math.max(0.06, 0.92 - f.time * 0.6) : 0.92,
+        mode === "heal"
+          ? f.regenDraught
+            ? FLASK_COLORS.regeneration
+            : FLASK_COLORS.healing
+          : undefined,
       );
     }
     const attackIndex = Math.max(1, Math.min(3, f.combo || 1));

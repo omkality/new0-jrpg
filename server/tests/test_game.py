@@ -35,6 +35,37 @@ def login(c, user_id=42):
     return {"Authorization": "Bearer " + r.json()["token"]}
 
 
+def test_portrait_autoplay_report_round_trip(client):
+    metrics = {"seconds": 1.0, "frames": 60, "fps": 60.0, "p95_ms": 16.7, "over_25_ms": 0, "over_50_ms": 0}
+    body = {
+        "protocol": "portrait-auto-1",
+        "client_revision": "a" * 16,
+        "asset_revision": "b" * 16,
+        "platform": "ios",
+        "telegram_version": "9.2",
+        "viewport_width": 393,
+        "viewport_height": 720,
+        "completed": True,
+        "weapon": "axe",
+        "weapon_swaps": 3,
+        "mimic_defeated": True,
+        "regen_used": True,
+        "pauses": 0,
+        "movement": metrics,
+        "combat": metrics,
+        "mimic": metrics,
+    }
+    assert client.post("/api/diagnostics", json=body).status_code == 401
+    headers = login(client)
+    for change in ({"score": 5}, {"weapon_swaps": 4}, {"mimic": {**metrics, "fps": -1}}):
+        assert client.post("/api/diagnostics", headers=headers, json={**body, **change}).status_code == 422
+    result = client.post("/api/diagnostics", headers=headers, json=body)
+    assert result.status_code == 200
+    url = "/api/diagnostics/" + result.json()["id"]
+    assert client.get(url, headers=headers).json() == body
+    assert client.get(url, headers=login(client, 43)).status_code == 404
+
+
 def device_payload():
     return {
         "protocol": "device-check-1",

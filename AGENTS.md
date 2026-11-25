@@ -1,17 +1,52 @@
 # new0 game development
 
+## Start here for new gameplay
+
+- The owner brief of November 22, 2026 sets the next direction. Read
+  [the portrait slice](docs/PORTRAIT_SLICE.md) for the first task, its acceptance
+  cases and the six video references. The old realtime prototype is the baseline.
+- Keep Danya's clips and the official PRISON OF HUSKS gallery together as the
+  visual brief. Compare actual portrait gameplay with the timecodes and images in
+  [the art notes](docs/REFERENCES.md) when choosing landmarks, light and framing.
+- Build for a portrait-only Telegram Mini App. Exploration leads into a dialogue
+  window where the player taps a turn command. The first choices are attack, item
+  and skill. Give the world a deliberate pixel grid and keep Cyrillic UI legible.
+  Danya will compose the music after reviewing a playable demo.
+- In the portrait chapter, use the rear three-quarter camera above the pilgrim.
+  Keep both fighters' heads, hands and planted feet in the portrait frame during
+  strikes and replies. Dialogue portraits and item close-ups have separate cameras.
+  Check the forest and the grille with both weapons at 320×568 and 430×932.
+- The singer's oath, the toll, the grave and the votive are independent choices.
+  Verify the path with two duels and both discoveries, and the peaceful path with
+  both NPCs alive, through ordinary touch controls. Beyond the bell, visit the
+  same tablet before and after turning the mirror and check both choices at the book.
+  Turn outcomes have one
+  authority in `src/chapter/encounter.ts`. Keep observed damage, sound and reactions
+  on the animated contact frame and let the player read before the next command.
+  Inspect new stairs, raised floors and arches in both directions in the live
+  camera. Check the rendered masonry against the walkable surface in the
+  environment asset validator. Keep deliberate windows and doorways open.
+- A fresh contributor can play `?chapter=forest` and start with **«Устройство играбельной версии»** in the brief.
+  Its preview must work for a real Telegram player. The guest review panel and
+  autoplay remain useful for development of the existing showcase.
+
+## Repository workflow
+
 - Work in this checkout. Development is on `dev`, with focused task branches and PRs into `dev`.
   `master` holds tested milestones. Never force-push or deploy automatically.
 - Track concrete open work in GitHub Issues with `priority:P0`, `priority:P1`, or `priority:P2`.
   Finish the current slice before starting new mechanics. Avoid duplicate issues.
-- Current scope is a one-week prototype: a connected Three.js route through forest,
+
+## Existing world and realtime showcase
+
+- The existing realtime showcase is a connected Three.js route through forest,
   gate court, cathedral/gallery and crypt, mobile-first Telegram play, casual combat,
   keys/coins, one held weapon with swap/drop, hollow chests and a mimic, a visible
   armour upgrade, hidden consumable healing potions without HP regeneration, Compose.
   The current public demo exposes one autoplay button. Keep developer review tools
   guest-only and off the normal Mini App screen.
-  The user explicitly rejected turn-based combat and action-selection menus.
-- The visual target is a gloomy PS1-inspired, human-scale 3D world with a third-person
+  The following animation, input and capture contracts apply to that showcase.
+- The visual target for exploration is a gloomy PS1-inspired, human-scale 3D world with a third-person
   camera behind the hero. Avoid an overhead/isometric view and cartoon proportions.
 - Cloth must follow the body surface and skin weights. Rigid metal plates are separate.
   Use weapon-specific stances and closed hand grips, with anatomical wrist limits.
@@ -64,10 +99,13 @@
   RTX 4070 Ti SUPER H.264 NVENC for export. Capture advances simulation once per
   accepted frame and respects encoder backpressure. Do not treat this as a realtime
   FPS benchmark or hide dropped frames by merely relabelling a video as 60 FPS.
+
+## Shared data, delivery and checks
+
 - Keep all prize-relevant rules and score calculation on the Python API. Validate Telegram
   initData before trusting identity. Never accept a client-supplied user ID, score, HP or win flag.
-- The current real-time vertical slice is local and non-competitive. It uses the existing API
-  only for identity, never submits local combat to the legacy turn-based leaderboard.
+- The existing realtime slice is local and non-competitive. Its API traffic covers
+  identity and device diagnostics. Local combat produces no leaderboard submissions.
   Server validation of real-time play and a new ruleset/version must precede prize results.
 - Guest runs are for local testing only and must never mix with Telegram results.
   Prize mode defaults to closed. Attempt limits and tie resolution still require owner decisions.

@@ -7,8 +7,10 @@ export class Atmosphere {
   readonly grain = { value: 0.022 };
   readonly veil = { value: 0.075 };
   private field: StaticLightField;
-  constructor(field: StaticLightField) {
+  private readonly winter: boolean;
+  constructor(field: StaticLightField, winter = false) {
     this.field = field;
+    this.winter = winter;
   }
   apply(root: T.Object3D) {
     root.traverse((o) => {
@@ -44,6 +46,13 @@ export class Atmosphere {
               #else
                 float airFog = smoothstep(fogNear, fogFar, vFogDepth);
               #endif
+              ${
+                this.winter
+                  ? `float luma = dot(gl_FragColor.rgb,vec3(.2126,.7152,.0722));
+              float ember = smoothstep(.14,.48,gl_FragColor.r-gl_FragColor.b);
+              gl_FragColor.rgb = mix(mix(vec3(luma),gl_FragColor.rgb,.57)*vec3(.80,.90,1.04),gl_FragColor.rgb,ember*.8);`
+                  : ""
+              }
               airFog = uAirVeil + (1.0 - uAirVeil) * airFog;
               gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, airFog);
             #endif
@@ -83,7 +92,8 @@ export class Atmosphere {
           }
         };
         material.customProgramCacheKey = () =>
-          key + "/fixes3-static-light-air-1";
+          key +
+          (this.winter ? "/procession-winter" : "/fixes3-static-light-air-1");
         material.needsUpdate = true;
       }
     });

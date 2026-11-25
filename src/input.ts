@@ -48,9 +48,9 @@ export class Input {
       )
         e.preventDefault();
       if (e.repeat) return;
-      this.keys.add(key);
       if (key === "Escape") this.onPause();
       if (!this.enabled) return;
+      this.keys.add(key);
       if (key === "KeyE") this.onInteract();
       if (key === "KeyJ") this.onAttack();
       if (["Space", "ShiftLeft", "ShiftRight", "KeyK"].includes(key))
@@ -150,11 +150,15 @@ export class Input {
         }
       });
   }
-  bindAction(button: HTMLButtonElement, action: () => void) {
+  bindAction(
+    button: HTMLButtonElement,
+    action: () => void,
+    enabled = () => this.enabled,
+  ) {
     button.addEventListener("pointerdown", (e) => {
       if (
         e.button !== 0 ||
-        !this.enabled ||
+        !enabled() ||
         button.disabled ||
         this.actionPointers.has(button)
       )
@@ -172,7 +176,7 @@ export class Input {
         this.actionPointers.delete(button);
         if (
           type === "pointerup" &&
-          this.enabled &&
+          enabled() &&
           !button.disabled &&
           button.contains(document.elementFromPoint(e.clientX, e.clientY))
         )
@@ -181,7 +185,7 @@ export class Input {
     // Pointer activation is handled above, including secondary touch pointers.
     // Keep native keyboard and assistive-technology activation.
     button.addEventListener("click", (e) => {
-      if (e.detail === 0 && this.enabled && !button.disabled) action();
+      if (e.detail === 0 && enabled() && !button.disabled) action();
     });
   }
   axis() {

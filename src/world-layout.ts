@@ -11,15 +11,17 @@ export interface Obstacle extends Point {
   minY?: number;
   maxY?: number;
   door?: string;
+  chest?: string;
 }
 export interface Wall extends Obstacle {
   id: string;
   area: AreaId;
   base: number;
   height: number;
-  material?: "stone" | "wall" | "dark";
+  material?: "stone" | "wall" | "dark" | "ashlar";
 }
 export const AREA_ORDER: AreaId[] = ["forest", "roofs", "chapel", "crypt"];
+export const CHAPEL_THRESHOLD_Z = -42;
 export const AREAS = {
   forest: {
     name: "Лес у Чёрных ворот",
@@ -125,34 +127,63 @@ export const ENCOUNTERS = [
   { id: "crypt", area: "crypt", kind: "mimic", x: -2, z: -85.2 },
   { id: "crypt-warden", area: "crypt", kind: "watcher", x: 3.6, z: -80.8 },
 ] as const;
+// World-space dimensions shared by both door leaves, the lintel and collision.
+export const FOREST_GATE = {
+  x: 0,
+  z: -14,
+  width: 3.2,
+  clearance: 3.12,
+  towerWidth: 2.45,
+  towerDepth: 3.3,
+  passageDepth: 2.4,
+  swing: Math.PI * 0.474,
+} as const;
+export const VESTRY = {
+  x: 5,
+  y: 5.2,
+  z: -60.4,
+  width: 1.8,
+  clearHeight: 2.08,
+} as const;
 export const DOORS = [
   {
     id: "gate",
     area: "forest",
-    x: 0,
-    z: -14,
+    x: FOREST_GATE.x,
+    z: FOREST_GATE.z,
     y: 0,
     key: "gate",
-    width: 3.2,
+    width: FOREST_GATE.width,
     name: "Чёрные ворота",
   },
   {
     id: "gallery",
     area: "chapel",
-    x: 5,
-    z: -60.4,
-    y: 5.2,
+    ...VESTRY,
     key: "gallery",
-    width: 1.8,
     name: "Ризница на верхней галерее",
   },
 ] as const;
 export function areaAt(z: number): AreaId {
-  return z > -16 ? "forest" : z > -42 ? "roofs" : z > -76 ? "chapel" : "crypt";
+  return z > -16
+    ? "forest"
+    : z > CHAPEL_THRESHOLD_Z
+      ? "roofs"
+      : z > -76
+        ? "chapel"
+        : "crypt";
 }
+export const COURT_STAIR = {
+  foot: -16,
+  landing: -22,
+  rise: 2.4,
+  width: 15.5,
+  steps: 18,
+} as const;
 export function floorHeight(x: number, z: number) {
-  if (z >= -16) return 0;
-  if (z > -22) return ((-16 - z) / 6) * 2.4;
+  const s = COURT_STAIR;
+  if (z >= s.foot) return 0;
+  if (z > s.landing) return ((s.foot - z) / (s.foot - s.landing)) * s.rise;
   if (x > 3.45 && x < 6.55 && z <= -49 && z >= -59)
     return 2.4 + ((-49 - z) / 10) * 2.8;
   if (x > 3.45 && x < 6.55 && z < -59 && z >= -68) return 5.2;
@@ -164,6 +195,7 @@ export const WALLS: Wall[] = [
   ...[-1, 1].map((side): Wall => ({
     id: `forest-ruin-${side}`,
     area: "forest",
+    material: "ashlar",
     x: side * 6.7,
     z: -5,
     hx: 0.5,
@@ -171,25 +203,45 @@ export const WALLS: Wall[] = [
     base: 0,
     height: 1.3,
   })),
-  ...[-1, 1].map((s): Wall => ({
-    id: `gate-wing-${s}`,
-    area: "forest",
-    x: s * 5,
-    z: -14,
-    hx: 3.4,
-    hz: 0.5,
-    base: 0,
-    height: 8,
-  })),
+  ...[-1, 1].flatMap((side): Wall[] => {
+    const opening = FOREST_GATE.width / 2;
+    const outer = opening + FOREST_GATE.towerWidth;
+    const end = 8.4;
+    return [
+      {
+        id: `gate-tower-${side}`,
+        area: "forest",
+        material: "ashlar",
+        x: FOREST_GATE.x + side * (opening + FOREST_GATE.towerWidth / 2),
+        z: FOREST_GATE.z,
+        hx: FOREST_GATE.towerWidth / 2,
+        hz: FOREST_GATE.towerDepth / 2,
+        base: 0,
+        height: 6.95,
+      },
+      {
+        id: `gate-wing-${side}`,
+        area: "forest",
+        material: "ashlar",
+        x: FOREST_GATE.x + (side * (outer + end)) / 2,
+        z: FOREST_GATE.z,
+        hx: (end - outer) / 2,
+        hz: 0.65,
+        base: 0,
+        height: 4.45,
+      },
+    ];
+  }),
   {
     id: "gate-header",
     area: "forest",
-    x: 0,
-    z: -14,
-    hx: 1.6,
-    hz: 0.5,
-    base: 4.25,
-    height: 3.75,
+    material: "ashlar",
+    x: FOREST_GATE.x,
+    z: FOREST_GATE.z,
+    hx: FOREST_GATE.width / 2,
+    hz: FOREST_GATE.passageDepth / 2,
+    base: FOREST_GATE.clearance,
+    height: 5.65 - FOREST_GATE.clearance,
   },
   ...[-6, -2, 2, 6].map((x): Wall => ({
     id: `bridge-pier-${x}`,
@@ -369,6 +421,15 @@ export const ARCH_PORTALS = [
     depth: 0.5,
   },
 ] as const;
+// The old service passage joins the chapel threshold to the crypt threshold.
+export const OSSUARY_PASSAGE = {
+  x: 2.65,
+  z: -73.5,
+  halfDepth: 4.15,
+  wallHalf: 0.24,
+  base: 2.4,
+  height: 4.18,
+} as const;
 export const CRYPT_BAYS = [-1, 1].flatMap((side) =>
   [-80, -86, -92, -98].map((z) => ({ x: side * 5.8, z })),
 );
@@ -377,6 +438,22 @@ export const CRYPT_COLUMNS = [-1, 1].flatMap((side) =>
   [-83, -89, -95, -101].map((z) => ({ x: side * 6.9, z })),
 );
 export const OBSTACLES: Obstacle[] = [
+  {
+    x: VESTRY.x,
+    z: VESTRY.z,
+    hx: 1.1,
+    hz: 0.18,
+    minY: VESTRY.y + VESTRY.clearHeight,
+    maxY: VESTRY.y + 3.8,
+  },
+  ...ARCH_PORTALS.map((p) => ({
+    x: 0,
+    z: p.z,
+    hx: p.radius,
+    hz: p.depth / 2,
+    minY: p.base + p.stem + p.radius,
+    maxY: p.base + p.wallHeight,
+  })),
   ...ARCH_PORTALS.flatMap((p) =>
     [-1, 1].flatMap((s) => [
       {
@@ -479,6 +556,7 @@ export const OBSTACLES: Obstacle[] = [
   })),
   ...WALLS.map((w) => ({ ...w, minY: w.base - 0.1, maxY: w.base + w.height })),
   ...CHESTS.map((c) => ({
+    chest: c.id,
     x: c.x,
     z: c.z,
     hx: 0.62,
@@ -492,13 +570,21 @@ export const OBSTACLES: Obstacle[] = [
     hx: d.width / 2,
     hz: 0.18,
     minY: d.y - 0.1,
-    maxY: d.y + 2.6,
+    maxY: d.y + (d.id === "gate" ? FOREST_GATE.clearance : 2.6),
     door: d.id,
   })),
   // Stair balustrades. The entrance and the lower return stay open.
   { x: 3.35, z: -56, hx: 0.13, hz: 6.7, minY: 2.3, maxY: 6.45 },
   { x: 6.65, z: -58.5, hx: 0.13, hz: 10.5, minY: 2.3, maxY: 6.45 },
-  // Real portal wings and the lectern alcove.
+  // Both flanks of the covered passage and the lectern alcove.
+  ...[-1, 1].map((side) => ({
+    x: side * OSSUARY_PASSAGE.x,
+    z: OSSUARY_PASSAGE.z,
+    hx: OSSUARY_PASSAGE.wallHalf,
+    hz: OSSUARY_PASSAGE.halfDepth,
+    minY: 2.3,
+    maxY: 6.8,
+  })),
   { x: -3.3, z: -43.9, hx: 0.15, hz: 0.9, minY: 2.3, maxY: 5.2 },
   { x: -3.3, z: -47.3, hx: 0.15, hz: 0.8, minY: 2.3, maxY: 5.2 },
   { x: -5.4, z: -48.1, hx: 1.4, hz: 0.15, minY: 2.3, maxY: 5.2 },

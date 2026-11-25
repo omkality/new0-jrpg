@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { Campaign } from "./campaign";
+import type { Fighter } from "./game";
 import {
-  CHESTS,
   KEYS,
   COINS,
   DOORS,
   POTIONS,
+  FOREST_GATE,
   type WeaponId,
 } from "./world-layout";
 import { prop, propModel } from "./asset-store";
@@ -15,7 +16,7 @@ import {
   HAND_GRIP,
   WEAPON_GRIP_SHIFT,
 } from "./weapon-spec";
-import { blackGate, flaskModel, armourModel, lootGlow } from "./gear-visuals";
+import { flaskModel, armourModel, lootGlow } from "./gear-visuals";
 
 export function attachWeapon(group: THREE.Group, gaoler = false) {
   group.position.fromArray(HAND_GRIP[gaoler ? "gaoler" : "human"]);
@@ -62,9 +63,13 @@ export class LevelProps {
   private mimicName = "";
   private mimicBody?: THREE.Object3D;
   private mimicLid?: THREE.Object3D;
-  constructor(private game: Campaign) {}
+  constructor(
+    private game: Campaign,
+    private gateDoors: THREE.Group,
+    private vestryDoor: THREE.Group,
+  ) {}
   build() {
-    for (const c of CHESTS) {
+    for (const c of this.game.chests) {
       const object = prop("chest");
       object.position.set(c.x, c.y, c.z);
       object.rotation.y = c.yaw;
@@ -127,9 +132,7 @@ export class LevelProps {
       this.potions.push({ object, id: p.id });
     }
     for (const d of DOORS) {
-      const object = d.id === "gate" ? blackGate() : prop("door");
-      object.position.set(d.x, d.y, d.z);
-      if (d.id !== "gate") object.scale.set(d.width / 1.5, 1, 1);
+      const object = d.id === "gate" ? this.gateDoors : this.vestryDoor;
       const pivots =
         d.id === "gate"
           ? [
@@ -137,7 +140,6 @@ export class LevelProps {
               object.getObjectByName("GateRight")!,
             ]
           : [object.getObjectByName("DoorPivot")!];
-      this.root.add(object);
       this.doors.push({ object, pivots, id: d.id });
     }
     for (let i = 0; i < this.game.drops.length; i++) {
@@ -146,15 +148,28 @@ export class LevelProps {
       for (const id of ["sword", "axe", "spear"] as const) {
         const weapon = prop(WEAPONS[id].asset);
         weapon.scale.setScalar(WEAPON_MOUNTS[id].scale);
-        weapon.rotation.set(Math.PI / 2, 0.25, Math.PI / 2);
+        weapon.rotation.x = Math.PI / 2;
+        const bounds = new THREE.Box3().setFromObject(weapon);
+        weapon.position.set(
+          -(bounds.min.x + bounds.max.x) / 2,
+          -bounds.min.y,
+          -(bounds.min.z + bounds.max.z) / 2,
+        );
         weapon.visible = false;
         object.add(weapon);
         variants.set(id, weapon);
       }
+      object.rotation.y = -0.82;
+      const glint = lootGlow(0x99a6b2);
+      glint.position.y = 0.085;
+      glint.scale.setScalar(0.46);
+      glint.material.opacity = 0.27;
+      object.add(glint);
       object.visible = false;
       this.root.add(object);
       this.drops.push({ object, variants });
     }
+    if (!this.game.enemies.has("crypt")) return;
     const body = prop("mimic");
     body.scale.setScalar(1.6);
     this.mimic.add(body);
@@ -198,7 +213,7 @@ export class LevelProps {
     );
     this.mimicMixer.update(0);
   }
-  update(dt: number, time: number) {
+  update(dt: number, time: number, stagedMimic?: Fighter) {
     const g = this.game;
     for (const c of this.chests) {
       c.object.visible = Math.abs(c.object.position.z - g.player.z) < 30;
@@ -234,7 +249,9 @@ export class LevelProps {
         d.pivots[i].rotation.y = THREE.MathUtils.damp(
           d.pivots[i].rotation.y,
           g.openDoors.has(d.id)
-            ? (g.doorSwing.get(d.id) ?? 1) * (i === 1 ? -1 : 1) * 1.65
+            ? (g.doorSwing.get(d.id) ?? 1) *
+                (i === 1 ? -1 : 1) *
+                (d.id === "gate" ? FOREST_GATE.swing : 1.65)
             : 0,
           4,
           dt,
@@ -248,13 +265,14 @@ export class LevelProps {
       for (const [id, model] of view.variants)
         model.visible = id === slot.weapon;
     }
-    const e = g.enemies.get("crypt")!;
+    const e = stagedMimic ?? g.enemies.get("crypt");
+    if (!e) return;
     this.mimic.position.set(e.x, e.y, e.z);
     this.mimic.rotation.y = e.yaw;
     if (!g.mimicAwake) this.mimicPose("Open", 0);
     else if (g.elapsed - g.mimicAwokeAt < 1.15)
       this.mimicPose("Reveal", (g.elapsed - g.mimicAwokeAt) / 1.15);
-    else if (e.hp <= 0) {
+    else if (e.hp <= 0 || e.mode === "dead") {
       this.mimicPose("Reveal", 1);
       if (this.mimicLid)
         this.mimicLid.rotation.x = -1.75 + Math.min(1, e.time / 1.4) * 0.55;
@@ -264,7 +282,7 @@ export class LevelProps {
       this.mimic.rotation.z = 0;
       this.mimicPose(
         e.mode === "attack" ? "Bite" : "Reveal",
-        e.mode === "attack" ? e.time : 1,
+        e.mode === "attack" ? e.time / (stagedMimic ? 0.72 : 1) : 1,
       );
       if (this.mimicBody) {
         this.mimicBody.position.y =
@@ -289,7 +307,7 @@ export class LevelProps {
     const p = this.game.player;
     if (!this.game.inspecting || p.mode === "hit" || p.mode === "dead")
       return null;
-    for (const c of CHESTS)
+    for (const c of this.game.chests)
       if (
         this.game.inspecting === c.id &&
         this.game.openedChests.has(c.id) &&
