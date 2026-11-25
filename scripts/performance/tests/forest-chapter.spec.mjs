@@ -126,7 +126,15 @@ test("portrait autoplay shows the weapon exchange, fights the mimic and retries 
     "memorial",
   );
   await expect(page.locator("#retry-report")).toBeVisible();
-  await tap("#retry-report");
+  const [receipt] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/diagnostics" &&
+        response.status() === 200,
+    ),
+    tap("#retry-report"),
+  ]);
+  expect(await receipt.json()).toEqual({ id: "fixture-receipt" });
   await expect(page.locator("#auto-save")).toHaveText("Отчёт сохранён");
   expect(reports).toHaveLength(2);
   expect(reports[0]).toEqual(reports[1]);
@@ -277,11 +285,15 @@ test("portrait play: concurrent taps, camera, rotation, inactive webview, retry 
   await walk(0.98, 0.18, null, 690);
   await walk(0.18, -0.98, () => near("Чёрные ворота"), 7200);
   await tap("#interact");
-  // Play the whole courtyard on the smallest supported screen. The actual
-  // compositor frame also verifies the browser has presented the new viewport.
+  // Verify the viewport Chromium uses for the touch coordinates below.
   await page.setViewportSize({ width: 320, height: 568 });
   await page.clock.runFor(64);
-  await page.screenshot();
+  await expect
+    .poll(async () => {
+      const { cssVisualViewport } = await session.send("Page.getLayoutMetrics");
+      return [cssVisualViewport.clientWidth, cssVisualViewport.clientHeight];
+    })
+    .toEqual([320, 568]);
   const report = await playBellRoute(
     page,
     session,
