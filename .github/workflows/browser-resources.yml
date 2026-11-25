@@ -21,22 +21,35 @@ concurrency:
   cancel-in-progress: true
 jobs:
   resource-soak:
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: world
+            check: resource-soak
+            minutes: 30
+            artifact: browser-resource-report
+          - suite: portrait
+            check: portrait-gameplay
+            minutes: 40
+            artifact: portrait-gameplay-report
     env:
-      NEW0_RESOURCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      NEW0_RESOURCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Run constrained software-rendered whole-World soak
-        run: node scripts/performance/run-docker.mjs
-      - name: Preserve resource evidence even on failure
+      - name: Run browser suite
+        run: node scripts/performance/run-docker.mjs --suite=${{ matrix.suite }}
+      - name: Preserve browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-resource-report
+          name: ${{ matrix.artifact }}
           path: scripts/performance/results/
           if-no-files-found: warn
           retention-days: 7

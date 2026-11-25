@@ -10,6 +10,10 @@ const folder = fileURLToPath(new URL("./", import.meta.url));
 const results = process.env.NEW0_RESOURCE_RESULTS ?? resolve(folder, "results");
 export default defineConfig({
   testDir: "./tests",
+  projects: [
+    { name: "world", testIgnore: "**/forest-chapter.spec.mjs" },
+    { name: "portrait", testMatch: "**/forest-chapter.spec.mjs" },
+  ],
   fullyParallel: false,
   forbidOnly: true,
   workers: 1,
