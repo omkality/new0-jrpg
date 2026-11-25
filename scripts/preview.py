@@ -24,7 +24,15 @@ def local_settings():
 def main():
     parser = argparse.ArgumentParser(description="Временная HTTPS-демка и автопроверка устройств")
     parser.add_argument("action", choices=["start", "status", "url", "bind", "report", "stop"])
+    parser.add_argument("--chapter", choices=["forest"], help="Открыть портретную главу в url или bind")
+    parser.add_argument(
+        "--autoplay", action="store_true", help="Запустить автопрохождение портретной главы с замером FPS"
+    )
     args = parser.parse_args()
+    if args.chapter and args.action not in {"url", "bind"}:
+        parser.error("--chapter applies to url and bind")
+    if args.autoplay and not args.chapter:
+        parser.error("--autoplay requires --chapter forest")
     values = local_settings()
     project = values.get("PREVIEW_PROJECT_NAME", "new0-preview")
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project):
@@ -67,17 +75,20 @@ def main():
         with urllib.request.urlopen(url + "/api/health", timeout=20) as response:
             if response.status != 200:
                 raise SystemExit("HTTPS-проверка не прошла")
+        entry = "chapter=forest" if args.chapter else "check=1"
+        if args.autoplay:
+            entry += "&check=1"
         if args.action == "url":
-            print(url)
+            print(f"{url}/?{entry}" if args.chapter else url)
         else:
             with urllib.request.urlopen(url, timeout=20) as response:
                 html = response.read().decode("utf-8")
             bundle = re.search(r'src="/assets/index-([a-zA-Z0-9_-]+)\.js"', html)
             if not bundle:
                 raise SystemExit("Не удалось определить текущую клиентскую сборку")
-            launch_url = url + "/?check=1&v=" + bundle.group(1)
+            launch_url = f"{url}/?{entry}&v={bundle.group(1)}"
             run("exec", "-T", "api", "python", "-m", "app.configure_bot", "--url", launch_url)
-            print("Проверенная HTTPS-демка: " + url)
+            print("Проверенный адрес кнопки: " + launch_url)
             path = ROOT / ".env"
             if path.exists():
                 lines = path.read_text(encoding="utf-8-sig").splitlines()

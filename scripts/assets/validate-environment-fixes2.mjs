@@ -8,7 +8,12 @@ import {
   terrainHeight,
 } from "../../src/terrain-height.ts";
 import { CRYPT_FURNISHINGS } from "../../src/castle-furnishings.ts";
-import { TREES, OBSTACLES } from "../../src/world-layout.ts";
+import {
+  TREES,
+  OBSTACLES,
+  ARCH_PORTALS,
+  floorHeight,
+} from "../../src/world-layout.ts";
 
 // No WebGL rendering is replaced here. The stub supplies only construction-time
 // drawing methods, so the audit can inspect actual generated geometry in Node.
@@ -45,6 +50,176 @@ const env = new ConnectedEnvironment({
     return t;
   },
 });
+// Trace the actual batched masonry. A ground plane can pass a walking test
+// while exposing empty sky below the landing from the approach camera.
+env.root.updateMatrixWorld(true);
+const structuralRay = new T.Raycaster();
+const structure = new Map(
+  ["roofs", "chapel", "crypt", "world"].map((area) => {
+    const meshes = [];
+    env.root.getObjectByName(area).traverse((o) => {
+      if (
+        o.isMesh &&
+        o.material.isMeshStandardMaterial &&
+        !o.material.transparent
+      )
+        meshes.push(o);
+    });
+    return [area, meshes];
+  }),
+);
+function stoneHit(area, x, y, z, dx, dy, dz, far) {
+  structuralRay.set(new T.Vector3(x, y, z), new T.Vector3(dx, dy, dz));
+  structuralRay.far = far;
+  return structuralRay.intersectObjects(structure.get(area), false)[0];
+}
+let courtSamples = 0,
+  faced = 0;
+for (const x of [-7.03, -5, -2.55, -1, 0, 2.55, 5, 7.03])
+  for (let z = -16.16; z > -23.9; z -= 0.32) {
+    const y = floorHeight(x, z);
+    assert(
+      stoneHit("roofs", x, y + 0.18, z, 0, -1, 0, 0.31),
+      `Unsupported courtyard at ${x}, ${z}`,
+    );
+    courtSamples++;
+  }
+for (const x of [-6.9, -4.3, 4.3, 6.9])
+  for (const y of [0.2, 0.9, 1.55, 2.25]) {
+    assert(
+      stoneHit("roofs", x, y, -15.9, 0, 0, -1, 6.5),
+      `Daylight below the landing at ${x}, ${y}`,
+    );
+    faced++;
+  }
+for (const side of [-1, 1])
+  for (const z of [-22.75, -24.5, -28.3, -33.2])
+    for (const y of [0.2, 1.2, 2.16]) {
+      assert(
+        stoneHit("roofs", side * 8.35, y, z, -side, 0, 0, 0.95),
+        "Open side below the raised yard",
+      );
+      faced++;
+    }
+for (const p of ARCH_PORTALS) {
+  for (const side of [-1, 1]) {
+    for (const x of [-0.75, 0, 0.75])
+      assert(
+        !stoneHit(p.area, x, p.base + 1.65, p.z + side * 0.8, 0, 0, -side, 1.6),
+        "Masonry blocks the passage beneath the arch",
+      );
+    for (const x of [-1.85, 0, 1.85]) {
+      const archY = p.base + p.stem + Math.sqrt(p.radius ** 2 - x ** 2);
+      for (const y of [archY + 0.04, p.base + p.wallHeight - 0.08])
+        assert(
+          stoneHit(p.area, x, y, p.z + side, 0, 0, -side, 1.5),
+          `Open spandrel at ${p.z}, ${x}, ${y}`,
+        );
+    }
+  }
+}
+// Daylight used to show between the timber leaf and the gallery arch.
+let solidVestrySamples = 0,
+  passageFloorSamples = 0;
+for (const side of [-1, 1])
+  for (const x of [4.64, 5, 5.36])
+    for (const y of [7.46, 7.69, 7.86]) {
+      assert(
+        stoneHit("chapel", x, y, -60.4 + side * 0.62, 0, 0, -side, 1.15),
+        `Daylight through the vestry tympanum at ${x}, ${y}, side ${side}`,
+      );
+      solidVestrySamples++;
+    }
+const galleryLeaf = env.vestryDoor.getObjectByName("DoorPivot");
+for (const angle of [0, 1.65, -1.65]) {
+  galleryLeaf.rotation.y = angle;
+  env.root.updateMatrixWorld(true);
+  for (const side of [-1, 1]) {
+    assert.equal(
+      !!stoneHit("chapel", 5, 6.45, -60.4 + side * 0.85, 0, 0, -side, 1.6),
+      angle === 0,
+      "Door leaf and passage disagree",
+    );
+    assert(
+      stoneHit("chapel", 5, 7.68, -60.4 + side * 0.85, 0, 0, -side, 1.6),
+      "The transom moved with the door",
+    );
+  }
+}
+galleryLeaf.rotation.y = 0;
+env.root.updateMatrixWorld(true);
+for (const z of [-69.8, -70.4, -72, -74.8, -75.9, -76.3, -77.2]) {
+  for (const x of [-1.52, 0, 1.52]) {
+    const owners = ["chapel", "crypt"].filter((sector) =>
+      stoneHit(sector, x, 2.46, z, 0, -1, 0, 0.14),
+    );
+    assert.equal(
+      owners.length,
+      1,
+      "Missing or overlapping pavement in the ossuary passage",
+    );
+    passageFloorSamples++;
+  }
+  for (const side of [-1, 1])
+    assert(
+      stoneHit("chapel", 0, 3.5, z, side, 0, 0, 3.1),
+      "Open flank in the ossuary passage",
+    );
+}
+let gallerySamples = 0;
+// Adjacent sectors render together at the choir gate. Exactly one floor must
+// own each slice of the threshold, including both sides of the door.
+for (const z of [-42.75, -42.25, -41.75, -41.25, -40.75]) {
+  for (const x of [-1.2, 0, 1.2]) {
+    const owners = ["roofs", "chapel"].filter((sector) =>
+      stoneHit(sector, x, 2.47, z, 0, -1, 0, 0.12),
+    );
+    assert.equal(
+      owners.length,
+      1,
+      `Threshold floor owners at ${x}, ${z}: ${owners.join(", ")}`,
+    );
+  }
+}
+for (const x of [3.52, 4.15, 5, 5.85, 6.48])
+  for (let z = -49.12; z >= -67.8; z -= 0.45) {
+    const y = floorHeight(x, z);
+    assert(
+      stoneHit("chapel", x, y + 0.18, z, 0, -1, 0, 0.34),
+      `Missing gallery tread or landing at ${x}, ${z}`,
+    );
+    gallerySamples++;
+  }
+for (const side of [-1, 1]) {
+  for (const x of [-1.65, 0, 1.65])
+    assert(
+      stoneHit(
+        "world",
+        x,
+        2.4 + 2.6 + Math.sqrt(1.9 ** 2 - x * x) + 0.06,
+        -37 + side * 2,
+        0,
+        0,
+        -side,
+        3,
+      ),
+      "Open bridge spandrel",
+    );
+  for (const x of [4.15, 5, 5.85])
+    assert(
+      stoneHit(
+        "chapel",
+        x,
+        5.2 + 1.9 + Math.sqrt(1.14 ** 2 - (x - 5) ** 2) + 0.08,
+        -60.4 + side,
+        0,
+        0,
+        -side,
+        1.4,
+      ),
+      "Open vestry spandrel",
+    );
+}
 for (const f of env.assetReview.furnishings) {
   const s = CRYPT_FURNISHINGS[f.index];
   assert(
@@ -195,6 +370,11 @@ assert(
   "Ending threshold does not brighten",
 );
 const report = {
+  solidVestrySamples,
+  passageFloorSamples,
+  supportedCourtSamples: courtSamples,
+  supportedGallerySamples: gallerySamples,
+  solidCourtFaces: faced,
   furnishings: env.assetReview.furnishings,
   candleFlames: env.assetReview.candleFlames.length,
   roots,

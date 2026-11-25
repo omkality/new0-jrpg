@@ -31,6 +31,7 @@ export interface Fighter {
   dodgeSide: "Left" | "Right" | "Back" | "Forward";
   death: "Front" | "Back" | "Side";
   weapon: WeaponId;
+  regenDraught?: boolean;
   kind: "pilgrim" | EnemyKind;
   maxHp: number;
   armour: number;
@@ -163,6 +164,14 @@ export interface GameEvent {
     | "door"
     | "drop";
   label?: string;
+  wound?: {
+    incoming?: boolean;
+    dx: number;
+    dz: number;
+    y: number;
+    ground: number;
+    kind: "cut" | "thrust" | "hew" | "rake";
+  };
   x: number;
   z: number;
 }
@@ -238,7 +247,10 @@ export class CombatGame {
   protected asleep(e: Fighter) {
     return e === this.enemy && this.enemyDormant;
   }
-  protected clearLine(a: Fighter, b: Fighter) {
+  protected clearLine(
+    a: Pick<Fighter, "x" | "y" | "z">,
+    b: Pick<Fighter, "x" | "y" | "z">,
+  ) {
     if (Math.abs(a.y - b.y) > 1.1) return false;
     const dx = b.x - a.x,
       dz = b.z - a.z;
@@ -637,6 +649,19 @@ export class CombatGame {
         if (this.distance < 6) p.yaw = this.enemyAngle;
       }
     }
+    this.updateLocomotion(dt, input);
+    this.distanceWalked += p.speed * dt;
+    if (this.distanceWalked > 1.8 && this.tutorial === 0) this.tutorial = 1;
+    if (this.phase === "playing")
+      for (const foe of this.opponents)
+        if (foe.hp > 0 && !this.asleep(foe)) this.enemyUpdate(dt, foe);
+  }
+  protected stopWalking() {
+    this.vx = this.vz = this.player.speed = 0;
+    this.set(this.player, "idle");
+  }
+  protected updateLocomotion(dt: number, input: { x: number; z: number }) {
+    const p = this.player;
     const movement = length(input.x, input.z);
     let speed =
       p.mode === "guard"
@@ -680,11 +705,6 @@ export class CombatGame {
         Math.atan2(Math.sin(yaw - p.yaw), Math.cos(yaw - p.yaw)) *
         (1 - Math.exp(-dt * 15));
     }
-    this.distanceWalked += p.speed * dt;
-    if (this.distanceWalked > 1.8 && this.tutorial === 0) this.tutorial = 1;
-    if (this.phase === "playing")
-      for (const foe of this.opponents)
-        if (foe.hp > 0 && !this.asleep(foe)) this.enemyUpdate(dt, foe);
   }
   private enemyUpdate(dt: number, e: Fighter) {
     const p = this.player,

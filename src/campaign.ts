@@ -63,6 +63,7 @@ const distance = (a: { x: number; z: number }, b: { x: number; z: number }) =>
   Math.hypot(a.x - b.x, a.z - b.z);
 
 export class Campaign extends CombatGame {
+  chests: readonly (typeof CHESTS)[number][] = CHESTS;
   scenario: ScenarioId = "journey";
   enemies = new Map<string, EnemyState>();
   openedChests = new Map<string, number>();
@@ -288,7 +289,7 @@ export class Campaign extends CombatGame {
     )
       return;
 
-    for (const chest of CHESTS) {
+    for (const chest of this.chests) {
       if (
         Math.abs(p.y - chest.y) > 0.8 ||
         distance(p, chest) > 1.65 ||
@@ -327,6 +328,10 @@ export class Campaign extends CombatGame {
         },
       };
     }
+    return this.pickupOrDoor() ?? this.encounterOrExit();
+  }
+  protected pickupOrDoor(): { label: string; run: () => void } | undefined {
+    const p = this.player;
     for (const key of KEYS)
       if (
         !this.collectedKeys.has(key.id) &&
@@ -403,6 +408,9 @@ export class Campaign extends CombatGame {
           },
         };
       }
+  }
+  private encounterOrExit(): { label: string; run: () => void } | undefined {
+    const p = this.player;
     const mimic = this.enemies.get("crypt")!;
     if (
       !this.mimicAwake &&

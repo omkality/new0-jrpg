@@ -1,0 +1,25 @@
+@font-face {
+  font-family: "Ebbe Black";
+  src: url("/fonts/Ebbe-Black.ttf") format("truetype");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
+#boot-status {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  text-align: center;
+  background: #1b221d;
+  color: #e6dfc6;
+  font:
+    18px "Ebbe Black",
+    serif;
+}
+#boot-status button {
+  font: inherit;
+  min-height: 44px;
+}

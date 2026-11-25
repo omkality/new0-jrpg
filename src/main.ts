@@ -31,6 +31,12 @@ declare global {
         version?: string;
         ready(): void;
         expand(): void;
+        lockOrientation?(): void;
+        isVersionAtLeast?(s: string): boolean;
+        isExpanded?: boolean;
+        isActive?: boolean;
+        viewportHeight?: number;
+        viewportStableHeight?: number;
         disableVerticalSwipes?(): void;
         setHeaderColor?(s: string): void;
         setBackgroundColor?(s: string): void;
@@ -39,6 +45,7 @@ declare global {
     };
   }
 }
+document.getElementById("app")!.hidden = false;
 const $ = <T extends HTMLElement = HTMLElement>(s: string) =>
   document.querySelector<T>(s)!;
 const visible = (s: string, v: boolean) => $(s).classList.toggle("hidden", !v);
